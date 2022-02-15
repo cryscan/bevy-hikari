@@ -1,12 +1,26 @@
-use bevy::prelude::*;
+use bevy::{
+    prelude::*,
+    render::{render_graph::RenderGraph, RenderApp},
+};
 use std::f32::consts::PI;
 
+mod voxel_cone_tracing;
+
 fn main() {
-    App::new()
-        .insert_resource(Msaa { samples: 4 })
+    let mut app = App::new();
+
+    app.insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
-        .add_startup_system(setup)
-        .run();
+        .add_startup_system(setup);
+
+    let render_app = match app.get_sub_app_mut(RenderApp) {
+        Ok(render_app) => render_app,
+        Err(_) => return,
+    };
+
+    let _graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
+
+    app.run();
 }
 
 /// set up a simple 3D scene
