@@ -11,13 +11,21 @@ struct VertexOutput {
     [[location(1)]] view_normal: vec3<f32>;
 };
 
+struct View {
+    view_proj: mat4x4<f32>;
+    projection: mat4x4<f32>;
+    world_position: vec3<f32>;
+};
+
+[[group(0), binding(0)]]
+var<uniform> view: View;
+
 [[group(1), binding(0)]]
 var<uniform> mesh: Mesh;
 
 struct Volume {
     min: vec3<f32>;
     max: vec3<f32>;
-    projection: mat4x4<f32>;
 };
 
 struct List {
@@ -51,10 +59,10 @@ var texture: texture_storage_1d<rgba8unorm, read_write>;
 [[stage(vertex)]]
 fn vertex(vertex: Vertex) -> VertexOutput {
     let world_position = mesh.model * vec4<f32>(vertex.position, 1.0);
-    let view_normal = volume.projection * mesh.model * vec4<f32>(vertex.normal, 0.0);
+    let view_normal = view.view_proj * mesh.model * vec4<f32>(vertex.normal, 0.0);
 
     var out: VertexOutput;
-    out.clip_position = volume.projection * world_position;
+    out.clip_position = view.view_proj * world_position;
     out.world_position = world_position;
     out.view_normal = view_normal.xyz;
     return out;
@@ -62,10 +70,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-    let normal_proj = dot(in.view_normal, vec3<f32>(0.0, 0.0, 1.0));
-    let normal_cond = abs(normal_proj) > 0.707;
+    let normal = abs(in.view_normal);
 
-    if (normal_cond) {
+    if (normal.z >= max(normal.x, normal.y)) {
         let id = atomicAdd(&fragments.counter, 1u);
         let position = (in.world_position.xyz - volume.min) / (volume.max - volume.min);
         fragments.data[id] = pack4x8unorm(vec4<f32>(position, 1.0));

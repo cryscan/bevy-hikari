@@ -1,16 +1,21 @@
 use bevy::{
+    core_pipeline::Transparent3d,
+    ecs::system::{lifetimeless::SRes, SystemParamItem},
     math::Vec3Swizzles,
     pbr::{MeshPipeline, MeshPipelineKey},
     prelude::*,
     reflect::TypeUuid,
     render::{
         camera::CameraProjection,
+        render_phase::{EntityRenderCommand, RenderCommandResult, RenderPhase, TrackedRenderPass},
         render_resource::{std140::AsStd140, *},
         renderer::RenderDevice,
+        view::ExtractedView,
         RenderApp, RenderStage,
     },
 };
 
+pub const VOXEL_SIZE: usize = 256;
 pub const MAX_FRAGMENTS: usize = 4194304;
 pub const MAX_OCTREE_SIZE: usize = 524288;
 
@@ -18,9 +23,9 @@ pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
 
 #[derive(Default)]
-pub struct VoxelGIPlugin;
+pub struct VoxelConeTracingPlugin;
 
-impl Plugin for VoxelGIPlugin {
+impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Volume {
             min: Vec3::new(-5.0, -5.0, -5.0),
@@ -39,42 +44,42 @@ impl Plugin for VoxelGIPlugin {
         };
 
         render_app
-            .init_resource::<VoxelGIPipeline>()
-            .init_resource::<SpecializedPipelines<VoxelGIPipeline>>()
+            .init_resource::<VoxelPipeline>()
+            .init_resource::<SpecializedPipelines<VoxelPipeline>>()
+            .init_resource::<VoxelMeta>()
             .add_system_to_stage(
                 RenderStage::Extract,
-                extract_volume.label(VoxelGISystems::ExtractVolume),
+                extract_volume.label(VoxelConeTracingSystems::ExtractVolume),
             )
             .add_system_to_stage(
                 RenderStage::Prepare,
-                prepare_volume.label(VoxelGISystems::PrepareVolume),
+                prepare_volume
+                    .exclusive_system()
+                    .label(VoxelConeTracingSystems::PrepareVolume),
             );
     }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
-pub enum VoxelGISystems {
+pub enum VoxelConeTracingSystems {
     ExtractVolume,
     PrepareVolume,
-    Queue,
+    QueueVoxelBindGroup,
 }
 
+#[derive(Component)]
+pub struct VolumeView;
+
+#[derive(Clone, Copy)]
 pub struct Volume {
     min: Vec3,
     max: Vec3,
 }
 
-pub struct ExtractedVolume {
-    min: Vec3,
-    max: Vec3,
-    projections: [OrthographicProjection; 3],
-}
-
-#[derive(AsStd140, Clone, Copy)]
+#[derive(AsStd140)]
 struct GpuVolume {
     min: Vec3,
     max: Vec3,
-    projection: Mat4,
 }
 
 #[derive(AsStd140)]
@@ -96,7 +101,12 @@ struct GpuOctree {
     level_counter: u32,
 }
 
-pub struct VoxelGIPipeline {
+#[derive(Default)]
+struct VoxelMeta {
+    bind_group: Option<BindGroup>,
+}
+
+pub struct VoxelPipeline {
     shader: Handle<Shader>,
     bind_group_layout: BindGroupLayout,
 
@@ -109,7 +119,7 @@ pub struct VoxelGIPipeline {
     build_mipmap_pipeline: ComputePipeline,
 }
 
-impl FromWorld for VoxelGIPipeline {
+impl FromWorld for VoxelPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
         let bind_group_layout =
@@ -208,7 +218,7 @@ impl FromWorld for VoxelGIPipeline {
     }
 }
 
-impl SpecializedPipeline for VoxelGIPipeline {
+impl SpecializedPipeline for VoxelPipeline {
     type Key = MeshPipelineKey;
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
@@ -220,42 +230,69 @@ impl SpecializedPipeline for VoxelGIPipeline {
             self.mesh_pipeline.mesh_layout.clone(),
             self.bind_group_layout.clone(),
         ]);
+        descriptor.depth_stencil = None;
 
         descriptor
     }
 }
 
 fn extract_volume(mut commands: Commands, volume: Res<Volume>) {
-    let min = volume.min;
-    let max = volume.max;
-
-    commands.insert_resource(ExtractedVolume {
-        min,
-        max,
-        projections: [
-            make_projection(min, max),
-            make_projection(min.yzx(), max.yxz()),
-            make_projection(min.zxy(), max.zxy()),
-        ],
-    });
+    commands.insert_resource(volume.clone());
 }
 
-fn prepare_volume(mut commands: Commands, volume: Res<ExtractedVolume>) {
-    commands.insert_resource(GpuVolume {
-        min: volume.min,
-        max: volume.max,
-        projection: volume.projections[0].get_projection_matrix(),
-    })
+fn prepare_volume(mut commands: Commands, volume: Res<Volume>) {
+    let center = (volume.max + volume.min) / 2.0;
+    let extend = (volume.max - volume.min) / 2.0;
+
+    let make_view = |extend: Vec3| -> ExtractedView {
+        ExtractedView {
+            width: VOXEL_SIZE as u32,
+            height: VOXEL_SIZE as u32,
+            transform: GlobalTransform::from_translation(center),
+            projection: OrthographicProjection {
+                left: -extend.x,
+                right: extend.x,
+                bottom: -extend.y,
+                top: extend.y,
+                near: -extend.z,
+                far: extend.z,
+                ..Default::default()
+            }
+            .get_projection_matrix(),
+            near: 0.0,
+            far: 2.0 * extend.z,
+        }
+    };
+
+    commands.spawn().insert_bundle((
+        VolumeView,
+        make_view(extend),
+        RenderPhase::<Transparent3d>::default(),
+    ));
+    commands.spawn().insert_bundle((
+        VolumeView,
+        make_view(extend.yzx()),
+        RenderPhase::<Transparent3d>::default(),
+    ));
+    commands.spawn().insert_bundle((
+        VolumeView,
+        make_view(extend.zxy()),
+        RenderPhase::<Transparent3d>::default(),
+    ));
 }
 
-fn make_projection(min: Vec3, max: Vec3) -> OrthographicProjection {
-    OrthographicProjection {
-        left: min.x,
-        right: max.x,
-        bottom: min.y,
-        top: max.y,
-        near: min.z,
-        far: max.z,
-        ..Default::default()
+struct SetVolumeBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetVolumeBindGroup<I> {
+    type Param = SRes<VoxelMeta>;
+
+    fn render<'w>(
+        _view: Entity,
+        _item: Entity,
+        meta: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let bind_group = meta.into_inner().bind_group.as_ref().unwrap();
+
+        RenderCommandResult::Success
     }
 }

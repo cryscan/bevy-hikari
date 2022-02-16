@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
-mod voxel_gi;
+mod voxel_cone_tracing;
 
 fn main() {
     let mut app = App::new();
 
     app.insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
-        .add_plugin(voxel_gi::VoxelGIPlugin)
+        .add_plugin(voxel_cone_tracing::VoxelConeTracingPlugin)
         .add_startup_system(setup)
         .run();
 }
