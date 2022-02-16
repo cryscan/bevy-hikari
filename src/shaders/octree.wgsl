@@ -1,9 +1,10 @@
 struct Volume {
     min: vec3<f32>;
     max: vec3<f32>;
+    projection: mat4x4<f32>;
 };
 
-struct FragmentList {
+struct List {
     data: array<u32, 4194304>;
     counter: atomic<u32>;
 };
@@ -19,16 +20,16 @@ struct Octree {
     level_counter: atomic<u32>;
 };
 
-[[group(2), binding(0)]]
+[[group(0), binding(0)]]
 var<uniform> volume: Volume;
 
-[[group(2), binding(1)]]
-var<storage, read_write> fragments: FragmentList;
+[[group(0), binding(1)]]
+var<storage, read_write> fragments: List;
 
-[[group(2), binding(2)]]
+[[group(0), binding(2)]]
 var<storage, read_write> octree: Octree;
 
-[[group(2), binding(3)]]
+[[group(0), binding(3)]]
 var texture: texture_storage_1d<rgba8unorm, read_write>;
 
 let node_mask: u32 = 0x7FFFFFFFu;
@@ -56,7 +57,7 @@ fn init() {
     octree.nodes[0].children = 1u;
     octree.levels[0] = 1u;
 
-    for (var i = 1u; i < 9u; i++) {
+    for (var i = 1u; i < 9u; i = i + 1u) {
         octree.nodes[i].children = 0u;
     }
     octree.levels[1] = 9u;
@@ -73,13 +74,13 @@ fn mark_nodes([[builtin(global_invocation_id)]] invocation_id: vec3<u32>) {
     // Traverse the tree to the leaf
     var node_id: u32 = 0u;
     var level: u32;
-    for (level = 0u; level < 8u; level++) {
+    for (level = 0u; level < 8u; level = level + 1u) {
         // If this node is not expanded (pointer = 0)
         let node = &octree.nodes[node_id];
         let children = (*node).children & node_mask;
         if (children == 0u) {
             // Mark this node (set the highest bit to 1)
-            (*node).children |= ~node_mask;
+            (*node).children = ~node_mask;
             break;
         }
         node_id = children + position_level_index(position, level);
@@ -101,7 +102,7 @@ fn expand_nodes([[builtin(global_invocation_id)]] invocation_id: vec3<u32>) {
     if (((*node).children & ~node_mask) != 0u) {
         (*node).children = atomicAdd(&octree.node_counter, 8u);
 
-        for (var i = 0u; i < 8u; i++) {
+        for (var i = 0u; i < 8u; i = i + 1u) {
             let child_id = (*node).children + i;
             octree.nodes[child_id].children = 0u;
         }
@@ -146,18 +147,18 @@ fn build_mipmap([[builtin(global_invocation_id)]] invocation_id: vec3<u32>) {
         return; 
     }
 
-    for (var level = 7u; level >= 1u; level--) {
+    for (var level = 7u; level >= 1u; level = level - 1u) {
         if (node_id < octree.levels[level] && node_id > octree.levels[level - 1u]) {
             let node = &octree.nodes[node_id];
 
             var color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
             if (!is_leaf_node(node_id)) {
-                for (var i = 0u; i < 8u; i++) {
+                for (var i = 0u; i < 8u; i = i + 1u) {
                     let child_id = (*node).children + i;
                     let child_color = textureLoad(texture, i32(child_id));
-                    color += child_color;
+                    color = color + child_color;
                 }
-                color /= 8.0;
+                color = color / 8.0;
             }
             textureStore(texture, i32(node_id), color);
         }
@@ -169,12 +170,12 @@ fn build_mipmap([[builtin(global_invocation_id)]] invocation_id: vec3<u32>) {
     {
         var color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
         let node = &octree.nodes[0];
-        for (var i = 0u; i < 8u; i++) {
+        for (var i = 0u; i < 8u; i = i + 1u) {
             let child_id = (*node).children + i;
             let child_color = textureLoad(texture, i32(child_id));
-            color += child_color;
+            color = color + child_color;
         }
-        color /= 8.0;
+        color = color / 8.0;
         textureStore(texture, i32(node_id), color);
     }
 }
