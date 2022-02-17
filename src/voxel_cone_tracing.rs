@@ -10,16 +10,19 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         camera::CameraProjection,
+        primitives::{Aabb, Frustum, Plane},
+        render_asset::RenderAssets,
         render_phase::{
-            sort_phase_system, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
-            EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase,
-            SetItemPipeline, TrackedRenderPass,
+            sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
+            DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
+            RenderPhase, SetItemPipeline, TrackedRenderPass,
         },
         render_resource::{std140::AsStd140, *},
         renderer::{RenderDevice, RenderQueue},
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms},
         RenderApp, RenderStage,
     },
+    transform::TransformSystem,
 };
 
 pub const VOXEL_SIZE: usize = 256;
@@ -35,7 +38,12 @@ pub struct VoxelConeTracingPlugin;
 
 impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Volume {
+        app.add_system_to_stage(
+            CoreStage::PostUpdate,
+            check_volume_visiblilty.after(TransformSystem::TransformPropagate),
+        )
+        .init_resource::<VolumeVisibileEntities>()
+        .insert_resource(Volume {
             min: Vec3::new(-5.0, -5.0, -5.0),
             max: Vec3::new(5.0, 5.0, 5.0),
         });
@@ -57,6 +65,7 @@ impl Plugin for VoxelConeTracingPlugin {
             .init_resource::<VolumeViewMeta>()
             .init_resource::<VoxelMeta>()
             .init_resource::<DrawFunctions<Voxel>>()
+            .add_render_command::<Voxel, DrawVoxelMesh>()
             .add_system_to_stage(
                 RenderStage::Extract,
                 extract_volume.label(VoxelConeTracingSystems::ExtractVolume),
@@ -98,13 +107,42 @@ pub enum VoxelConeTracingSystems {
     QueueVoxel,
 }
 
-#[derive(Component)]
-pub struct VolumeView;
-
 #[derive(Clone, Copy)]
 pub struct Volume {
     min: Vec3,
     max: Vec3,
+}
+
+impl From<Volume> for Frustum {
+    fn from(volume: Volume) -> Self {
+        Self {
+            planes: [
+                Plane {
+                    normal_d: Vec4::new(1.0, 0.0, 0.0, volume.min.x),
+                },
+                Plane {
+                    normal_d: Vec4::new(-1.0, 0.0, 0.0, volume.max.x),
+                },
+                Plane {
+                    normal_d: Vec4::new(0.0, 1.0, 0.0, volume.min.y),
+                },
+                Plane {
+                    normal_d: Vec4::new(0.0, -1.0, 0.0, volume.max.y),
+                },
+                Plane {
+                    normal_d: Vec4::new(0.0, 0.0, 1.0, volume.min.z),
+                },
+                Plane {
+                    normal_d: Vec4::new(0.0, 0.0, -1.0, volume.max.z),
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct VolumeVisibileEntities {
+    entities: Vec<Entity>,
 }
 
 #[derive(AsStd140)]
@@ -153,7 +191,6 @@ struct VoxelMeta {
 }
 
 pub struct VoxelPipeline {
-    shader: Handle<Shader>,
     volume_view_layout: BindGroupLayout,
     voxel_layout: BindGroupLayout,
 
@@ -174,7 +211,7 @@ impl FromWorld for VoxelPipeline {
                 label: None,
                 entries: &[BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -256,13 +293,9 @@ impl FromWorld for VoxelPipeline {
         let expand_final_level_nodes_pipeline = make_compute_pipeline("expand_final_level_nodes");
         let build_mipmap_pipeline = make_compute_pipeline("build_mipmap");
 
-        let asset_sever = world.get_resource::<AssetServer>().unwrap();
-        let shader = asset_sever.get_handle(VOXEL_SHADER_HANDLE);
-
         let mesh_pipeline = world.get_resource::<MeshPipeline>().unwrap().clone();
 
         Self {
-            shader,
             volume_view_layout,
             voxel_layout,
             mesh_pipeline,
@@ -279,9 +312,11 @@ impl SpecializedPipeline for VoxelPipeline {
     type Key = MeshPipelineKey;
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+        let shader = VOXEL_SHADER_HANDLE.typed::<Shader>();
+        
         let mut descriptor = self.mesh_pipeline.specialize(key);
-        descriptor.vertex.shader = self.shader.clone();
-        descriptor.fragment.as_mut().unwrap().shader = self.shader.clone();
+        descriptor.vertex.shader = shader.clone();
+        descriptor.fragment.as_mut().unwrap().shader = shader.clone();
         descriptor.layout = Some(vec![
             self.volume_view_layout.clone(),
             self.mesh_pipeline.mesh_layout.clone(),
@@ -293,8 +328,35 @@ impl SpecializedPipeline for VoxelPipeline {
     }
 }
 
-fn extract_volume(mut commands: Commands, volume: Res<Volume>) {
+fn check_volume_visiblilty(
+    volume: Res<Volume>,
+    mut volume_visible_entities: ResMut<VolumeVisibileEntities>,
+    mut visible_entity_query: Query<(Entity, &Visibility, Option<&Aabb>, Option<&GlobalTransform>)>,
+) {
+    let frustum: Frustum = volume.into_inner().clone().into();
+
+    for (entity, visibility, maybe_aabb, maybe_transform) in visible_entity_query.iter_mut() {
+        if !visibility.is_visible {
+            continue;
+        }
+
+        if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
+            if !frustum.intersects_obb(aabb, &transform.compute_matrix()) {
+                continue;
+            }
+        }
+
+        volume_visible_entities.entities.push(entity);
+    }
+}
+
+fn extract_volume(
+    mut commands: Commands,
+    volume: Res<Volume>,
+    volume_visible_entities: Res<VolumeVisibileEntities>,
+) {
     commands.insert_resource(volume.clone());
+    commands.insert_resource(volume_visible_entities.clone());
 }
 
 fn prepare_volume(mut commands: Commands, volume: Res<Volume>) {
@@ -321,21 +383,15 @@ fn prepare_volume(mut commands: Commands, volume: Res<Volume>) {
         }
     };
 
-    commands.spawn().insert_bundle((
-        VolumeView,
-        make_view(extend),
-        RenderPhase::<Voxel>::default(),
-    ));
-    commands.spawn().insert_bundle((
-        VolumeView,
-        make_view(extend.yzx()),
-        RenderPhase::<Voxel>::default(),
-    ));
-    commands.spawn().insert_bundle((
-        VolumeView,
-        make_view(extend.zxy()),
-        RenderPhase::<Voxel>::default(),
-    ));
+    commands
+        .spawn()
+        .insert_bundle((make_view(extend), RenderPhase::<Voxel>::default()));
+    commands
+        .spawn()
+        .insert_bundle((make_view(extend.yzx()), RenderPhase::<Voxel>::default()));
+    commands
+        .spawn()
+        .insert_bundle((make_view(extend.zxy()), RenderPhase::<Voxel>::default()));
 }
 
 fn prepare_voxel(
@@ -446,7 +502,44 @@ fn queue_voxel_bind_group(
     voxel_meta.bind_group = Some(bind_group);
 }
 
-fn queue_voxel() {}
+fn queue_voxel(
+    voxel_draw_functions: Res<DrawFunctions<Voxel>>,
+    voxel_pipeline: Res<VoxelPipeline>,
+    meshes: Query<&Handle<Mesh>>,
+    render_meshes: Res<RenderAssets<Mesh>>,
+    mut pipelines: ResMut<SpecializedPipelines<VoxelPipeline>>,
+    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    volume_visible_entities: Res<VolumeVisibileEntities>,
+    mut voxel_phases: Query<&mut RenderPhase<Voxel>>,
+) {
+    let draw_mesh = voxel_draw_functions
+        .read()
+        .get_id::<DrawVoxelMesh>()
+        .unwrap();
+
+    for mut phase in voxel_phases.iter_mut() {
+        for entity in volume_visible_entities.entities.iter().copied() {
+            if let Ok(mesh_handle) = meshes.get(entity) {
+                let mut key = MeshPipelineKey::empty();
+                if let Some(mesh) = render_meshes.get(mesh_handle) {
+                    if mesh.has_tangents {
+                        key |= MeshPipelineKey::VERTEX_TANGENTS;
+                    }
+                    key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                    key |= MeshPipelineKey::from_msaa_samples(4)
+                }
+
+                let pipeline_id = pipelines.specialize(&mut pipeline_cache, &voxel_pipeline, key);
+                phase.add(Voxel {
+                    draw_function: draw_mesh,
+                    pipeline: pipeline_id,
+                    entity,
+                    distance: 0.0,
+                });
+            }
+        }
+    }
+}
 
 struct Voxel {
     distance: f32,
@@ -480,7 +573,7 @@ impl CachedPipelinePhaseItem for Voxel {
 }
 
 struct VoxelPassNode {
-    volume_view_query: QueryState<(Entity, &'static RenderPhase<Voxel>), With<VolumeView>>,
+    volume_view_query: QueryState<(Entity, &'static RenderPhase<Voxel>)>,
 }
 
 impl VoxelPassNode {
