@@ -1,11 +1,10 @@
 struct Volume {
     min: vec3<f32>;
     max: vec3<f32>;
-    projection: mat4x4<f32>;
 };
 
 struct List {
-    data: array<u32, 4194304>;
+    data: array<u32, 1048576>;
     counter: atomic<u32>;
 };
 
@@ -14,10 +13,14 @@ struct Node {
 };
 
 struct Octree {
-    nodes: array<Node, 524288>;
+    nodes: array<Node, 131072>;
     levels: array<u32, 8>;
     node_counter: atomic<u32>;
     level_counter: atomic<u32>;
+};
+
+struct Radiance {
+    data: array<u32, 2097152>;
 };
 
 [[group(0), binding(0)]]
@@ -30,7 +33,7 @@ var<storage, read_write> fragments: List;
 var<storage, read_write> octree: Octree;
 
 [[group(0), binding(3)]]
-var texture: texture_storage_1d<rgba8unorm, read_write>;
+var<storage, read_write> radiance: Radiance;
 
 let node_mask: u32 = 0x7FFFFFFFu;
 
@@ -155,12 +158,12 @@ fn build_mipmap([[builtin(global_invocation_id)]] invocation_id: vec3<u32>) {
             if (!is_leaf_node(node_id)) {
                 for (var i = 0u; i < 8u; i = i + 1u) {
                     let child_id = (*node).children + i;
-                    let child_color = textureLoad(texture, i32(child_id));
+                    let child_color = unpack4x8unorm(radiance.data[child_id]);
                     color = color + child_color;
                 }
                 color = color / 8.0;
             }
-            textureStore(texture, i32(node_id), color);
+            radiance.data[node_id] = pack4x8unorm(color);
         }
 
         storageBarrier();
@@ -172,10 +175,10 @@ fn build_mipmap([[builtin(global_invocation_id)]] invocation_id: vec3<u32>) {
         let node = &octree.nodes[0];
         for (var i = 0u; i < 8u; i = i + 1u) {
             let child_id = (*node).children + i;
-            let child_color = textureLoad(texture, i32(child_id));
+            let child_color = unpack4x8unorm(radiance.data[child_id]);
             color = color + child_color;
         }
         color = color / 8.0;
-        textureStore(texture, i32(node_id), color);
+        radiance.data[node_id] = pack4x8unorm(color);
     }
 }

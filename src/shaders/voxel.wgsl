@@ -29,7 +29,7 @@ struct Volume {
 };
 
 struct List {
-    data: array<u32, 4194304>;
+    data: array<u32, 1048576>;
     counter: atomic<u32>;
 };
 
@@ -38,23 +38,27 @@ struct Node {
 };
 
 struct Octree {
-    nodes: array<Node, 524288>;
+    nodes: array<Node, 131072>;
     levels: array<u32, 8>;
     node_counter: atomic<u32>;
     level_counter: atomic<u32>;
 };
 
-[[group(2), binding(0)]]
+struct Radiance {
+    data: array<u32, 2097152>;
+};
+
+[[group(0), binding(0)]]
 var<uniform> volume: Volume;
 
-[[group(2), binding(1)]]
+[[group(0), binding(1)]]
 var<storage, read_write> fragments: List;
 
-[[group(2), binding(2)]]
+[[group(0), binding(2)]]
 var<storage, read_write> octree: Octree;
 
-[[group(2), binding(3)]]
-var texture: texture_storage_1d<rgba8unorm, read_write>;
+[[group(0), binding(3)]]
+var<storage, read_write> radiance: Radiance;
 
 [[stage(vertex)]]
 fn vertex(vertex: Vertex) -> VertexOutput {

@@ -1,23 +1,31 @@
 use bevy::{
-    core_pipeline::Transparent3d,
-    ecs::system::{lifetimeless::SRes, SystemParamItem},
+    core::FloatOrd,
+    ecs::system::{
+        lifetimeless::{Read, SQuery, SRes},
+        SystemParamItem,
+    },
     math::Vec3Swizzles,
-    pbr::{MeshPipeline, MeshPipelineKey},
+    pbr::{DrawMesh, MeshPipeline, MeshPipelineKey, SetMeshBindGroup},
     prelude::*,
     reflect::TypeUuid,
     render::{
         camera::CameraProjection,
-        render_phase::{EntityRenderCommand, RenderCommandResult, RenderPhase, TrackedRenderPass},
+        render_phase::{
+            sort_phase_system, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
+            EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase,
+            SetItemPipeline, TrackedRenderPass,
+        },
         render_resource::{std140::AsStd140, *},
-        renderer::RenderDevice,
-        view::ExtractedView,
+        renderer::{RenderDevice, RenderQueue},
+        view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms},
         RenderApp, RenderStage,
     },
 };
 
 pub const VOXEL_SIZE: usize = 256;
-pub const MAX_FRAGMENTS: usize = 4194304;
-pub const MAX_OCTREE_SIZE: usize = 524288;
+pub const MAX_FRAGMENTS: usize = 1048576;
+pub const MAX_OCTREE_SIZE: usize = 131072;
+pub const MAX_RADIANCE_SIZE: usize = 2097152;
 
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
@@ -46,7 +54,9 @@ impl Plugin for VoxelConeTracingPlugin {
         render_app
             .init_resource::<VoxelPipeline>()
             .init_resource::<SpecializedPipelines<VoxelPipeline>>()
+            .init_resource::<VolumeViewMeta>()
             .init_resource::<VoxelMeta>()
+            .init_resource::<DrawFunctions<Voxel>>()
             .add_system_to_stage(
                 RenderStage::Extract,
                 extract_volume.label(VoxelConeTracingSystems::ExtractVolume),
@@ -56,7 +66,25 @@ impl Plugin for VoxelConeTracingPlugin {
                 prepare_volume
                     .exclusive_system()
                     .label(VoxelConeTracingSystems::PrepareVolume),
-            );
+            )
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                prepare_voxel.label(VoxelConeTracingSystems::PrepareVoxel),
+            )
+            .add_system_to_stage(
+                RenderStage::Queue,
+                queue_volume_view_bind_group
+                    .label(VoxelConeTracingSystems::QueueVolumeViewBindGroup),
+            )
+            .add_system_to_stage(
+                RenderStage::Queue,
+                queue_voxel_bind_group.label(VoxelConeTracingSystems::QueueVoxelBindGroup),
+            )
+            .add_system_to_stage(
+                RenderStage::Queue,
+                queue_voxel.label(VoxelConeTracingSystems::QueueVoxel),
+            )
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>);
     }
 }
 
@@ -64,7 +92,10 @@ impl Plugin for VoxelConeTracingPlugin {
 pub enum VoxelConeTracingSystems {
     ExtractVolume,
     PrepareVolume,
+    PrepareVoxel,
+    QueueVolumeViewBindGroup,
     QueueVoxelBindGroup,
+    QueueVoxel,
 }
 
 #[derive(Component)]
@@ -101,14 +132,30 @@ struct GpuOctree {
     level_counter: u32,
 }
 
+#[derive(AsStd140)]
+struct GpuRadiance {
+    data: [u32; MAX_RADIANCE_SIZE],
+}
+
+#[derive(Default)]
+struct VolumeViewMeta {
+    bind_group: Option<BindGroup>,
+}
+
 #[derive(Default)]
 struct VoxelMeta {
+    volume: UniformVec<GpuVolume>,
+    fragments: Option<Buffer>,
+    octree: Option<Buffer>,
+    radiance: Option<Buffer>,
+
     bind_group: Option<BindGroup>,
 }
 
 pub struct VoxelPipeline {
     shader: Handle<Shader>,
-    bind_group_layout: BindGroupLayout,
+    volume_view_layout: BindGroupLayout,
+    voxel_layout: BindGroupLayout,
 
     mesh_pipeline: MeshPipeline,
 
@@ -122,56 +169,65 @@ pub struct VoxelPipeline {
 impl FromWorld for VoxelPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
-        let bind_group_layout =
+        let volume_view_layout =
             render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: None,
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(
-                                GpuVolume::std140_size_static() as u64
-                            ),
-                        },
-                        count: None,
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(ViewUniform::std140_size_static() as u64),
                     },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(GpuList::std140_size_static() as u64),
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(
-                                GpuOctree::std140_size_static() as u64
-                            ),
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
-                        ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::ReadWrite,
-                            format: TextureFormat::Rgba8Unorm,
-                            view_dimension: TextureViewDimension::D1,
-                        },
-                        count: None,
-                    },
-                ],
+                    count: None,
+                }],
             });
+        let voxel_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(GpuList::std140_size_static() as u64),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(GpuOctree::std140_size_static() as u64),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(GpuRadiance::std140_size_static() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
 
         let shader = render_device.create_shader_module(&ShaderModuleDescriptor {
             label: None,
@@ -179,12 +235,12 @@ impl FromWorld for VoxelPipeline {
         });
         let pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("octree_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[&voxel_layout],
             push_constant_ranges: &[],
         });
 
         let make_compute_pipeline = |entry_point: &str| -> ComputePipeline {
-            let label = format!("{entry_point}_pipeline");
+            let label = format!("octree_{entry_point}_pipeline");
 
             render_device.create_compute_pipeline(&ComputePipelineDescriptor {
                 label: Some(&label),
@@ -207,7 +263,8 @@ impl FromWorld for VoxelPipeline {
 
         Self {
             shader,
-            bind_group_layout,
+            volume_view_layout,
+            voxel_layout,
             mesh_pipeline,
             init_pipeline,
             mark_nodes_pipeline,
@@ -226,9 +283,9 @@ impl SpecializedPipeline for VoxelPipeline {
         descriptor.vertex.shader = self.shader.clone();
         descriptor.fragment.as_mut().unwrap().shader = self.shader.clone();
         descriptor.layout = Some(vec![
-            self.mesh_pipeline.view_layout.clone(),
+            self.volume_view_layout.clone(),
             self.mesh_pipeline.mesh_layout.clone(),
-            self.bind_group_layout.clone(),
+            self.voxel_layout.clone(),
         ]);
         descriptor.depth_stencil = None;
 
@@ -267,32 +324,204 @@ fn prepare_volume(mut commands: Commands, volume: Res<Volume>) {
     commands.spawn().insert_bundle((
         VolumeView,
         make_view(extend),
-        RenderPhase::<Transparent3d>::default(),
+        RenderPhase::<Voxel>::default(),
     ));
     commands.spawn().insert_bundle((
         VolumeView,
         make_view(extend.yzx()),
-        RenderPhase::<Transparent3d>::default(),
+        RenderPhase::<Voxel>::default(),
     ));
     commands.spawn().insert_bundle((
         VolumeView,
         make_view(extend.zxy()),
-        RenderPhase::<Transparent3d>::default(),
+        RenderPhase::<Voxel>::default(),
     ));
 }
 
-struct SetVolumeBindGroup<const I: usize>;
-impl<const I: usize> EntityRenderCommand for SetVolumeBindGroup<I> {
+fn prepare_voxel(
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    mut voxel_meta: ResMut<VoxelMeta>,
+    volume: Res<Volume>,
+) {
+    voxel_meta.volume.clear();
+    voxel_meta.volume.push(GpuVolume {
+        min: volume.min,
+        max: volume.max,
+    });
+    voxel_meta
+        .volume
+        .write_buffer(&render_device, &render_queue);
+
+    if voxel_meta.fragments.is_none() {
+        let buffer = render_device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_fragments_buffer"),
+            size: GpuList::std140_size_static() as u64,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        voxel_meta.fragments = Some(buffer);
+    }
+
+    if voxel_meta.octree.is_none() {
+        let buffer = render_device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_octree_buffer"),
+            size: GpuOctree::std140_size_static() as u64,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        voxel_meta.octree = Some(buffer);
+    }
+
+    if voxel_meta.radiance.is_none() {
+        let buffer = render_device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_radiance_buffer"),
+            size: GpuRadiance::std140_size_static() as u64,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        voxel_meta.radiance = Some(buffer);
+    }
+}
+
+fn queue_volume_view_bind_group(
+    render_device: Res<RenderDevice>,
+    voxel_pipeline: Res<VoxelPipeline>,
+    view_uniforms: Res<ViewUniforms>,
+    mut volume_view_meta: ResMut<VolumeViewMeta>,
+) {
+    if let Some(view_binding) = view_uniforms.uniforms.binding() {
+        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: Some("volume_view_bind_group"),
+            layout: &voxel_pipeline.volume_view_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: view_binding,
+            }],
+        });
+        volume_view_meta.bind_group = Some(bind_group);
+    }
+}
+
+fn queue_voxel_bind_group() {}
+
+fn queue_voxel() {}
+
+struct Voxel {
+    distance: f32,
+    entity: Entity,
+    pipeline: CachedPipelineId,
+    draw_function: DrawFunctionId,
+}
+
+impl PhaseItem for Voxel {
+    type SortKey = FloatOrd;
+
+    fn sort_key(&self) -> Self::SortKey {
+        FloatOrd(self.distance)
+    }
+
+    fn draw_function(&self) -> DrawFunctionId {
+        self.draw_function
+    }
+}
+
+impl EntityPhaseItem for Voxel {
+    fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
+impl CachedPipelinePhaseItem for Voxel {
+    fn cached_pipeline(&self) -> CachedPipelineId {
+        self.pipeline
+    }
+}
+
+struct VoxelPassNode {
+    volume_view_query: QueryState<(Entity, &'static RenderPhase<Voxel>), With<VolumeView>>,
+}
+
+impl VoxelPassNode {
+    pub fn new(world: &mut World) -> Self {
+        let volume_view_query = QueryState::new(world);
+        Self { volume_view_query }
+    }
+}
+
+impl bevy::render::render_graph::Node for VoxelPassNode {
+    fn update(&mut self, world: &mut World) {
+        self.volume_view_query.update_archetypes(world);
+    }
+
+    fn run(
+        &self,
+        _graph: &mut bevy::render::render_graph::RenderGraphContext,
+        render_context: &mut bevy::render::renderer::RenderContext,
+        world: &World,
+    ) -> Result<(), bevy::render::render_graph::NodeRunError> {
+        for (entity, phase) in self.volume_view_query.iter_manual(world) {
+            let descriptor = RenderPassDescriptor {
+                label: Some("volume_pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: None,
+            };
+
+            let draw_functions = world.get_resource::<DrawFunctions<Voxel>>().unwrap();
+            let render_pass = render_context
+                .command_encoder
+                .begin_render_pass(&descriptor);
+            let mut draw_functions = draw_functions.write();
+            let mut tracked_pass = TrackedRenderPass::new(render_pass);
+            for item in &phase.items {
+                let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
+                draw_function.draw(world, &mut tracked_pass, entity, item);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub type DrawVoxelMesh = (
+    SetItemPipeline,
+    SetVolumeViewBindGroup<0>,
+    SetMeshBindGroup<1>,
+    SetVoxelBindGroup<2>,
+    DrawMesh,
+);
+
+struct SetVolumeViewBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetVolumeViewBindGroup<I> {
+    type Param = (SRes<VolumeViewMeta>, SQuery<Read<ViewUniformOffset>>);
+
+    fn render<'w>(
+        view: Entity,
+        _item: Entity,
+        (volume_view_meta, view_query): SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let view_uniform_offset = view_query.get(view).unwrap();
+        pass.set_bind_group(
+            I,
+            volume_view_meta.into_inner().bind_group.as_ref().unwrap(),
+            &[view_uniform_offset.offset],
+        );
+
+        RenderCommandResult::Success
+    }
+}
+
+struct SetVoxelBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
     type Param = SRes<VoxelMeta>;
 
     fn render<'w>(
         _view: Entity,
         _item: Entity,
-        meta: SystemParamItem<'w, '_, Self::Param>,
+        voxel_meta: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let bind_group = meta.into_inner().bind_group.as_ref().unwrap();
-
         RenderCommandResult::Success
     }
 }
