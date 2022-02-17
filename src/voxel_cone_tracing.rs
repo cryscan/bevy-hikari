@@ -403,7 +403,48 @@ fn queue_volume_view_bind_group(
     }
 }
 
-fn queue_voxel_bind_group() {}
+fn queue_voxel_bind_group(
+    render_device: Res<RenderDevice>,
+    voxel_pipeline: Res<VoxelPipeline>,
+    mut voxel_meta: ResMut<VoxelMeta>,
+) {
+    let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+        label: Some("voxel_bind_group"),
+        layout: &voxel_pipeline.voxel_layout,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: voxel_meta.volume.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::Buffer(BufferBinding {
+                    buffer: voxel_meta.fragments.as_ref().unwrap(),
+                    offset: 0,
+                    size: None,
+                }),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::Buffer(BufferBinding {
+                    buffer: voxel_meta.octree.as_ref().unwrap(),
+                    offset: 0,
+                    size: None,
+                }),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: BindingResource::Buffer(BufferBinding {
+                    buffer: voxel_meta.radiance.as_ref().unwrap(),
+                    offset: 0,
+                    size: None,
+                }),
+            },
+        ],
+    });
+
+    voxel_meta.bind_group = Some(bind_group);
+}
 
 fn queue_voxel() {}
 
@@ -522,6 +563,7 @@ impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
         voxel_meta: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
+        pass.set_bind_group(I, voxel_meta.into_inner().bind_group.as_ref().unwrap(), &[]);
         RenderCommandResult::Success
     }
 }
