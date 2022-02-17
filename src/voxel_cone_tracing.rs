@@ -1,11 +1,10 @@
 use bevy::{
     core::FloatOrd,
-    core_pipeline::node::CLEAR_PASS_DRIVER,
+    core_pipeline,
     ecs::system::{
         lifetimeless::{Read, SQuery, SRes},
         SystemParamItem,
     },
-    math::Vec3Swizzles,
     pbr::{DrawMesh, MeshPipeline, MeshPipelineKey, SetMeshBindGroup},
     prelude::*,
     reflect::TypeUuid,
@@ -21,11 +20,13 @@ use bevy::{
         },
         render_resource::{std140::AsStd140, *},
         renderer::{RenderDevice, RenderQueue},
+        texture::TextureCache,
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms},
         RenderApp, RenderStage,
     },
     transform::TransformSystem,
 };
+use std::f32::consts::FRAC_PI_2;
 
 pub const VOXEL_SIZE: usize = 256;
 pub const MAX_FRAGMENTS: usize = 1048576;
@@ -34,6 +35,16 @@ pub const MAX_RADIANCE_SIZE: usize = 2097152;
 
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
+
+pub mod node {
+    pub const INIT: &str = "voxel_init";
+}
+
+pub mod draw_3d_graph {
+    pub mod node {
+        pub const VOXEL_PASS: &str = "voxel_pass";
+    }
+}
 
 #[derive(Default)]
 pub struct VoxelConeTracingPlugin;
@@ -60,6 +71,8 @@ impl Plugin for VoxelConeTracingPlugin {
             Ok(render_app) => render_app,
             Err(_) => return,
         };
+
+        let voxel_pass_node = VoxelPassNode::new(&mut render_app.world);
 
         render_app
             .init_resource::<VoxelPipeline>()
@@ -98,9 +111,26 @@ impl Plugin for VoxelConeTracingPlugin {
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>);
 
         let mut render_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
-        render_graph.add_node("voxel_init", DispatchVoxelInit);
+        render_graph.add_node(node::INIT, DispatchVoxelInit);
         render_graph
-            .add_node_edge("voxel_init", CLEAR_PASS_DRIVER)
+            .add_node_edge(node::INIT, core_pipeline::node::MAIN_PASS_DEPENDENCIES)
+            .unwrap();
+
+        let draw_3d_graph = render_graph
+            .get_sub_graph_mut(core_pipeline::draw_3d_graph::NAME)
+            .unwrap();
+        draw_3d_graph.add_node(draw_3d_graph::node::VOXEL_PASS, voxel_pass_node);
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph::node::VOXEL_PASS,
+                core_pipeline::draw_3d_graph::node::MAIN_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                draw_3d_graph::node::VOXEL_PASS,
+            )
             .unwrap();
     }
 }
@@ -151,6 +181,11 @@ impl From<Volume> for Frustum {
 #[derive(Default, Clone)]
 pub struct VolumeVisibileEntities {
     entities: Vec<Entity>,
+}
+
+#[derive(Component)]
+pub struct VolumeView {
+    texture_view: TextureView,
 }
 
 #[derive(AsStd140)]
@@ -222,7 +257,7 @@ impl FromWorld for VoxelPipeline {
                     visibility: ShaderStages::VERTEX_FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: BufferSize::new(ViewUniform::std140_size_static() as u64),
                     },
                     count: None,
@@ -367,15 +402,20 @@ fn extract_volume(
     commands.insert_resource(volume_visible_entities.clone());
 }
 
-fn prepare_volume(mut commands: Commands, volume: Res<Volume>) {
+fn prepare_volume(
+    mut commands: Commands,
+    volume: Res<Volume>,
+    render_device: Res<RenderDevice>,
+    mut texture_cache: ResMut<TextureCache>,
+) {
     let center = (volume.max + volume.min) / 2.0;
     let extend = (volume.max - volume.min) / 2.0;
 
-    let make_view = |extend: Vec3| -> ExtractedView {
+    let create_view = |rotation: GlobalTransform| -> ExtractedView {
         ExtractedView {
             width: VOXEL_SIZE as u32,
             height: VOXEL_SIZE as u32,
-            transform: GlobalTransform::from_translation(center),
+            transform: GlobalTransform::from_translation(center) * rotation,
             projection: OrthographicProjection {
                 left: -extend.x,
                 right: extend.x,
@@ -391,15 +431,60 @@ fn prepare_volume(mut commands: Commands, volume: Res<Volume>) {
         }
     };
 
-    commands
-        .spawn()
-        .insert_bundle((make_view(extend), RenderPhase::<Voxel>::default()));
-    commands
-        .spawn()
-        .insert_bundle((make_view(extend.yzx()), RenderPhase::<Voxel>::default()));
-    commands
-        .spawn()
-        .insert_bundle((make_view(extend.zxy()), RenderPhase::<Voxel>::default()));
+    let texture_view = texture_cache
+        .get(
+            &render_device,
+            TextureDescriptor {
+                label: Some("voxel_volume_texture"),
+                size: Extent3d {
+                    width: 256,
+                    height: 256,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 4,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Bgra8UnormSrgb,
+                usage: TextureUsages::RENDER_ATTACHMENT,
+            },
+        )
+        .texture
+        .create_view(&TextureViewDescriptor {
+            label: Some("voxel_volume_texture_view"),
+            format: None,
+            dimension: Some(TextureViewDimension::D2),
+            aspect: TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        });
+
+    commands.spawn().insert_bundle((
+        create_view(GlobalTransform::identity()),
+        VolumeView {
+            texture_view: texture_view.clone(),
+        },
+        RenderPhase::<Voxel>::default(),
+    ));
+    commands.spawn().insert_bundle((
+        create_view(GlobalTransform::from_rotation(Quat::from_rotation_y(
+            FRAC_PI_2,
+        ))),
+        VolumeView {
+            texture_view: texture_view.clone(),
+        },
+        RenderPhase::<Voxel>::default(),
+    ));
+    commands.spawn().insert_bundle((
+        create_view(GlobalTransform::from_rotation(Quat::from_rotation_x(
+            FRAC_PI_2,
+        ))),
+        VolumeView {
+            texture_view: texture_view.clone(),
+        },
+        RenderPhase::<Voxel>::default(),
+    ));
 }
 
 fn prepare_voxel(
@@ -625,7 +710,7 @@ impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
 }
 
 pub struct VoxelPassNode {
-    volume_view_query: QueryState<(Entity, &'static RenderPhase<Voxel>)>,
+    volume_view_query: QueryState<(Entity, &'static VolumeView, &'static RenderPhase<Voxel>)>,
 }
 
 impl VoxelPassNode {
@@ -646,10 +731,17 @@ impl render_graph::Node for VoxelPassNode {
         render_context: &mut bevy::render::renderer::RenderContext,
         world: &World,
     ) -> Result<(), bevy::render::render_graph::NodeRunError> {
-        for (entity, phase) in self.volume_view_query.iter_manual(world) {
+        for (entity, volume_view, phase) in self.volume_view_query.iter_manual(world) {
             let descriptor = RenderPassDescriptor {
-                label: Some("volume_pass"),
-                color_attachments: &[],
+                label: None,
+                color_attachments: &[RenderPassColorAttachment {
+                    view: &volume_view.texture_view,
+                    resolve_target: None,
+                    ops: Operations {
+                        load: LoadOp::Clear(Color::BLACK.into()),
+                        store: true,
+                    },
+                }],
                 depth_stencil_attachment: None,
             };
 
