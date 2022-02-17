@@ -365,6 +365,8 @@ impl SpecializedPipeline for VoxelPipeline {
             self.mesh_pipeline.mesh_layout.clone(),
             self.voxel_layout.clone(),
         ]);
+        descriptor.primitive.cull_mode = None;
+        descriptor.primitive.conservative = true;
         descriptor.depth_stencil = None;
 
         descriptor
@@ -442,7 +444,7 @@ fn prepare_volume(
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
-                sample_count: 4,
+                sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Bgra8UnormSrgb,
                 usage: TextureUsages::RENDER_ATTACHMENT,
@@ -619,7 +621,7 @@ fn queue_voxel(
                         key |= MeshPipelineKey::VERTEX_TANGENTS;
                     }
                     key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
-                    key |= MeshPipelineKey::from_msaa_samples(4)
+                    key |= MeshPipelineKey::from_msaa_samples(1)
                 }
 
                 let pipeline_id = pipelines.specialize(&mut pipeline_cache, &voxel_pipeline, key);
