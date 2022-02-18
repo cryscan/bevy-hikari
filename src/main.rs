@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
+use crate::voxel_cone_tracing::VolumeBundle;
+
 mod voxel_cone_tracing;
 
 fn main() {
@@ -27,7 +29,10 @@ fn setup(
     });
     // cube
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+        mesh: meshes.add(Mesh::from(shape::UVSphere {
+            radius: 0.5,
+            ..Default::default()
+        })),
         material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
         transform: Transform::from_xyz(0.0, 0.5, 0.0),
         ..Default::default()
@@ -63,4 +68,6 @@ fn setup(
         transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
+
+    commands.spawn_bundle(VolumeBundle::default());
 }
