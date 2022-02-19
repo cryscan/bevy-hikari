@@ -12,7 +12,7 @@ use bevy::{
     prelude::*,
     reflect::TypeUuid,
     render::{
-        camera::ExtractedCamera,
+        camera::CameraProjection,
         primitives::Frustum,
         render_asset::RenderAssets,
         render_graph::{self, RenderGraph},
@@ -79,7 +79,7 @@ impl Plugin for VoxelConeTracingPlugin {
             )
             .add_system_to_stage(
                 RenderStage::Extract,
-                extract_cameras.label(VoxelConeTracingSystems::ExtractCameras),
+                extract_views.label(VoxelConeTracingSystems::ExtractViews),
             )
             .add_system_to_stage(
                 RenderStage::Prepare,
@@ -124,7 +124,7 @@ impl Plugin for VoxelConeTracingPlugin {
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum VoxelConeTracingSystems {
     ExtractVolumes,
-    ExtractCameras,
+    ExtractViews,
     PrepareVolumes,
     QueueVoxelBindGroup,
     QueueVoxel,
@@ -300,23 +300,27 @@ fn add_volume_views(mut commands: Commands, mut query: Query<&mut Volume>) {
     }
 }
 
-fn extract_cameras(
+fn extract_views(
     mut commands: Commands,
-    query: Query<(Entity, &Camera, &GlobalTransform, &VisibleEntities), With<VolumeView>>,
+    query: Query<
+        (
+            Entity,
+            &GlobalTransform,
+            &OrthographicProjection,
+            &VisibleEntities,
+        ),
+        With<VolumeView>,
+    >,
 ) {
-    for (entity, camera, transform, visible_entities) in query.iter() {
+    for (entity, transform, projection, visible_entities) in query.iter() {
         commands.get_or_spawn(entity).insert_bundle((
-            ExtractedCamera {
-                window_id: camera.window,
-                name: camera.name.clone(),
-            },
             ExtractedView {
-                projection: camera.projection_matrix,
+                projection: projection.get_projection_matrix(),
                 transform: *transform,
                 width: VOXEL_SIZE as u32,
                 height: VOXEL_SIZE as u32,
-                near: camera.near,
-                far: camera.far,
+                near: projection.near,
+                far: projection.far,
             },
             visible_entities.clone(),
             VolumeView,
