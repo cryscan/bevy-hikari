@@ -1,21 +1,19 @@
 use bevy::{
     core::FloatOrd,
-    core_pipeline,
+    core_pipeline::{self},
     ecs::system::{
         lifetimeless::{Read, SQuery},
         SystemParamItem,
     },
-    math::const_vec3,
     pbr::{
-        DrawMesh, ExtractedClusterConfig, ExtractedClustersPointLights, MeshPipeline,
-        MeshPipelineKey, SetMaterialBindGroup, SetMeshBindGroup, SetMeshViewBindGroup,
-        SpecializedMaterial,
+        DrawMesh, MeshPipeline, MeshPipelineKey, SetMaterialBindGroup, SetMeshBindGroup,
+        SetMeshViewBindGroup, SpecializedMaterial,
     },
     prelude::*,
     reflect::TypeUuid,
     render::{
-        camera::CameraProjection,
-        primitives::{Aabb, Frustum, Plane},
+        camera::ExtractedCamera,
+        primitives::Frustum,
         render_asset::RenderAssets,
         render_graph::{self, RenderGraph},
         render_phase::{
@@ -26,7 +24,7 @@ use bevy::{
         render_resource::{std140::AsStd140, *},
         renderer::{RenderDevice, RenderQueue},
         texture::TextureCache,
-        view::ExtractedView,
+        view::{ExtractedView, VisibleEntities},
         RenderApp, RenderStage,
     },
     transform::TransformSystem,
@@ -51,7 +49,9 @@ impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
         app.add_system_to_stage(
             CoreStage::PostUpdate,
-            check_volume_visiblilty.after(TransformSystem::TransformPropagate),
+            add_volume_views
+                .exclusive_system()
+                .after(TransformSystem::TransformPropagate),
         );
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
@@ -75,13 +75,17 @@ impl Plugin for VoxelConeTracingPlugin {
             .add_render_command::<Voxel, DrawVoxelMesh>()
             .add_system_to_stage(
                 RenderStage::Extract,
-                extract_volumes.label(VoxelConeTracingSystems::ExtractVolume),
+                extract_volumes.label(VoxelConeTracingSystems::ExtractVolumes),
+            )
+            .add_system_to_stage(
+                RenderStage::Extract,
+                extract_cameras.label(VoxelConeTracingSystems::ExtractCameras),
             )
             .add_system_to_stage(
                 RenderStage::Prepare,
                 prepare_volumes
                     .exclusive_system()
-                    .label(VoxelConeTracingSystems::PrepareVolume),
+                    .label(VoxelConeTracingSystems::PrepareVolumes),
             )
             .add_system_to_stage(
                 RenderStage::Queue,
@@ -99,10 +103,11 @@ impl Plugin for VoxelConeTracingPlugin {
             .get_sub_graph_mut(core_pipeline::draw_3d_graph::NAME)
             .unwrap();
 
+        /*
         draw_3d_graph.add_node(draw_3d_graph::node::VOXEL_PASS, voxel_pass_node);
         draw_3d_graph
             .add_node_edge(
-                draw_3d_graph.input_node().unwrap().id,
+                bevy::pbr::draw_3d_graph::node::SHADOW_PASS,
                 draw_3d_graph::node::VOXEL_PASS,
             )
             .unwrap();
@@ -112,63 +117,32 @@ impl Plugin for VoxelConeTracingPlugin {
                 core_pipeline::draw_3d_graph::node::MAIN_PASS,
             )
             .unwrap();
+         */
     }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum VoxelConeTracingSystems {
-    ExtractVolume,
-    PrepareVolume,
+    ExtractVolumes,
+    ExtractCameras,
+    PrepareVolumes,
     QueueVoxelBindGroup,
     QueueVoxel,
 }
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone)]
 pub struct Volume {
     pub min: Vec3,
     pub max: Vec3,
+    views: Vec<Entity>,
 }
 
-const NEGATIVE_X: Vec3 = const_vec3!([-1.0, 0.0, 0.0]);
-const NEGATIVE_Y: Vec3 = const_vec3!([0.0, -1.0, 0.0]);
-const NEGATIVE_Z: Vec3 = const_vec3!([0.0, 0.0, -1.0]);
-
-impl From<Volume> for Frustum {
-    fn from(volume: Volume) -> Self {
-        Self {
-            planes: [
-                Plane {
-                    normal_d: Vec3::X.extend(volume.min.x),
-                },
-                Plane {
-                    normal_d: NEGATIVE_X.extend(volume.max.x),
-                },
-                Plane {
-                    normal_d: Vec3::Y.extend(volume.min.y),
-                },
-                Plane {
-                    normal_d: NEGATIVE_Y.extend(volume.max.y),
-                },
-                Plane {
-                    normal_d: Vec3::Z.extend(volume.min.z),
-                },
-                Plane {
-                    normal_d: NEGATIVE_Z.extend(volume.max.z),
-                },
-            ],
-        }
-    }
-}
-
-#[derive(Component, Default, Clone)]
-pub struct VolumeVisibileEntities {
-    pub entities: Vec<Entity>,
-}
+#[derive(Component)]
+pub struct VolumeView;
 
 #[derive(Bundle, Clone)]
 pub struct VolumeBundle {
     pub volume: Volume,
-    pub volume_visible_entities: VolumeVisibileEntities,
 }
 
 impl Default for VolumeBundle {
@@ -177,25 +151,8 @@ impl Default for VolumeBundle {
             volume: Volume {
                 min: Vec3::new(-5.0, -5.0, -5.0),
                 max: Vec3::new(5.0, 5.0, 5.0),
+                views: vec![],
             },
-            volume_visible_entities: Default::default(),
-        }
-    }
-}
-
-#[derive(Component)]
-pub struct ExtractedVolume {
-    pub min: Vec3,
-    pub max: Vec3,
-    pub views: Vec<Entity>,
-}
-
-impl From<Volume> for ExtractedVolume {
-    fn from(volume: Volume) -> Self {
-        Self {
-            min: volume.min,
-            max: volume.max,
-            views: vec![],
         }
     }
 }
@@ -206,7 +163,7 @@ pub struct VolumeUniformOffset {
 }
 
 #[derive(Component)]
-pub struct VolumeView {
+pub struct VolumeTexture {
     pub texture_view: TextureView,
 }
 
@@ -302,39 +259,74 @@ impl SpecializedPipeline for VoxelPipeline {
     }
 }
 
-fn check_volume_visiblilty(
-    mut volume_query: Query<(&Volume, &mut VolumeVisibileEntities), Without<Visibility>>,
-    mut visible_entity_query: Query<(Entity, &Visibility, Option<&Aabb>, Option<&GlobalTransform>)>,
-) {
-    for (volume, mut volume_visible_entities) in volume_query.iter_mut() {
-        volume_visible_entities.entities.clear();
+fn add_volume_views(mut commands: Commands, mut query: Query<&mut Volume>) {
+    for mut volume in query.iter_mut() {
+        if !volume.views.is_empty() {
+            continue;
+        }
 
-        let frustum: Frustum = volume.clone().into();
-        for (entity, visibility, maybe_aabb, maybe_transform) in visible_entity_query.iter_mut() {
-            if !visibility.is_visible {
-                continue;
-            }
+        let center = (volume.max + volume.min) / 2.0;
+        let extend = (volume.max - volume.min) / 2.0;
 
-            if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
-                if !frustum.intersects_obb(aabb, &transform.compute_matrix()) {
-                    continue;
-                }
-            }
+        for rotation in [
+            Quat::IDENTITY,
+            Quat::from_rotation_y(FRAC_PI_2),
+            Quat::from_rotation_x(FRAC_PI_2),
+        ] {
+            let transform = GlobalTransform::from_translation(center)
+                * GlobalTransform::from_rotation(rotation);
 
-            volume_visible_entities.entities.push(entity);
+            let projection = OrthographicProjection {
+                left: -extend.x,
+                right: extend.x,
+                bottom: -extend.y,
+                top: extend.y,
+                near: -extend.z,
+                far: extend.z,
+                ..Default::default()
+            };
+
+            let entity = commands
+                .spawn_bundle((
+                    VolumeView,
+                    transform,
+                    projection,
+                    Frustum::default(),
+                    VisibleEntities::default(),
+                ))
+                .id();
+            volume.views.push(entity);
         }
     }
 }
 
-fn extract_volumes(
+fn extract_cameras(
     mut commands: Commands,
-    query: Query<(Entity, &Volume, &VolumeVisibileEntities)>,
+    query: Query<(Entity, &Camera, &GlobalTransform, &VisibleEntities), With<VolumeView>>,
 ) {
-    for (entity, volume, volume_visible_entities) in query.iter() {
-        commands
-            .get_or_spawn(entity)
-            .insert(ExtractedVolume::from(volume.clone()))
-            .insert(volume_visible_entities.clone());
+    for (entity, camera, transform, visible_entities) in query.iter() {
+        commands.get_or_spawn(entity).insert_bundle((
+            ExtractedCamera {
+                window_id: camera.window,
+                name: camera.name.clone(),
+            },
+            ExtractedView {
+                projection: camera.projection_matrix,
+                transform: *transform,
+                width: VOXEL_SIZE as u32,
+                height: VOXEL_SIZE as u32,
+                near: camera.near,
+                far: camera.far,
+            },
+            visible_entities.clone(),
+            VolumeView,
+        ));
+    }
+}
+
+fn extract_volumes(mut commands: Commands, query: Query<(Entity, &Volume)>) {
+    for (entity, volume) in query.iter() {
+        commands.get_or_spawn(entity).insert(volume.clone());
     }
 }
 
@@ -343,23 +335,20 @@ fn prepare_volumes(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut texture_cache: ResMut<TextureCache>,
-    mut query: Query<(Entity, &mut ExtractedVolume)>,
+    mut query: Query<(Entity, &Volume)>,
     mut voxel_meta: ResMut<VoxelMeta>,
 ) {
     voxel_meta.volume_uniforms.clear();
 
-    for (entity, mut volume) in query.iter_mut() {
-        let center = (volume.max + volume.min) / 2.0;
-        let extend = (volume.max - volume.min) / 2.0;
-
+    for (entity, volume) in query.iter_mut() {
         let texture_view = texture_cache
             .get(
                 &render_device,
                 TextureDescriptor {
                     label: Some("voxel_volume_texture"),
                     size: Extent3d {
-                        width: 256,
-                        height: 256,
+                        width: VOXEL_SIZE as u32,
+                        height: VOXEL_SIZE as u32,
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
@@ -381,45 +370,12 @@ fn prepare_volumes(
                 array_layer_count: None,
             });
 
-        for rotation in [
-            Quat::IDENTITY,
-            Quat::from_rotation_y(FRAC_PI_2),
-            Quat::from_rotation_x(FRAC_PI_2),
-        ] {
-            let transform = GlobalTransform::from_translation(center)
-                * GlobalTransform::from_rotation(rotation);
+        for view in &volume.views {
             let texture_view = texture_view.clone();
-            volume.views.push(
-                commands
-                    .spawn()
-                    .insert_bundle((
-                        ExtractedView {
-                            width: VOXEL_SIZE as u32,
-                            height: VOXEL_SIZE as u32,
-                            transform,
-                            projection: OrthographicProjection {
-                                left: -extend.x,
-                                right: extend.x,
-                                bottom: -extend.y,
-                                top: extend.y,
-                                near: -extend.z,
-                                far: extend.z,
-                                ..Default::default()
-                            }
-                            .get_projection_matrix(),
-                            near: 0.0,
-                            far: 2.0 * extend.z,
-                        },
-                        // ExtractedClusterConfig {
-                        //     near: todo!(),
-                        //     axis_slices: todo!(),
-                        // },
-                        // ExtractedClustersPointLights { data: todo!() },
-                        VolumeView { texture_view },
-                        RenderPhase::<Voxel>::default(),
-                    ))
-                    .id(),
-            );
+            commands.entity(*view).insert_bundle((
+                VolumeTexture { texture_view },
+                RenderPhase::<Voxel>::default(),
+            ));
         }
 
         let volume_uniform_offset = VolumeUniformOffset {
@@ -511,18 +467,18 @@ fn queue_voxel(
     render_meshes: Res<RenderAssets<Mesh>>,
     mut pipelines: ResMut<SpecializedPipelines<VoxelPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
-    volume_query: Query<(&ExtractedVolume, &VolumeVisibileEntities)>,
-    mut voxel_phase_query: Query<&mut RenderPhase<Voxel>, Without<ExtractedVolume>>,
+    volume_query: Query<&Volume, Without<VolumeView>>,
+    mut volume_view_query: Query<(&VisibleEntities, &mut RenderPhase<Voxel>), With<VolumeView>>,
 ) {
     let draw_mesh = voxel_draw_functions
         .read()
         .get_id::<DrawVoxelMesh>()
         .unwrap();
 
-    for (volume, volume_visible_entities) in volume_query.iter() {
+    for volume in volume_query.iter() {
         for view in volume.views.iter().cloned() {
-            let mut phase = voxel_phase_query.get_mut(view).unwrap();
-            for entity in volume_visible_entities.entities.iter().cloned() {
+            let (visible_entities, mut phase) = volume_view_query.get_mut(view).unwrap();
+            for entity in visible_entities.entities.iter().cloned() {
                 if let Ok(mesh_handle) = meshes.get(entity) {
                     let mut key = MeshPipelineKey::empty();
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
@@ -604,7 +560,7 @@ impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
 }
 
 pub struct VoxelPassNode {
-    volume_view_query: QueryState<(Entity, &'static VolumeView, &'static RenderPhase<Voxel>)>,
+    volume_view_query: QueryState<(Entity, &'static VolumeTexture, &'static RenderPhase<Voxel>)>,
 }
 
 impl VoxelPassNode {
