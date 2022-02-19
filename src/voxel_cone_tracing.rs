@@ -47,12 +47,7 @@ pub struct VoxelConeTracingPlugin;
 
 impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system_to_stage(
-            CoreStage::PostUpdate,
-            add_volume_views
-                .exclusive_system()
-                .after(TransformSystem::TransformPropagate),
-        );
+        app.add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system());
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
