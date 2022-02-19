@@ -9,13 +9,11 @@ fn main() {
     let mut app = App::new();
 
     app.insert_resource(Msaa { samples: 4 })
-        .add_plugins_with(DefaultPlugins, |plugins| {
-            plugins.disable::<bevy::log::LogPlugin>()
-        })
+        .add_plugins(DefaultPlugins)
         .add_plugin(voxel_cone_tracing::VoxelConeTracingPlugin)
         .add_startup_system(setup);
 
-    bevy_mod_debugdump::print_render_graph(&mut app);
+    // bevy_mod_debugdump::print_render_graph(&mut app);
 
     app.run();
 }
