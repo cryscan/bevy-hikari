@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.6"
+bevy_mod_debugdump = "0.3.0"
