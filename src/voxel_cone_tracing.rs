@@ -6,17 +6,14 @@ use bevy::{
         SystemParamItem,
     },
     pbr::{
-        DrawMesh, ExtractedDirectionalLight, ExtractedDirectionalLightShadowMap,
-        GpuDirectionalLight, GpuLights, LightMeta, MeshPipeline, MeshPipelineKey,
-        SetMaterialBindGroup, SetMeshBindGroup, SetMeshViewBindGroup, ShadowPipeline,
-        SpecializedMaterial, ViewShadowBindings, DIRECTIONAL_SHADOW_LAYERS, MAX_DIRECTIONAL_LIGHTS,
-        SHADOW_FORMAT,
+        DrawMesh, ExtractedDirectionalLightShadowMap, GpuLights, LightMeta, MeshPipeline,
+        MeshPipelineKey, SetMaterialBindGroup, SetMeshBindGroup, ShadowPipeline,
+        SpecializedMaterial, ViewShadowBindings, DIRECTIONAL_SHADOW_LAYERS, SHADOW_FORMAT,
     },
     prelude::*,
     reflect::TypeUuid,
     render::{
         camera::CameraProjection,
-        options::WgpuOptions,
         primitives::{Aabb, Frustum},
         render_asset::RenderAssets,
         render_graph::{self, RenderGraph},
@@ -59,7 +56,7 @@ impl Plugin for VoxelConeTracingPlugin {
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
             VOXEL_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("shaders/voxel_3d.wgsl")),
+            Shader::from_wgsl(include_str!("shaders/voxel_3d.wgsl").replace("\r\n", "\n")),
         );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
@@ -176,9 +173,6 @@ pub struct VolumeColorAttachment {
 pub struct VolumeBindings {
     voxel_texture: Texture,
     voxel_texture_view: TextureView,
-
-    directional_light_depth_texture: Texture,
-    directional_light_depth_texture_view: TextureView,
 }
 
 #[derive(Clone, AsStd140)]
@@ -312,7 +306,6 @@ impl SpecializedPipeline for VoxelPipeline {
             self.voxel_layout.clone(),
         ]);
         descriptor.primitive.cull_mode = None;
-        descriptor.primitive.conservative = true;
         descriptor.depth_stencil = None;
 
         descriptor
@@ -462,7 +455,6 @@ fn prepare_volumes(
     directional_light_shadow_map: Res<ExtractedDirectionalLightShadowMap>,
     mut query: Query<(Entity, &Volume)>,
     mut voxel_meta: ResMut<VoxelMeta>,
-    wgpu_options: Res<WgpuOptions>,
 ) {
     voxel_meta.volume_uniforms.clear();
 
@@ -539,14 +531,14 @@ fn prepare_volumes(
             array_layer_count: None,
         });
 
-        let directional_light_depth_texture = texture_cache.get(
+        let _directional_light_depth_texture = texture_cache.get(
             &render_device,
             TextureDescriptor {
                 size: Extent3d {
                     width: (directional_light_shadow_map.size as u32)
-                        .min(wgpu_options.limits.max_texture_dimension_2d),
+                        .min(render_device.limits().max_texture_dimension_2d),
                     height: (directional_light_shadow_map.size as u32)
-                        .min(wgpu_options.limits.max_texture_dimension_2d),
+                        .min(render_device.limits().max_texture_dimension_2d),
                     depth_or_array_layers: DIRECTIONAL_SHADOW_LAYERS,
                 },
                 mip_level_count: 1,
@@ -558,7 +550,7 @@ fn prepare_volumes(
             },
         );
 
-        let directional_light_depth_texture_view = directional_light_depth_texture
+        let _directional_light_depth_texture_view = _directional_light_depth_texture
             .texture
             .create_view(&TextureViewDescriptor {
                 label: Some("directional_light_shadow_map_array_texture_view"),
@@ -577,8 +569,6 @@ fn prepare_volumes(
         let volume_bindings = VolumeBindings {
             voxel_texture: voxel_texture.texture,
             voxel_texture_view,
-            directional_light_depth_texture: directional_light_depth_texture.texture,
-            directional_light_depth_texture_view,
         };
 
         for view in &volume.views {
@@ -601,13 +591,16 @@ fn queue_volume_view_bind_groups(
     shadow_pipeline: Res<ShadowPipeline>,
     light_meta: Res<LightMeta>,
     view_uniforms: Res<ViewUniforms>,
-    views: Query<(Entity, &VolumeBindings), With<VolumeView>>,
+    views: Query<Entity, With<VolumeView>>,
+    shadow_bindings: Query<&ViewShadowBindings, Without<VolumeView>>,
 ) {
     if let (Some(view_binding), Some(light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
     ) {
-        for (entity, volume_bindings) in views.iter() {
+        let shadow_binding = shadow_bindings.iter().next().unwrap();
+
+        for entity in views.iter() {
             let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: Some("volume_view_bind_group"),
                 layout: &voxel_pipeline.view_layout,
@@ -623,7 +616,7 @@ fn queue_volume_view_bind_groups(
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &volume_bindings.directional_light_depth_texture_view,
+                            &shadow_binding.directional_light_depth_texture_view,
                         ),
                     },
                     BindGroupEntry {
