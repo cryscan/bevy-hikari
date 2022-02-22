@@ -32,7 +32,7 @@ use bevy::{
         RenderApp, RenderStage,
     },
 };
-use std::f32::consts::FRAC_PI_2;
+use std::{f32::consts::FRAC_PI_2, num::NonZeroU32};
 
 pub const VOXEL_SIZE: usize = 256;
 
@@ -56,7 +56,7 @@ impl Plugin for VoxelConeTracingPlugin {
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
             VOXEL_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("shaders/voxel_3d.wgsl").replace("\r\n", "\n")),
+            Shader::from_wgsl(include_str!("shaders/voxel.wgsl").replace("\r\n", "\n")),
         );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
@@ -126,7 +126,6 @@ pub enum VoxelConeTracingSystems {
     ExtractVolumes,
     ExtractViews,
     PrepareVolumes,
-    PrepareVolumeViews,
     QueueVolumeViewBindGroups,
     QueueVoxelBindGroups,
     QueueVoxel,
@@ -171,8 +170,8 @@ pub struct VolumeColorAttachment {
 
 #[derive(Component, Clone)]
 pub struct VolumeBindings {
-    voxel_texture: Texture,
-    voxel_texture_view: TextureView,
+    pub voxel_texture: Texture,
+    pub voxel_texture_view: TextureView,
 }
 
 #[derive(Clone, AsStd140)]
@@ -187,13 +186,13 @@ struct VoxelMeta {
 }
 
 #[derive(Component)]
-struct VolumeViewBindGroup {
-    value: BindGroup,
+pub struct VolumeViewBindGroup {
+    pub value: BindGroup,
 }
 
 #[derive(Component)]
-struct VoxelBindGroup {
-    value: BindGroup,
+pub struct VoxelBindGroup {
+    pub value: BindGroup,
 }
 
 pub struct VoxelPipeline {
@@ -512,7 +511,7 @@ fn prepare_volumes(
                     height: VOXEL_SIZE as u32,
                     depth_or_array_layers: VOXEL_SIZE as u32,
                 },
-                mip_level_count: 1,
+                mip_level_count: 1 + (VOXEL_SIZE as f32).log2() as u32,
                 sample_count: 1,
                 dimension: TextureDimension::D3,
                 format: TextureFormat::Rgba8Unorm,
@@ -526,7 +525,7 @@ fn prepare_volumes(
             dimension: Some(TextureViewDimension::D3),
             aspect: TextureAspect::All,
             base_mip_level: 0,
-            mip_level_count: None,
+            mip_level_count: NonZeroU32::new(1),
             base_array_layer: 0,
             array_layer_count: None,
         });
@@ -740,7 +739,6 @@ impl CachedPipelinePhaseItem for Voxel {
 
 pub type DrawVoxelMesh = (
     SetItemPipeline,
-    // SetMeshViewBindGroup<0>,
     SetVolumeViewBindGroup<0>,
     SetMaterialBindGroup<StandardMaterial, 1>,
     SetMeshBindGroup<2>,
@@ -748,7 +746,7 @@ pub type DrawVoxelMesh = (
     DrawMesh,
 );
 
-struct SetVolumeViewBindGroup<const I: usize>;
+pub struct SetVolumeViewBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetVolumeViewBindGroup<I> {
     type Param = SQuery<(Read<ViewUniformOffset>, Read<VolumeViewBindGroup>)>;
 
@@ -764,7 +762,7 @@ impl<const I: usize> EntityRenderCommand for SetVolumeViewBindGroup<I> {
     }
 }
 
-struct SetVoxelBindGroup<const I: usize>;
+pub struct SetVoxelBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
     type Param = SQuery<(Read<VolumeUniformOffset>, Read<VoxelBindGroup>)>;
 
