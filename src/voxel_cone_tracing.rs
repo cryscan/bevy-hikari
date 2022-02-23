@@ -6,14 +6,13 @@ use bevy::{
         SystemParamItem,
     },
     pbr::{
-        DrawMesh, ExtractedDirectionalLightShadowMap, GpuLights, LightMeta, MeshPipeline,
-        MeshPipelineKey, SetMaterialBindGroup, SetMeshBindGroup, ShadowPipeline,
-        SpecializedMaterial, ViewShadowBindings, DIRECTIONAL_SHADOW_LAYERS, SHADOW_FORMAT,
+        DrawMesh, GpuLights, LightMeta, MeshPipeline, MeshPipelineKey, SetMaterialBindGroup,
+        SetMeshBindGroup, ShadowPipeline, SpecializedMaterial, ViewShadowBindings,
     },
     prelude::*,
     reflect::TypeUuid,
     render::{
-        camera::CameraProjection,
+        camera::{CameraProjection, ExtractedCamera},
         primitives::{Aabb, Frustum},
         render_asset::RenderAssets,
         render_graph::{self, RenderGraph},
@@ -32,9 +31,10 @@ use bevy::{
         RenderApp, RenderStage,
     },
 };
-use std::{f32::consts::FRAC_PI_2, num::NonZeroU32};
+use std::{borrow::Cow, f32::consts::FRAC_PI_2, num::NonZeroU32};
 
 pub const VOXEL_SIZE: usize = 256;
+pub const VOXEL_MIPMAP_LEVEL_COUNT: usize = 9;
 
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
@@ -42,6 +42,7 @@ pub const VOXEL_SHADER_HANDLE: HandleUntyped =
 pub mod draw_3d_graph {
     pub mod node {
         pub const VOXEL_PASS: &str = "voxel_pass";
+        pub const MIPMAP_PASS: &str = "mipmap_pass";
     }
 }
 
@@ -65,6 +66,7 @@ impl Plugin for VoxelConeTracingPlugin {
         };
 
         let voxel_pass_node = VoxelPassNode::new(&mut render_app.world);
+        let mipmap_pass_node = MipmapPassNode::new(&mut render_app.world);
 
         render_app
             .init_resource::<VoxelPipeline>()
@@ -97,6 +99,10 @@ impl Plugin for VoxelConeTracingPlugin {
                 RenderStage::Queue,
                 queue_voxel.label(VoxelConeTracingSystems::QueueVoxel),
             )
+            .add_system_to_stage(
+                RenderStage::Queue,
+                queue_mipmap_bind_groups.label(VoxelConeTracingSystems::QueueMipmapBindGroups),
+            )
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>);
 
         let mut render_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
@@ -106,6 +112,8 @@ impl Plugin for VoxelConeTracingPlugin {
             .unwrap();
 
         draw_3d_graph.add_node(draw_3d_graph::node::VOXEL_PASS, voxel_pass_node);
+        draw_3d_graph.add_node(draw_3d_graph::node::MIPMAP_PASS, mipmap_pass_node);
+
         draw_3d_graph
             .add_node_edge(
                 bevy::pbr::draw_3d_graph::node::SHADOW_PASS,
@@ -115,6 +123,12 @@ impl Plugin for VoxelConeTracingPlugin {
         draw_3d_graph
             .add_node_edge(
                 draw_3d_graph::node::VOXEL_PASS,
+                draw_3d_graph::node::MIPMAP_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph::node::MIPMAP_PASS,
                 core_pipeline::draw_3d_graph::node::MAIN_PASS,
             )
             .unwrap();
@@ -129,6 +143,7 @@ pub enum VoxelConeTracingSystems {
     QueueVolumeViewBindGroups,
     QueueVoxelBindGroups,
     QueueVoxel,
+    QueueMipmapBindGroups,
 }
 
 #[derive(Component, Clone)]
@@ -171,7 +186,7 @@ pub struct VolumeColorAttachment {
 #[derive(Component, Clone)]
 pub struct VolumeBindings {
     pub voxel_texture: Texture,
-    pub voxel_texture_view: TextureView,
+    pub voxel_texture_views: Vec<TextureView>,
 }
 
 #[derive(Clone, AsStd140)]
@@ -195,11 +210,19 @@ pub struct VoxelBindGroup {
     pub value: BindGroup,
 }
 
+#[derive(Component, Default, Clone)]
+pub struct MipmapBindGroup {
+    pub values: Vec<(usize, BindGroup)>,
+}
+
 pub struct VoxelPipeline {
     view_layout: BindGroupLayout,
     material_layout: BindGroupLayout,
     voxel_layout: BindGroupLayout,
     mesh_pipeline: MeshPipeline,
+
+    mipmap_layout: BindGroupLayout,
+    mipmap_pipeline: ComputePipeline,
 }
 
 impl FromWorld for VoxelPipeline {
@@ -281,11 +304,60 @@ impl FromWorld for VoxelPipeline {
             ],
         });
 
+        let mipmap_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("mipmap_layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadOnly,
+                        format: TextureFormat::Rgba8Unorm,
+                        view_dimension: TextureViewDimension::D3,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba8Unorm,
+                        view_dimension: TextureViewDimension::D3,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let mipmap_pipeline_layout =
+            render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("mipmap_pipeline_layout"),
+                bind_group_layouts: &[&mipmap_layout],
+                push_constant_ranges: &[],
+            });
+
+        let shader = render_device.create_shader_module(&ShaderModuleDescriptor {
+            label: None,
+            source: ShaderSource::Wgsl(Cow::Borrowed(
+                &include_str!("shaders/mipmap.wgsl").replace("\r\n", "\n"),
+            )),
+        });
+
+        let mipmap_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("mipmap_pipeline"),
+            layout: Some(&mipmap_pipeline_layout),
+            module: &shader,
+            entry_point: "mipmap",
+        });
+
         Self {
             view_layout,
             material_layout,
             voxel_layout,
             mesh_pipeline,
+            mipmap_layout,
+            mipmap_pipeline,
         }
     }
 }
@@ -451,7 +523,6 @@ fn prepare_volumes(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut texture_cache: ResMut<TextureCache>,
-    directional_light_shadow_map: Res<ExtractedDirectionalLightShadowMap>,
     mut query: Query<(Entity, &Volume)>,
     mut voxel_meta: ResMut<VoxelMeta>,
 ) {
@@ -511,7 +582,7 @@ fn prepare_volumes(
                     height: VOXEL_SIZE as u32,
                     depth_or_array_layers: VOXEL_SIZE as u32,
                 },
-                mip_level_count: 1 + (VOXEL_SIZE as f32).log2() as u32,
+                mip_level_count: VOXEL_MIPMAP_LEVEL_COUNT as u32,
                 sample_count: 1,
                 dimension: TextureDimension::D3,
                 format: TextureFormat::Rgba8Unorm,
@@ -519,55 +590,24 @@ fn prepare_volumes(
             },
         );
 
-        let voxel_texture_view = voxel_texture.texture.create_view(&TextureViewDescriptor {
-            label: Some(&format!("voxel_texture_view_{}", entity.id())),
-            format: None,
-            dimension: Some(TextureViewDimension::D3),
-            aspect: TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: NonZeroU32::new(1),
-            base_array_layer: 0,
-            array_layer_count: None,
-        });
-
-        let _directional_light_depth_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                size: Extent3d {
-                    width: (directional_light_shadow_map.size as u32)
-                        .min(render_device.limits().max_texture_dimension_2d),
-                    height: (directional_light_shadow_map.size as u32)
-                        .min(render_device.limits().max_texture_dimension_2d),
-                    depth_or_array_layers: DIRECTIONAL_SHADOW_LAYERS,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: SHADOW_FORMAT,
-                label: Some("directional_light_shadow_map_texture"),
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            },
-        );
-
-        let _directional_light_depth_texture_view = _directional_light_depth_texture
-            .texture
-            .create_view(&TextureViewDescriptor {
-                label: Some("directional_light_shadow_map_array_texture_view"),
-                format: None,
-                #[cfg(not(feature = "webgl"))]
-                dimension: Some(TextureViewDimension::D2Array),
-                #[cfg(feature = "webgl")]
-                dimension: Some(TextureViewDimension::D2),
-                aspect: TextureAspect::All,
-                base_mip_level: 0,
-                mip_level_count: None,
-                base_array_layer: 0,
-                array_layer_count: None,
-            });
+        let voxel_texture_views = (0..VOXEL_MIPMAP_LEVEL_COUNT)
+            .map(|i| {
+                voxel_texture.texture.create_view(&TextureViewDescriptor {
+                    label: Some(&format!("voxel_texture_view_{}_{}", entity.id(), i)),
+                    format: None,
+                    dimension: Some(TextureViewDimension::D3),
+                    aspect: TextureAspect::All,
+                    base_mip_level: i as u32,
+                    mip_level_count: NonZeroU32::new(1),
+                    base_array_layer: 0,
+                    array_layer_count: None,
+                })
+            })
+            .collect();
 
         let volume_bindings = VolumeBindings {
             voxel_texture: voxel_texture.texture,
-            voxel_texture_view,
+            voxel_texture_views,
         };
 
         for view in &volume.views {
@@ -576,6 +616,8 @@ fn prepare_volumes(
                 .insert(volume_uniform_offset.clone())
                 .insert(volume_bindings.clone());
         }
+
+        commands.entity(entity).insert(volume_bindings);
     }
 
     voxel_meta
@@ -591,13 +633,17 @@ fn queue_volume_view_bind_groups(
     light_meta: Res<LightMeta>,
     view_uniforms: Res<ViewUniforms>,
     views: Query<Entity, With<VolumeView>>,
-    shadow_bindings: Query<&ViewShadowBindings, Without<VolumeView>>,
+    view_shadow_bindings: Query<(&ExtractedCamera, &ViewShadowBindings), Without<VolumeView>>,
 ) {
     if let (Some(view_binding), Some(light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
     ) {
-        let shadow_binding = shadow_bindings.iter().next().unwrap();
+        let (_, shadow_binding) = view_shadow_bindings
+            .iter()
+            .filter(|(camera, _)| camera.window_id.is_primary())
+            .next()
+            .unwrap();
 
         for entity in views.iter() {
             let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
@@ -639,9 +685,9 @@ fn queue_voxel_bind_groups(
     render_device: Res<RenderDevice>,
     voxel_pipeline: Res<VoxelPipeline>,
     voxel_meta: Res<VoxelMeta>,
-    view_query: Query<(Entity, &VolumeBindings), With<VolumeView>>,
+    views: Query<(Entity, &VolumeBindings), With<VolumeView>>,
 ) {
-    for (entity, bindings) in view_query.iter() {
+    for (entity, bindings) in views.iter() {
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: Some("voxel_bind_group"),
             layout: &voxel_pipeline.voxel_layout,
@@ -652,7 +698,7 @@ fn queue_voxel_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&bindings.voxel_texture_view),
+                    resource: BindingResource::TextureView(&bindings.voxel_texture_views[0]),
                 },
             ],
         });
@@ -670,17 +716,17 @@ fn queue_voxel(
     render_meshes: Res<RenderAssets<Mesh>>,
     mut pipelines: ResMut<SpecializedPipelines<VoxelPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
-    volume_query: Query<&Volume, Without<VolumeView>>,
-    mut volume_view_query: Query<(&VisibleEntities, &mut RenderPhase<Voxel>), With<VolumeView>>,
+    volumes: Query<&Volume, Without<VolumeView>>,
+    mut views: Query<(&VisibleEntities, &mut RenderPhase<Voxel>), With<VolumeView>>,
 ) {
     let draw_mesh = voxel_draw_functions
         .read()
         .get_id::<DrawVoxelMesh>()
         .unwrap();
 
-    for volume in volume_query.iter() {
+    for volume in volumes.iter() {
         for view in volume.views.iter().cloned() {
-            let (visible_entities, mut phase) = volume_view_query.get_mut(view).unwrap();
+            let (visible_entities, mut phase) = views.get_mut(view).unwrap();
             for entity in visible_entities.entities.iter().cloned() {
                 if let Ok(mesh_handle) = meshes.get(entity) {
                     let mut key = MeshPipelineKey::empty();
@@ -703,6 +749,39 @@ fn queue_voxel(
                 }
             }
         }
+    }
+}
+
+fn queue_mipmap_bind_groups(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    voxel_pipeline: Res<VoxelPipeline>,
+    volumes: Query<(Entity, &VolumeBindings), With<Volume>>,
+) {
+    for (entity, volume_bindings) in volumes.iter() {
+        let mut mipmap_bind_group = MipmapBindGroup::default();
+        for i in 0..VOXEL_MIPMAP_LEVEL_COUNT - 1 {
+            let ref texture_in = volume_bindings.voxel_texture_views[i];
+            let ref texture_out = volume_bindings.voxel_texture_views[i + 1];
+            let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &voxel_pipeline.mipmap_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(texture_in),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::TextureView(texture_out),
+                    },
+                ],
+            });
+            let size = (VOXEL_SIZE / 2) / (1usize << i);
+            mipmap_bind_group.values.push((size, bind_group));
+        }
+
+        commands.entity(entity).insert(mipmap_bind_group);
     }
 }
 
@@ -827,6 +906,46 @@ impl render_graph::Node for VoxelPassNode {
             for item in &phase.items {
                 let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
                 draw_function.draw(world, &mut tracked_pass, entity, item);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub struct MipmapPassNode {
+    volume_query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+}
+
+impl MipmapPassNode {
+    pub fn new(world: &mut World) -> Self {
+        let volume_query = QueryState::new(world);
+        Self { volume_query }
+    }
+}
+
+impl render_graph::Node for MipmapPassNode {
+    fn update(&mut self, world: &mut World) {
+        self.volume_query.update_archetypes(world);
+    }
+
+    fn run(
+        &self,
+        _graph: &mut render_graph::RenderGraphContext,
+        render_context: &mut bevy::render::renderer::RenderContext,
+        world: &World,
+    ) -> Result<(), render_graph::NodeRunError> {
+        let pipeline = world.get_resource::<VoxelPipeline>().unwrap();
+        let mut pass = render_context
+            .command_encoder
+            .begin_compute_pass(&ComputePassDescriptor::default());
+        pass.set_pipeline(&pipeline.mipmap_pipeline);
+
+        for mipmap_bind_group in self.volume_query.iter_manual(world) {
+            for (size, bind_group) in &mipmap_bind_group.values {
+                pass.set_bind_group(0, bind_group, &[]);
+                let size = (size / 4).max(1usize) as u32;
+                pass.dispatch(size, size, size);
             }
         }
 
