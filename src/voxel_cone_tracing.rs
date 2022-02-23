@@ -1,13 +1,14 @@
 use bevy::{
     core::FloatOrd,
-    core_pipeline::{self},
+    core_pipeline,
     ecs::system::{
         lifetimeless::{Read, SQuery},
         SystemParamItem,
     },
     pbr::{
         DrawMesh, GpuLights, LightMeta, MeshPipeline, MeshPipelineKey, SetMaterialBindGroup,
-        SetMeshBindGroup, ShadowPipeline, SpecializedMaterial, ViewShadowBindings,
+        SetMeshBindGroup, ShadowPipeline, SpecializedMaterial, ViewLightsUniformOffset,
+        ViewShadowBindings,
     },
     prelude::*,
     reflect::TypeUuid,
@@ -153,25 +154,24 @@ pub struct Volume {
     views: Vec<Entity>,
 }
 
-#[derive(Component)]
-pub struct VolumeView;
-
-#[derive(Bundle, Clone)]
-pub struct VolumeBundle {
-    pub volume: Volume,
-}
-
-impl Default for VolumeBundle {
-    fn default() -> Self {
+impl Volume {
+    pub fn new(min: Vec3, max: Vec3) -> Self {
         Self {
-            volume: Volume {
-                min: Vec3::new(-5.0, -5.0, -5.0),
-                max: Vec3::new(5.0, 5.0, 5.0),
-                views: vec![],
-            },
+            min,
+            max,
+            views: vec![],
         }
     }
 }
+
+impl Default for Volume {
+    fn default() -> Self {
+        Self::new(Vec3::new(-5.0, -5.0, -5.0), Vec3::new(5.0, 5.0, 5.0))
+    }
+}
+
+#[derive(Component)]
+pub struct VolumeView;
 
 #[derive(Component, Clone)]
 pub struct VolumeUniformOffset {
@@ -251,7 +251,7 @@ impl FromWorld for VoxelPipeline {
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: BufferSize::new(GpuLights::std140_size_static() as u64),
                     },
                     count: None,
@@ -383,8 +383,8 @@ impl SpecializedPipeline for VoxelPipeline {
     }
 }
 
-fn add_volume_views(mut commands: Commands, mut query: Query<&mut Volume>) {
-    for mut volume in query.iter_mut() {
+fn add_volume_views(mut commands: Commands, mut volumes: Query<&mut Volume>) {
+    for mut volume in volumes.iter_mut() {
         if !volume.views.is_empty() {
             continue;
         }
@@ -512,8 +512,8 @@ fn extract_views(
     }
 }
 
-fn extract_volumes(mut commands: Commands, query: Query<(Entity, &Volume)>) {
-    for (entity, volume) in query.iter() {
+fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
+    for (entity, volume) in volumes.iter() {
         commands.get_or_spawn(entity).insert(volume.clone());
     }
 }
@@ -523,12 +523,12 @@ fn prepare_volumes(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut texture_cache: ResMut<TextureCache>,
-    mut query: Query<(Entity, &Volume)>,
+    mut volumes: Query<(Entity, &Volume)>,
     mut voxel_meta: ResMut<VoxelMeta>,
 ) {
     voxel_meta.volume_uniforms.clear();
 
-    for (entity, volume) in query.iter_mut() {
+    for (entity, volume) in volumes.iter_mut() {
         let texture_view = texture_cache
             .get(
                 &render_device,
@@ -610,11 +610,8 @@ fn prepare_volumes(
             voxel_texture_views,
         };
 
-        for view in &volume.views {
-            commands
-                .entity(*view)
-                .insert(volume_uniform_offset.clone())
-                .insert(volume_bindings.clone());
+        for view in volume.views.iter().cloned() {
+            commands.entity(view).insert(volume_uniform_offset.clone());
         }
 
         commands.entity(entity).insert(volume_bindings);
@@ -632,46 +629,50 @@ fn queue_volume_view_bind_groups(
     shadow_pipeline: Res<ShadowPipeline>,
     light_meta: Res<LightMeta>,
     view_uniforms: Res<ViewUniforms>,
-    views: Query<Entity, With<VolumeView>>,
-    view_shadow_bindings: Query<&ViewShadowBindings>,
+    volume_query: Query<(&Volume, &ViewShadowBindings, &ViewLightsUniformOffset)>,
 ) {
     if let (Some(view_binding), Some(light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
     ) {
-        let shadow_binding = view_shadow_bindings.iter().next().unwrap();
+        for (volume, shadow_bindings, lights_uniform_offset) in volume_query.iter() {
+            for view in volume.views.iter().cloned() {
+                let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+                    label: Some("volume_view_bind_group"),
+                    layout: &voxel_pipeline.view_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: view_binding.clone(),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: light_binding.clone(),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: BindingResource::TextureView(
+                                &shadow_bindings.directional_light_depth_texture_view,
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 3,
+                            resource: BindingResource::Sampler(
+                                &shadow_pipeline.directional_light_sampler,
+                            ),
+                        },
+                    ],
+                });
 
-        for entity in views.iter() {
-            let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-                label: Some("volume_view_bind_group"),
-                layout: &voxel_pipeline.view_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: view_binding.clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: light_binding.clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(
-                            &shadow_binding.directional_light_depth_texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: BindingResource::Sampler(
-                            &shadow_pipeline.directional_light_sampler,
-                        ),
-                    },
-                ],
-            });
-
-            commands.entity(entity).insert(VolumeViewBindGroup {
-                value: view_bind_group,
-            });
+                commands
+                    .entity(view)
+                    .insert(VolumeViewBindGroup {
+                        value: view_bind_group,
+                    })
+                    .insert(ViewLightsUniformOffset {
+                        offset: lights_uniform_offset.offset,
+                    });
+            }
         }
     }
 }
@@ -681,27 +682,29 @@ fn queue_voxel_bind_groups(
     render_device: Res<RenderDevice>,
     voxel_pipeline: Res<VoxelPipeline>,
     voxel_meta: Res<VoxelMeta>,
-    views: Query<(Entity, &VolumeBindings), With<VolumeView>>,
+    volumes: Query<(&Volume, &VolumeBindings)>,
 ) {
-    for (entity, bindings) in views.iter() {
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            label: Some("voxel_bind_group"),
-            layout: &voxel_pipeline.voxel_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: voxel_meta.volume_uniforms.binding().unwrap(),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(&bindings.voxel_texture_views[0]),
-                },
-            ],
-        });
+    for (volume, bindings) in volumes.iter() {
+        for view in volume.views.iter().cloned() {
+            let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+                label: Some("voxel_bind_group"),
+                layout: &voxel_pipeline.voxel_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: voxel_meta.volume_uniforms.binding().unwrap(),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::TextureView(&bindings.voxel_texture_views[0]),
+                    },
+                ],
+            });
 
-        commands
-            .entity(entity)
-            .insert(VoxelBindGroup { value: bind_group });
+            commands
+                .entity(view)
+                .insert(VoxelBindGroup { value: bind_group });
+        }
     }
 }
 
@@ -713,7 +716,7 @@ fn queue_voxel(
     mut pipelines: ResMut<SpecializedPipelines<VoxelPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     volumes: Query<&Volume, Without<VolumeView>>,
-    mut views: Query<(&VisibleEntities, &mut RenderPhase<Voxel>), With<VolumeView>>,
+    mut view_query: Query<(&VisibleEntities, &mut RenderPhase<Voxel>), With<VolumeView>>,
 ) {
     let draw_mesh = voxel_draw_functions
         .read()
@@ -722,7 +725,7 @@ fn queue_voxel(
 
     for volume in volumes.iter() {
         for view in volume.views.iter().cloned() {
-            let (visible_entities, mut phase) = views.get_mut(view).unwrap();
+            let (visible_entities, mut phase) = view_query.get_mut(view).unwrap();
             for entity in visible_entities.entities.iter().cloned() {
                 if let Ok(mesh_handle) = meshes.get(entity) {
                     let mut key = MeshPipelineKey::empty();
@@ -823,7 +826,11 @@ pub type DrawVoxelMesh = (
 
 pub struct SetVolumeViewBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetVolumeViewBindGroup<I> {
-    type Param = SQuery<(Read<ViewUniformOffset>, Read<VolumeViewBindGroup>)>;
+    type Param = SQuery<(
+        Read<ViewUniformOffset>,
+        Read<ViewLightsUniformOffset>,
+        Read<VolumeViewBindGroup>,
+    )>;
 
     fn render<'w>(
         view: Entity,
@@ -831,8 +838,12 @@ impl<const I: usize> EntityRenderCommand for SetVolumeViewBindGroup<I> {
         query: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (view_uniform_offset, bind_group) = query.get(view).unwrap();
-        pass.set_bind_group(I, &bind_group.value, &[view_uniform_offset.offset]);
+        let (view_uniform_offset, lights_uniform_offset, bind_group) = query.get(view).unwrap();
+        pass.set_bind_group(
+            I,
+            &bind_group.value,
+            &[view_uniform_offset.offset, lights_uniform_offset.offset],
+        );
         RenderCommandResult::Success
     }
 }

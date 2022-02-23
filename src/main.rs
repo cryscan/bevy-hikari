@@ -1,10 +1,9 @@
+use crate::voxel_cone_tracing::Volume;
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
 };
 use std::f32::consts::PI;
-
-use crate::voxel_cone_tracing::VolumeBundle;
 
 mod voxel_cone_tracing;
 
@@ -72,10 +71,10 @@ fn setup(
     });
 
     // camera
-    commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..Default::default()
-    });
-
-    commands.spawn_bundle(VolumeBundle::default());
+    commands
+        .spawn_bundle(PerspectiveCameraBundle {
+            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..Default::default()
+        })
+        .insert(Volume::default());
 }
