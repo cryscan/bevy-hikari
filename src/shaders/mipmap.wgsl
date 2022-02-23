@@ -26,7 +26,7 @@ fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
         for (var i = 0u; i < 8u; i = i + 1u) {
             color = color + colors[i].rgb * colors[i].a;
         }
-        output_color = vec4<f32>(color / alpha, alpha);
+        output_color = vec4<f32>(color / alpha, alpha / 8.0);
     }
 
     textureStore(voxel_texture_out, vec3<i32>(id), output_color);
