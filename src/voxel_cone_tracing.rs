@@ -12,7 +12,7 @@ use bevy::{
     prelude::*,
     reflect::TypeUuid,
     render::{
-        camera::{CameraProjection, ExtractedCamera},
+        camera::CameraProjection,
         primitives::{Aabb, Frustum},
         render_asset::RenderAssets,
         render_graph::{self, RenderGraph},
@@ -633,17 +633,13 @@ fn queue_volume_view_bind_groups(
     light_meta: Res<LightMeta>,
     view_uniforms: Res<ViewUniforms>,
     views: Query<Entity, With<VolumeView>>,
-    view_shadow_bindings: Query<(&ExtractedCamera, &ViewShadowBindings), Without<VolumeView>>,
+    view_shadow_bindings: Query<&ViewShadowBindings>,
 ) {
     if let (Some(view_binding), Some(light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
     ) {
-        let (_, shadow_binding) = view_shadow_bindings
-            .iter()
-            .filter(|(camera, _)| camera.window_id.is_primary())
-            .next()
-            .unwrap();
+        let shadow_binding = view_shadow_bindings.iter().next().unwrap();
 
         for entity in views.iter() {
             let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
