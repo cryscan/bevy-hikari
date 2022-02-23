@@ -1,4 +1,7 @@
-use bevy::prelude::*;
+use bevy::{
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    prelude::*,
+};
 use std::f32::consts::PI;
 
 use crate::voxel_cone_tracing::VolumeBundle;
@@ -10,6 +13,8 @@ fn main() {
 
     app.insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
+        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(voxel_cone_tracing::VoxelConeTracingPlugin)
         .add_startup_system(setup);
 
