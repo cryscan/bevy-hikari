@@ -16,7 +16,7 @@ use bevy::{
         camera::CameraProjection,
         primitives::{Aabb, Frustum},
         render_asset::RenderAssets,
-        render_graph::{self, RenderGraph},
+        render_graph::{self, RenderGraph, SlotInfo, SlotType},
         render_phase::{
             sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
             DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
@@ -112,6 +112,14 @@ impl Plugin for VoxelConeTracingPlugin {
         draw_3d_graph.add_node(draw_3d_graph::node::VOXEL_PASS, voxel_pass_node);
         draw_3d_graph.add_node(draw_3d_graph::node::MIPMAP_PASS, mipmap_pass_node);
 
+        draw_3d_graph
+            .add_slot_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
+                draw_3d_graph::node::VOXEL_PASS,
+                VoxelPassNode::IN_VIEW,
+            )
+            .unwrap();
         draw_3d_graph
             .add_node_edge(
                 bevy::pbr::draw_3d_graph::node::SHADOW_PASS,
@@ -823,54 +831,67 @@ impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
 }
 
 pub struct VoxelPassNode {
-    volume_view_query: QueryState<(
-        Entity,
-        &'static VolumeColorAttachment,
-        &'static RenderPhase<Voxel>,
-    )>,
+    volume_query: QueryState<&'static Volume>,
+    volume_view_query: QueryState<(&'static VolumeColorAttachment, &'static RenderPhase<Voxel>)>,
 }
 
 impl VoxelPassNode {
+    pub const IN_VIEW: &'static str = "view";
+
     pub fn new(world: &mut World) -> Self {
+        let volume_query = QueryState::new(world);
         let volume_view_query = QueryState::new(world);
-        Self { volume_view_query }
+        Self {
+            volume_query,
+            volume_view_query,
+        }
     }
 }
 
 impl render_graph::Node for VoxelPassNode {
+    fn input(&self) -> Vec<render_graph::SlotInfo> {
+        vec![SlotInfo::new(Self::IN_VIEW, SlotType::Entity)]
+    }
+
     fn update(&mut self, world: &mut World) {
+        self.volume_query.update_archetypes(world);
         self.volume_view_query.update_archetypes(world);
     }
 
     fn run(
         &self,
-        _graph: &mut bevy::render::render_graph::RenderGraphContext,
+        graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext,
         world: &World,
     ) -> Result<(), bevy::render::render_graph::NodeRunError> {
-        for (entity, volume_view, phase) in self.volume_view_query.iter_manual(world) {
-            let descriptor = RenderPassDescriptor {
-                label: None,
-                color_attachments: &[RenderPassColorAttachment {
-                    view: &volume_view.texture_view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::BLACK.into()),
-                        store: true,
-                    },
-                }],
-                depth_stencil_attachment: None,
-            };
+        let entity = graph.get_input_entity(Self::IN_VIEW)?;
+        if let Ok(volume) = self.volume_query.get_manual(world, entity) {
+            for view in volume.views.iter().cloned() {
+                let (volume_color_attachment, phase) =
+                    self.volume_view_query.get_manual(world, view).unwrap();
+                let descriptor = RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[RenderPassColorAttachment {
+                        view: &volume_color_attachment.texture_view,
+                        resolve_target: None,
+                        ops: Operations {
+                            load: LoadOp::Clear(Color::BLACK.into()),
+                            store: true,
+                        },
+                    }],
+                    depth_stencil_attachment: None,
+                };
 
-            let draw_functions = world.get_resource::<DrawFunctions<Voxel>>().unwrap();
-            let render_pass = render_context
-                .command_encoder
-                .begin_render_pass(&descriptor);
-            let mut draw_functions = draw_functions.write();
-            let mut tracked_pass = TrackedRenderPass::new(render_pass);
-            for item in &phase.items {
-                let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
-                draw_function.draw(world, &mut tracked_pass, entity, item);
+                let draw_functions = world.get_resource::<DrawFunctions<Voxel>>().unwrap();
+                let render_pass = render_context
+                    .command_encoder
+                    .begin_render_pass(&descriptor);
+                let mut draw_functions = draw_functions.write();
+                let mut tracked_pass = TrackedRenderPass::new(render_pass);
+                for item in &phase.items {
+                    let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
+                    draw_function.draw(world, &mut tracked_pass, view, item);
+                }
             }
         }
 
