@@ -16,26 +16,32 @@ var voxel_texture: texture_3d<f32>;
 [[group(1), binding(2)]]
 var voxel_texture_sampler: sampler;
 
-let DIRECTIONAL_LIGHT_SHADOW_CONE_HALF_ANGLE: f32 = 0.1;
+let DIRECTIONAL_LIGHT_SHADOW_CONE_HALF_ANGLE: f32 = 0.01;
 
 fn out_of_volume(position: vec3<f32>) -> bool {
     return any(position < volume.min) || any(position > volume.max);
 }
 
-fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32) -> vec4<f32> {
+fn max_component(v: vec3<f32>) -> f32 {
+    return max(max(v.x, v.y), v.z);
+}
+
+fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32, normal: vec3<f32>) -> vec4<f32> {
     var color = vec4<f32>(0.0);
 
     let dims = vec3<f32>(textureDimensions(voxel_texture));
     let extends = volume.max - volume.min;
 
-    let extend = max(max(extends.x, extends.y), extends.z);
-    let dim = max(max(dims.x, dims.y), dims.z);
+    let extend = max_component(extends);
+    let dim = max_component(dims);
     let max_level = log2(dim);
 
-    var distance = extend / dim;
+    let bias = extend / dim;
+    var distance = bias / max_component(direction);
+    let normal_bias = bias * normal / max_component(normal);
 
     loop {
-        let position = origin + distance * direction;
+        let position = origin + normal_bias + distance * direction;
         if (out_of_volume(position) || color.a >= 1.0) {
             break;
         }
@@ -49,7 +55,8 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32) -> vec4<f32> {
         let sample = textureSampleLevel(voxel_texture, voxel_texture_sampler, coords, level);
         color = color + (1.0 - color.a) * sample;
 
-        distance = distance + 2.0 * radius;
+        let step_size = min(radius, bias);
+        distance = distance + step_size / max_component(direction);
     }
 
     return color;
@@ -67,10 +74,11 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     var occlusion = 0.0;
     for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
         let light = lights.directional_lights[i];
-        let color = cone(in.world_position.xyz, light.direction_to_light, DIRECTIONAL_LIGHT_SHADOW_CONE_HALF_ANGLE);
+        let direction = normalize(light.direction_to_light);
+        let color = cone(in.world_position.xyz, direction, DIRECTIONAL_LIGHT_SHADOW_CONE_HALF_ANGLE, in.world_normal);
         occlusion = occlusion + color.a;
     }
     occlusion = occlusion / f32(min(lights.n_directional_lights, 1u));
-
+    
     return vec4<f32>(0.0, 0.0, 0.0, occlusion);
 }

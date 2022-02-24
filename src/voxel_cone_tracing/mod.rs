@@ -28,6 +28,7 @@ pub const TRACING_SHADER_HANDLE: HandleUntyped =
 pub mod draw_3d_graph {
     pub mod node {
         pub const VOXEL_PASS: &str = "voxel_pass";
+        pub const CLEAR_PASS: &str = "voxel_clear_pass";
         pub const MIPMAP_PASS: &str = "mipmap_pass";
         pub const TRACING_PASS: &str = "tracing_pass";
     }
@@ -57,16 +58,20 @@ impl Plugin for VoxelConeTracingPlugin {
         };
 
         let voxel_pass_node = VoxelPassNode::new(&mut render_app.world);
+        let clear_pass_node = VoxelClearPassNode::new(&mut render_app.world);
         let mipmap_pass_node = MipmapPassNode::new(&mut render_app.world);
         let tracing_pass_node = TracingPassNode::new(&mut render_app.world);
 
         render_app
+            .init_resource::<VolumeMeta>()
             .init_resource::<VoxelPipeline>()
             .init_resource::<SpecializedPipelines<VoxelPipeline>>()
-            .init_resource::<VolumeMeta>()
             .init_resource::<DrawFunctions<Voxel>>()
+            .init_resource::<TracingPipeline>()
+            .init_resource::<SpecializedPipelines<TracingPipeline>>()
             .init_resource::<DrawFunctions<Tracing>>()
             .add_render_command::<Voxel, DrawVoxelMesh>()
+            .add_render_command::<Tracing, DrawTracingMesh>()
             .add_system_to_stage(
                 RenderStage::Extract,
                 extract_volumes.label(VoxelConeTracingSystems::ExtractVolumes),
@@ -96,9 +101,23 @@ impl Plugin for VoxelConeTracingPlugin {
                 RenderStage::Queue,
                 queue_mipmap_bind_groups.label(VoxelConeTracingSystems::QueueMipmapBindGroups),
             )
-            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>);
+            .add_system_to_stage(
+                RenderStage::Queue,
+                queue_tracing.label(VoxelConeTracingSystems::QueueTracing),
+            )
+            .add_system_to_stage(
+                RenderStage::Queue,
+                queue_tracing_bind_groups.label(VoxelConeTracingSystems::QueueTracingBindGroups),
+            )
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>)
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Tracing>);
 
         let mut render_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
+
+        let clear_graph = render_graph
+            .get_sub_graph_mut(core_pipeline::clear_graph::NAME)
+            .unwrap();
+        clear_graph.add_node(draw_3d_graph::node::CLEAR_PASS, clear_pass_node);
 
         let draw_3d_graph = render_graph
             .get_sub_graph_mut(core_pipeline::draw_3d_graph::NAME)
@@ -160,6 +179,8 @@ pub enum VoxelConeTracingSystems {
     QueueVoxelBindGroups,
     QueueVoxel,
     QueueMipmapBindGroups,
+    QueueTracing,
+    QueueTracingBindGroups,
 }
 
 #[derive(Component, Clone)]
@@ -201,7 +222,10 @@ pub struct VolumeColorAttachment {
 #[derive(Component, Clone)]
 pub struct VolumeBindings {
     pub voxel_texture: Texture,
-    pub voxel_texture_views: Vec<TextureView>,
+    pub voxel_storage_views: Vec<TextureView>,
+
+    pub voxel_sampled_view: TextureView,
+    pub voxel_texture_sampler: Sampler,
 }
 
 #[derive(Clone, AsStd140)]
@@ -285,7 +309,7 @@ pub fn prepare_volumes(
             },
         );
 
-        let voxel_texture_views = (0..VOXEL_MIPMAP_LEVEL_COUNT)
+        let voxel_storage_views = (0..VOXEL_MIPMAP_LEVEL_COUNT)
             .map(|i| {
                 voxel_texture.texture.create_view(&TextureViewDescriptor {
                     label: Some(&format!("voxel_texture_view_{}_{}", entity.id(), i)),
@@ -300,6 +324,28 @@ pub fn prepare_volumes(
             })
             .collect();
 
+        let voxel_sampled_view = voxel_texture.texture.create_view(&TextureViewDescriptor {
+            label: Some("voxel_textur_view"),
+            format: None,
+            dimension: Some(TextureViewDimension::D3),
+            aspect: TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: NonZeroU32::new(VOXEL_MIPMAP_LEVEL_COUNT as u32),
+            base_array_layer: 0,
+            array_layer_count: None,
+        });
+
+        let voxel_texture_sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: None,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
+
         for view in volume.views.iter().cloned() {
             commands.entity(view).insert_bundle((
                 volume_uniform_offset.clone(),
@@ -311,9 +357,12 @@ pub fn prepare_volumes(
         }
 
         commands.entity(entity).insert_bundle((
+            volume_uniform_offset.clone(),
             VolumeBindings {
                 voxel_texture: voxel_texture.texture,
-                voxel_texture_views,
+                voxel_storage_views,
+                voxel_sampled_view,
+                voxel_texture_sampler,
             },
             RenderPhase::<Tracing>::default(),
         ));

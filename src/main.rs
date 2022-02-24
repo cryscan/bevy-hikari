@@ -1,7 +1,6 @@
 use crate::voxel_cone_tracing::Volume;
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    pbr::NotShadowReceiver,
     prelude::*,
 };
 use std::f32::consts::PI;
@@ -16,12 +15,16 @@ fn main() {
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(voxel_cone_tracing::VoxelConeTracingPlugin)
-        .add_startup_system(setup);
+        .add_startup_system(setup)
+        .add_system(keyboard_input_system);
 
     // bevy_mod_debugdump::print_render_graph(&mut app);
 
     app.run();
 }
+
+#[derive(Component)]
+struct Controller;
 
 /// Set up a simple 3D scene
 fn setup(
@@ -30,14 +33,11 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Plane
-    commands
-        .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
-            material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-            ..Default::default()
-        })
-        // Since shadows will be handled by GI, disable receiver here
-        .insert(NotShadowReceiver);
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
+        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+        ..Default::default()
+    });
 
     // Cube
     commands
@@ -50,7 +50,7 @@ fn setup(
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
             ..Default::default()
         })
-        .insert(NotShadowReceiver);
+        .insert(Controller);
 
     const HALF_SIZE: f32 = 1.0;
     commands.spawn_bundle(DirectionalLightBundle {
@@ -84,4 +84,31 @@ fn setup(
             ..Default::default()
         })
         .insert(Volume::default());
+}
+
+fn keyboard_input_system(
+    keyboard_input: Res<Input<KeyCode>>,
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<Controller>>,
+) {
+    for mut transform in query.iter_mut() {
+        if keyboard_input.pressed(KeyCode::W) {
+            transform.translation += Vec3::Z * time.delta_seconds();
+        }
+        if keyboard_input.pressed(KeyCode::A) {
+            transform.translation += Vec3::X * time.delta_seconds();
+        }
+        if keyboard_input.pressed(KeyCode::S) {
+            transform.translation -= Vec3::Z * time.delta_seconds();
+        }
+        if keyboard_input.pressed(KeyCode::D) {
+            transform.translation -= Vec3::X * time.delta_seconds();
+        }
+        if keyboard_input.pressed(KeyCode::E) {
+            transform.translation += Vec3::Y * time.delta_seconds();
+        }
+        if keyboard_input.pressed(KeyCode::Q) {
+            transform.translation -= Vec3::Y * time.delta_seconds();
+        }
+    }
 }

@@ -39,6 +39,7 @@ pub struct VoxelBindGroup {
 #[derive(Component, Default, Clone)]
 pub struct MipmapBindGroup {
     pub values: Vec<(usize, BindGroup)>,
+    pub clear: Option<BindGroup>,
 }
 
 pub struct VoxelPipeline {
@@ -48,6 +49,7 @@ pub struct VoxelPipeline {
 
     mipmap_layout: BindGroupLayout,
     mipmap_pipeline: ComputePipeline,
+    clear_pipeline: ComputePipeline,
 }
 
 impl FromWorld for VoxelPipeline {
@@ -90,10 +92,10 @@ impl FromWorld for VoxelPipeline {
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
                         view_dimension: TextureViewDimension::D3,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -105,6 +107,12 @@ impl FromWorld for VoxelPipeline {
                         format: TextureFormat::Rgba8Unorm,
                         view_dimension: TextureViewDimension::D3,
                     },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -130,6 +138,12 @@ impl FromWorld for VoxelPipeline {
             module: &shader,
             entry_point: "mipmap",
         });
+        let clear_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("clear_pipeline"),
+            layout: Some(&mipmap_pipeline_layout),
+            module: &shader,
+            entry_point: "clear",
+        });
 
         Self {
             material_layout,
@@ -137,6 +151,7 @@ impl FromWorld for VoxelPipeline {
             mesh_pipeline,
             mipmap_layout,
             mipmap_pipeline,
+            clear_pipeline,
         }
     }
 }
@@ -402,7 +417,7 @@ pub fn queue_voxel_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureView(&bindings.voxel_texture_views[0]),
+                        resource: BindingResource::TextureView(&bindings.voxel_storage_views[0]),
                     },
                 ],
             });
@@ -466,8 +481,8 @@ pub fn queue_mipmap_bind_groups(
     for (entity, volume_bindings) in volumes.iter() {
         let mut mipmap_bind_group = MipmapBindGroup::default();
         for i in 0..VOXEL_MIPMAP_LEVEL_COUNT - 1 {
-            let ref texture_in = volume_bindings.voxel_texture_views[i];
-            let ref texture_out = volume_bindings.voxel_texture_views[i + 1];
+            let ref texture_in = volume_bindings.voxel_storage_views[i];
+            let ref texture_out = volume_bindings.voxel_storage_views[i + 1];
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &voxel_pipeline.mipmap_layout,
@@ -480,11 +495,34 @@ pub fn queue_mipmap_bind_groups(
                         binding: 1,
                         resource: BindingResource::TextureView(texture_out),
                     },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: BindingResource::Sampler(&volume_bindings.voxel_texture_sampler),
+                    },
                 ],
             });
             let size = (VOXEL_SIZE / 2) / (1usize << i);
             mipmap_bind_group.values.push((size, bind_group));
         }
+
+        mipmap_bind_group.clear = Some(render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &voxel_pipeline.mipmap_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&volume_bindings.voxel_storage_views[1]),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&volume_bindings.voxel_storage_views[0]),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::Sampler(&volume_bindings.voxel_texture_sampler),
+                },
+            ],
+        }));
 
         commands.entity(entity).insert(mipmap_bind_group);
     }
@@ -649,6 +687,47 @@ impl render_graph::Node for MipmapPassNode {
                 let size = (size / 4).max(1usize) as u32;
                 pass.dispatch(size, size, size);
             }
+        }
+
+        Ok(())
+    }
+}
+
+pub struct VoxelClearPassNode {
+    volume_query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+}
+
+impl VoxelClearPassNode {
+    pub fn new(world: &mut World) -> Self {
+        let volume_query = QueryState::new(world);
+        Self { volume_query }
+    }
+}
+
+impl render_graph::Node for VoxelClearPassNode {
+    fn update(&mut self, world: &mut World) {
+        self.volume_query.update_archetypes(world);
+    }
+
+    fn run(
+        &self,
+        _graph: &mut render_graph::RenderGraphContext,
+        render_context: &mut bevy::render::renderer::RenderContext,
+        world: &World,
+    ) -> Result<(), render_graph::NodeRunError> {
+        let pipeline = world.get_resource::<VoxelPipeline>().unwrap();
+        let mut pass = render_context
+            .command_encoder
+            .begin_compute_pass(&ComputePassDescriptor::default());
+
+        let size = (VOXEL_SIZE / 4) as u32;
+
+        pass.set_pipeline(&pipeline.clear_pipeline);
+
+        for mipmap_bind_group in self.volume_query.iter_manual(world) {
+            let bind_group = mipmap_bind_group.clear.as_ref().unwrap();
+            pass.set_bind_group(0, bind_group, &[]);
+            pass.dispatch(size, size, size);
         }
 
         Ok(())
