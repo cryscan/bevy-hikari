@@ -16,7 +16,8 @@ var voxel_texture: texture_3d<f32>;
 [[group(1), binding(2)]]
 var voxel_texture_sampler: sampler;
 
-let DIRECTIONAL_LIGHT_SHADOW_CONE_HALF_ANGLE: f32 = 0.01;
+let PI: f32 = 3.141592653589793;
+let SQRT2: f32 = 0.7071067812;
 
 fn out_of_volume(position: vec3<f32>) -> bool {
     return any(position < volume.min) || any(position > volume.max);
@@ -26,7 +27,21 @@ fn max_component(v: vec3<f32>) -> f32 {
     return max(max(v.x, v.y), v.z);
 }
 
-fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32, normal: vec3<f32>) -> vec4<f32> {
+fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
+    var b: vec3<f32>;
+    var t: vec3<f32>;
+    
+    if (abs(n.y) > 0.999) {
+        b = vec3<f32>(1., 0., 0.);
+        t = vec3<f32>(0., 0., 1.);
+    } else {
+    	b = normalize(cross(n, vec3<f32>(0., 1., 0.)));
+    	t = normalize(cross(b, n));
+    }
+    return mat3x3<f32>(b.x, t.x, n.x, b.y, t.y, n.y, b.z, t.z, n.z);
+}
+
+fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32, bias: vec3<f32>) -> vec4<f32> {
     var color = vec4<f32>(0.0);
 
     let dims = vec3<f32>(textureDimensions(voxel_texture));
@@ -36,12 +51,10 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32, normal: vec3<f
     let dim = max_component(dims);
     let max_level = log2(dim);
 
-    let bias = extend / dim;
-    var distance = bias / max_component(direction);
-    let normal_bias = bias * normal / max_component(normal);
+    var distance = extend / dim;
 
     loop {
-        let position = origin + normal_bias + distance * direction;
+        let position = origin + bias + distance * direction;
         if (out_of_volume(position) || color.a >= 1.0) {
             break;
         }
@@ -55,10 +68,37 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32, normal: vec3<f
         let sample = textureSampleLevel(voxel_texture, voxel_texture_sampler, coords, level);
         color = color + (1.0 - color.a) * sample;
 
-        let step_size = min(radius, bias);
+        let step_size = min(radius, extend / dim);
         distance = distance + step_size / max_component(direction);
     }
 
+    return color;
+}
+
+fn cone_90(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
+    var color = vec4<f32>(0.0);
+
+    let dims = vec3<f32>(textureDimensions(voxel_texture));
+    let extends = volume.max - volume.min;
+    let unit = max_component(extends / dims);
+    let step_factor = 1.0 / max_component(direction);
+
+    let max_level = log2(max_component(dims));
+    var distance: f32 = 0.0;
+
+    for (var level = 0u; level <= u32(max_level); level = level + 1u) {
+        distance = distance + unit * pow(2.0, f32(level)) * step_factor;
+        let position = origin + distance * direction;
+
+        if (out_of_volume(position) || color.a >= 1.0) {
+            break;
+        }
+
+        let coords = (position - volume.min) / extends;
+        let sample = textureSampleLevel(voxel_texture, voxel_texture_sampler, coords, f32(level));
+        color = color + sample * (1.0 - color.a);
+    }
+    
     return color;
 }
 
@@ -70,15 +110,21 @@ struct FragmentInput {
 
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
-    // For each directional light, shoot a shadow cone
-    var occlusion = 0.0;
-    for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
-        let light = lights.directional_lights[i];
-        let direction = normalize(light.direction_to_light);
-        let color = cone(in.world_position.xyz, direction, DIRECTIONAL_LIGHT_SHADOW_CONE_HALF_ANGLE, in.world_normal);
-        occlusion = occlusion + color.a;
-    }
-    occlusion = occlusion / f32(min(lights.n_directional_lights, 1u));
-    
-    return vec4<f32>(0.0, 0.0, 0.0, occlusion);
+    let dims = vec3<f32>(textureDimensions(voxel_texture));
+    let extends = volume.max - volume.min;
+    let unit = max_component(extends / dims);
+
+    let normal = in.world_normal;
+    let origin = in.world_position.xyz + normal * unit / max_component(normal);
+    let tbn = normal_basis(in.world_normal);
+
+    var color = vec4<f32>(0.0);
+    color = color + cone_90(origin, normal);
+    color = color + cone_90(origin, vec3<f32>(SQRT2, 0.0, SQRT2) * tbn) * SQRT2;
+    color = color + cone_90(origin, vec3<f32>(-SQRT2, 0.0, SQRT2) * tbn) * SQRT2;
+    color = color + cone_90(origin, vec3<f32>(SQRT2, 0.0, -SQRT2) * tbn) * SQRT2;
+    color = color + cone_90(origin, vec3<f32>(-SQRT2, 0.0, -SQRT2) * tbn) * SQRT2;
+    color = color / PI;
+
+    return color;
 }

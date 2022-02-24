@@ -277,7 +277,7 @@ impl render_graph::Node for TracingPassNode {
             depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                 view: &depth.view,
                 depth_ops: Some(Operations {
-                    load: LoadOp::Load,
+                    load: LoadOp::Clear(0.0),
                     store: true,
                 }),
                 stencil_ops: None,

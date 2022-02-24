@@ -42,9 +42,11 @@ fn setup(
     // Cube
     commands
         .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::UVSphere {
+            mesh: meshes.add(Mesh::from(shape::Torus {
                 radius: 0.5,
-                ..Default::default()
+                ring_radius: 0.25,
+                subdivisions_segments: 32,
+                subdivisions_sides: 24,
             })),
             material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
@@ -55,7 +57,7 @@ fn setup(
     const HALF_SIZE: f32 = 1.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 10000.0,
+            illuminance: 100000.0,
             shadow_projection: OrthographicProjection {
                 left: -HALF_SIZE,
                 right: HALF_SIZE,
@@ -110,5 +112,12 @@ fn keyboard_input_system(
         if keyboard_input.pressed(KeyCode::Q) {
             transform.translation -= Vec3::Y * time.delta_seconds();
         }
+
+        transform.rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            time.delta_seconds(),
+            time.delta_seconds(),
+            time.delta_seconds(),
+        ) * transform.rotation;
     }
 }
