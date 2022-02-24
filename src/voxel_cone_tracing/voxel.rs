@@ -1,6 +1,9 @@
+use super::{
+    GpuVolume, Volume, VolumeBindings, VolumeColorAttachment, VolumeMeta, VolumeUniformOffset,
+    VolumeView, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+};
 use bevy::{
     core::FloatOrd,
-    core_pipeline,
     ecs::system::{
         lifetimeless::{Read, SQuery},
         SystemParamItem,
@@ -11,199 +14,22 @@ use bevy::{
         SpecializedMaterial, ViewClusterBindings, ViewLightsUniformOffset, ViewShadowBindings,
     },
     prelude::*,
-    reflect::TypeUuid,
     render::{
         camera::CameraProjection,
         primitives::{Aabb, Frustum},
         render_asset::RenderAssets,
-        render_graph::{self, RenderGraph, SlotInfo, SlotType},
+        render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
-            DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
-            RenderPhase, SetItemPipeline, TrackedRenderPass,
+            CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions, EntityPhaseItem,
+            EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase, SetItemPipeline,
+            TrackedRenderPass,
         },
         render_resource::{std140::AsStd140, *},
-        renderer::{RenderDevice, RenderQueue},
-        texture::TextureCache,
+        renderer::RenderDevice,
         view::{ExtractedView, RenderLayers, ViewUniforms, VisibleEntities},
-        RenderApp, RenderStage,
     },
 };
-use std::{borrow::Cow, f32::consts::FRAC_PI_2, num::NonZeroU32};
-
-pub const VOXEL_SIZE: usize = 256;
-pub const VOXEL_MIPMAP_LEVEL_COUNT: usize = 9;
-
-pub const VOXEL_SHADER_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
-
-pub mod draw_3d_graph {
-    pub mod node {
-        pub const VOXEL_PASS: &str = "voxel_pass";
-        pub const MIPMAP_PASS: &str = "mipmap_pass";
-    }
-}
-
-#[derive(Default)]
-pub struct VoxelConeTracingPlugin;
-
-impl Plugin for VoxelConeTracingPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
-            .add_system_to_stage(CoreStage::PostUpdate, check_visibility);
-
-        let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
-        shaders.set_untracked(
-            VOXEL_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("shaders/voxel.wgsl").replace("\r\n", "\n")),
-        );
-
-        let render_app = match app.get_sub_app_mut(RenderApp) {
-            Ok(render_app) => render_app,
-            Err(_) => return,
-        };
-
-        let voxel_pass_node = VoxelPassNode::new(&mut render_app.world);
-        let mipmap_pass_node = MipmapPassNode::new(&mut render_app.world);
-
-        render_app
-            .init_resource::<VoxelPipeline>()
-            .init_resource::<SpecializedPipelines<VoxelPipeline>>()
-            .init_resource::<VoxelMeta>()
-            .init_resource::<DrawFunctions<Voxel>>()
-            .add_render_command::<Voxel, DrawVoxelMesh>()
-            .add_system_to_stage(
-                RenderStage::Extract,
-                extract_volumes.label(VoxelConeTracingSystems::ExtractVolumes),
-            )
-            .add_system_to_stage(
-                RenderStage::Extract,
-                extract_views.label(VoxelConeTracingSystems::ExtractViews),
-            )
-            .add_system_to_stage(
-                RenderStage::Prepare,
-                prepare_volumes.label(VoxelConeTracingSystems::PrepareVolumes),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_volume_view_bind_groups
-                    .label(VoxelConeTracingSystems::QueueVolumeViewBindGroups),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_voxel_bind_groups.label(VoxelConeTracingSystems::QueueVoxelBindGroups),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_voxel.label(VoxelConeTracingSystems::QueueVoxel),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_mipmap_bind_groups.label(VoxelConeTracingSystems::QueueMipmapBindGroups),
-            )
-            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>);
-
-        let mut render_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
-
-        let draw_3d_graph = render_graph
-            .get_sub_graph_mut(core_pipeline::draw_3d_graph::NAME)
-            .unwrap();
-
-        draw_3d_graph.add_node(draw_3d_graph::node::VOXEL_PASS, voxel_pass_node);
-        draw_3d_graph.add_node(draw_3d_graph::node::MIPMAP_PASS, mipmap_pass_node);
-
-        draw_3d_graph
-            .add_slot_edge(
-                draw_3d_graph.input_node().unwrap().id,
-                core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
-                draw_3d_graph::node::VOXEL_PASS,
-                VoxelPassNode::IN_VIEW,
-            )
-            .unwrap();
-        draw_3d_graph
-            .add_node_edge(
-                bevy::pbr::draw_3d_graph::node::SHADOW_PASS,
-                draw_3d_graph::node::VOXEL_PASS,
-            )
-            .unwrap();
-        draw_3d_graph
-            .add_node_edge(
-                draw_3d_graph::node::VOXEL_PASS,
-                draw_3d_graph::node::MIPMAP_PASS,
-            )
-            .unwrap();
-        draw_3d_graph
-            .add_node_edge(
-                draw_3d_graph::node::MIPMAP_PASS,
-                core_pipeline::draw_3d_graph::node::MAIN_PASS,
-            )
-            .unwrap();
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
-pub enum VoxelConeTracingSystems {
-    ExtractVolumes,
-    ExtractViews,
-    PrepareVolumes,
-    QueueVolumeViewBindGroups,
-    QueueVoxelBindGroups,
-    QueueVoxel,
-    QueueMipmapBindGroups,
-}
-
-#[derive(Component, Clone)]
-pub struct Volume {
-    pub min: Vec3,
-    pub max: Vec3,
-    views: Vec<Entity>,
-}
-
-impl Volume {
-    pub fn new(min: Vec3, max: Vec3) -> Self {
-        Self {
-            min,
-            max,
-            views: vec![],
-        }
-    }
-}
-
-impl Default for Volume {
-    fn default() -> Self {
-        Self::new(Vec3::new(-5.0, -5.0, -5.0), Vec3::new(5.0, 5.0, 5.0))
-    }
-}
-
-#[derive(Component)]
-pub struct VolumeView;
-
-#[derive(Component, Clone)]
-pub struct VolumeUniformOffset {
-    pub offset: u32,
-}
-
-#[derive(Component)]
-pub struct VolumeColorAttachment {
-    pub texture_view: TextureView,
-}
-
-#[derive(Component, Clone)]
-pub struct VolumeBindings {
-    pub voxel_texture: Texture,
-    pub voxel_texture_views: Vec<TextureView>,
-}
-
-#[derive(Clone, AsStd140)]
-struct GpuVolume {
-    min: Vec3,
-    max: Vec3,
-}
-
-#[derive(Default)]
-struct VoxelMeta {
-    volume_uniforms: DynamicUniformVec<GpuVolume>,
-}
+use std::{borrow::Cow, f32::consts::FRAC_PI_2};
 
 #[derive(Component)]
 pub struct VoxelBindGroup {
@@ -294,7 +120,7 @@ impl FromWorld for VoxelPipeline {
         let shader = render_device.create_shader_module(&ShaderModuleDescriptor {
             label: None,
             source: ShaderSource::Wgsl(Cow::Borrowed(
-                &include_str!("shaders/mipmap.wgsl").replace("\r\n", "\n"),
+                &include_str!("../shaders/mipmap.wgsl").replace("\r\n", "\n"),
             )),
         });
 
@@ -336,7 +162,7 @@ impl SpecializedPipeline for VoxelPipeline {
     }
 }
 
-fn add_volume_views(mut commands: Commands, mut volumes: Query<&mut Volume>) {
+pub fn add_volume_views(mut commands: Commands, mut volumes: Query<&mut Volume>) {
     for mut volume in volumes.iter_mut() {
         if !volume.views.is_empty() {
             continue;
@@ -437,7 +263,7 @@ pub fn check_visibility(
     }
 }
 
-fn extract_views(
+pub fn extract_views(
     mut commands: Commands,
     query: Query<
         (
@@ -465,117 +291,7 @@ fn extract_views(
     }
 }
 
-fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
-    for (entity, volume) in volumes.iter() {
-        commands.get_or_spawn(entity).insert(volume.clone());
-    }
-}
-
-fn prepare_volumes(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    mut texture_cache: ResMut<TextureCache>,
-    mut volumes: Query<(Entity, &Volume)>,
-    mut voxel_meta: ResMut<VoxelMeta>,
-) {
-    voxel_meta.volume_uniforms.clear();
-
-    for (entity, volume) in volumes.iter_mut() {
-        let texture_view = texture_cache
-            .get(
-                &render_device,
-                TextureDescriptor {
-                    label: Some("voxel_volume_texture"),
-                    size: Extent3d {
-                        width: VOXEL_SIZE as u32,
-                        height: VOXEL_SIZE as u32,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format: TextureFormat::Bgra8UnormSrgb,
-                    usage: TextureUsages::RENDER_ATTACHMENT,
-                },
-            )
-            .texture
-            .create_view(&TextureViewDescriptor {
-                label: Some("voxel_volume_texture_view"),
-                format: None,
-                dimension: Some(TextureViewDimension::D2),
-                aspect: TextureAspect::All,
-                base_mip_level: 0,
-                mip_level_count: None,
-                base_array_layer: 0,
-                array_layer_count: None,
-            });
-
-        for view in &volume.views {
-            let texture_view = texture_view.clone();
-            commands.entity(*view).insert_bundle((
-                VolumeColorAttachment { texture_view },
-                RenderPhase::<Voxel>::default(),
-            ));
-        }
-
-        let volume_uniform_offset = VolumeUniformOffset {
-            offset: voxel_meta.volume_uniforms.push(GpuVolume {
-                min: volume.min,
-                max: volume.max,
-            }),
-        };
-
-        let voxel_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: None,
-                size: Extent3d {
-                    width: VOXEL_SIZE as u32,
-                    height: VOXEL_SIZE as u32,
-                    depth_or_array_layers: VOXEL_SIZE as u32,
-                },
-                mip_level_count: VOXEL_MIPMAP_LEVEL_COUNT as u32,
-                sample_count: 1,
-                dimension: TextureDimension::D3,
-                format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            },
-        );
-
-        let voxel_texture_views = (0..VOXEL_MIPMAP_LEVEL_COUNT)
-            .map(|i| {
-                voxel_texture.texture.create_view(&TextureViewDescriptor {
-                    label: Some(&format!("voxel_texture_view_{}_{}", entity.id(), i)),
-                    format: None,
-                    dimension: Some(TextureViewDimension::D3),
-                    aspect: TextureAspect::All,
-                    base_mip_level: i as u32,
-                    mip_level_count: NonZeroU32::new(1),
-                    base_array_layer: 0,
-                    array_layer_count: None,
-                })
-            })
-            .collect();
-
-        let volume_bindings = VolumeBindings {
-            voxel_texture: voxel_texture.texture,
-            voxel_texture_views,
-        };
-
-        for view in volume.views.iter().cloned() {
-            commands.entity(view).insert(volume_uniform_offset.clone());
-        }
-
-        commands.entity(entity).insert(volume_bindings);
-    }
-
-    voxel_meta
-        .volume_uniforms
-        .write_buffer(&render_device, &render_queue);
-}
-
-fn queue_volume_view_bind_groups(
+pub fn queue_volume_view_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     mesh_pipeline: Res<MeshPipeline>,
@@ -667,11 +383,11 @@ fn queue_volume_view_bind_groups(
     }
 }
 
-fn queue_voxel_bind_groups(
+pub fn queue_voxel_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     voxel_pipeline: Res<VoxelPipeline>,
-    voxel_meta: Res<VoxelMeta>,
+    volume_meta: Res<VolumeMeta>,
     volumes: Query<(&Volume, &VolumeBindings)>,
 ) {
     for (volume, bindings) in volumes.iter() {
@@ -682,7 +398,7 @@ fn queue_voxel_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: voxel_meta.volume_uniforms.binding().unwrap(),
+                        resource: volume_meta.volume_uniforms.binding().unwrap(),
                     },
                     BindGroupEntry {
                         binding: 1,
@@ -698,7 +414,7 @@ fn queue_voxel_bind_groups(
     }
 }
 
-fn queue_voxel(
+pub fn queue_voxel(
     voxel_draw_functions: Res<DrawFunctions<Voxel>>,
     voxel_pipeline: Res<VoxelPipeline>,
     meshes: Query<&Handle<Mesh>>,
@@ -741,7 +457,7 @@ fn queue_voxel(
     }
 }
 
-fn queue_mipmap_bind_groups(
+pub fn queue_mipmap_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     voxel_pipeline: Res<VoxelPipeline>,
@@ -774,7 +490,7 @@ fn queue_mipmap_bind_groups(
     }
 }
 
-struct Voxel {
+pub struct Voxel {
     distance: f32,
     entity: Entity,
     pipeline: CachedPipelineId,

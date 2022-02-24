@@ -196,7 +196,8 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         for (var i: u32 = 0u; i < lights.n_directional_lights; i = i + 1u) {
             let light = lights.directional_lights[i];
             var shadow: f32 = 1.0;
-            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+            // if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+            if ((light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
                 shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
             }
             let light_contrib = directional_light(light, roughness, NdotV, N, V, diffuse_color);
