@@ -17,7 +17,6 @@ var voxel_texture: texture_3d<f32>;
 var voxel_texture_sampler: sampler;
 
 let PI: f32 = 3.141592653589793;
-let SQRT2: f32 = 0.7071067812;
 
 fn out_of_volume(position: vec3<f32>) -> bool {
     return any(position < volume.min) || any(position > volume.max);
@@ -38,10 +37,10 @@ fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
     	b = normalize(cross(n, vec3<f32>(0., 1., 0.)));
     	t = normalize(cross(b, n));
     }
-    return mat3x3<f32>(b.x, t.x, n.x, b.y, t.y, n.y, b.z, t.z, n.z);
+    return mat3x3<f32>(t, b, n);
 }
 
-fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32, bias: vec3<f32>) -> vec4<f32> {
+fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32) -> vec4<f32> {
     var color = vec4<f32>(0.0);
 
     let dims = vec3<f32>(textureDimensions(voxel_texture));
@@ -51,25 +50,28 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, half_angle: f32, bias: vec3<f32
     let dim = max_component(dims);
     let max_level = log2(dim);
 
-    var distance = extend / dim;
+    let unit = extend / dim;
+    let step_factor = 1.0 / max_component(direction);
+
+    var distance = unit * step_factor;
 
     loop {
-        let position = origin + bias + distance * direction;
+        let position = origin + distance * direction;
         if (out_of_volume(position) || color.a >= 1.0) {
             break;
         }
 
+        let radius = distance * sin(half_angle);
         let coords = (position - volume.min) / extends;
 
-        let radius = distance * sin(half_angle);
-        let unit_radius = radius / extend;
-        let level = clamp(max_level + log2(unit_radius * 2.0), 0.0, max_level);
+        let diameter = 2.0 * radius / extend;
+        let level = clamp(max_level + log2(diameter), 0.0, max_level);
 
         let sample = textureSampleLevel(voxel_texture, voxel_texture_sampler, coords, level);
         color = color + (1.0 - color.a) * sample;
 
-        let step_size = min(radius, extend / dim);
-        distance = distance + step_size / max_component(direction);
+        let step_size = max(radius, unit);
+        distance = distance + step_size * step_factor;
     }
 
     return color;
@@ -112,19 +114,22 @@ struct FragmentInput {
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let dims = vec3<f32>(textureDimensions(voxel_texture));
     let extends = volume.max - volume.min;
-    let unit = max_component(extends / dims);
+    let unit = extends / dims;
 
-    let normal = in.world_normal;
-    let origin = in.world_position.xyz + normal * unit / max_component(normal);
-    let tbn = normal_basis(in.world_normal);
+    let position = in.world_position.xyz;
+    let normal = normalize(in.world_normal);
+    let origin = position + 2.0 * normal * unit / max_component(normal);
+    let tbn = normal_basis(normal);
 
-    var color = vec4<f32>(0.0);
-    color = color + cone_90(origin, normal);
-    color = color + cone_90(origin, vec3<f32>(SQRT2, 0.0, SQRT2) * tbn) * SQRT2;
-    color = color + cone_90(origin, vec3<f32>(-SQRT2, 0.0, SQRT2) * tbn) * SQRT2;
-    color = color + cone_90(origin, vec3<f32>(SQRT2, 0.0, -SQRT2) * tbn) * SQRT2;
-    color = color + cone_90(origin, vec3<f32>(-SQRT2, 0.0, -SQRT2) * tbn) * SQRT2;
-    color = color / PI;
+    let coords = (position - volume.min) / extends;
+
+    var color = vec4<f32>(0.);
+    color = color + cone(origin, normal, PI / 6.0) * 0.25;
+    color = color + cone(origin, tbn * vec3<f32>(0.0, 0.866025, 0.5), PI / 6.0) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(0.823639, 0.267617, 0.5), PI / 6.0) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(0.509037, -0.700629, 0.5), PI / 6.0) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), PI / 6.0) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(-0.823638, 0.267617, 0.5), PI / 6.0) * 0.15;
 
     return color;
 }

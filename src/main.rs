@@ -16,7 +16,8 @@ fn main() {
         .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(voxel_cone_tracing::VoxelConeTracingPlugin)
         .add_startup_system(setup)
-        .add_system(keyboard_input_system);
+        .add_system(keyboard_input_system)
+        .add_system(light_rotate_system);
 
     // bevy_mod_debugdump::print_render_graph(&mut app);
 
@@ -42,19 +43,14 @@ fn setup(
     // Cube
     commands
         .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Torus {
-                radius: 0.5,
-                ring_radius: 0.25,
-                subdivisions_segments: 32,
-                subdivisions_sides: 24,
-            })),
+            mesh: meshes.add(Mesh::from(shape::Cube::default())),
             material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
             ..Default::default()
         })
         .insert(Controller);
 
-    const HALF_SIZE: f32 = 1.0;
+    const HALF_SIZE: f32 = 5.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 100000.0,
@@ -85,7 +81,10 @@ fn setup(
             transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         })
-        .insert(Volume::default());
+        .insert(Volume::new(
+            Vec3::new(-2.5, -2.5, -2.5),
+            Vec3::new(2.5, 2.5, 2.5),
+        ));
 }
 
 fn keyboard_input_system(
@@ -113,11 +112,21 @@ fn keyboard_input_system(
             transform.translation -= Vec3::Y * time.delta_seconds();
         }
 
+        let speed = 0.2;
         transform.rotation = Quat::from_euler(
             EulerRot::XYZ,
-            time.delta_seconds(),
-            time.delta_seconds(),
-            time.delta_seconds(),
+            speed * time.delta_seconds(),
+            speed * time.delta_seconds(),
+            speed * time.delta_seconds(),
         ) * transform.rotation;
+    }
+}
+
+fn light_rotate_system(time: Res<Time>, mut query: Query<&mut Transform, With<DirectionalLight>>) {
+    for mut transform in query.iter_mut() {
+        let speed = 0.25;
+        transform.rotation =
+            Quat::from_euler(EulerRot::XYZ, 0.0, speed * time.delta_seconds(), 0.0)
+                * transform.rotation;
     }
 }

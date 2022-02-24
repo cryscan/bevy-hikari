@@ -80,7 +80,18 @@ impl SpecializedPipeline for TracingPipeline {
 
         let mut descriptor = self.mesh_pipeline.specialize(key);
         descriptor.fragment.as_mut().unwrap().shader = shader.clone();
-        descriptor.fragment.as_mut().unwrap().targets[0].blend = Some(BlendState::ALPHA_BLENDING);
+        // descriptor.fragment.as_mut().unwrap().targets[0].blend = Some(BlendState::ALPHA_BLENDING);
+        descriptor.depth_stencil = Some(DepthStencilState {
+            format: TextureFormat::Depth32Float,
+            depth_write_enabled: true,
+            depth_compare: CompareFunction::Greater,
+            stencil: StencilState::default(),
+            bias: DepthBiasState {
+                constant: 0,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+        });
         descriptor.layout = Some(vec![
             self.mesh_pipeline.view_layout.clone(),
             self.tracing_layout.clone(),
@@ -278,7 +289,7 @@ impl render_graph::Node for TracingPassNode {
                 view: &depth.view,
                 depth_ops: Some(Operations {
                     load: LoadOp::Clear(0.0),
-                    store: true,
+                    store: false,
                 }),
                 stencil_ops: None,
             }),

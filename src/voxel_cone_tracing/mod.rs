@@ -330,7 +330,7 @@ pub fn prepare_volumes(
             dimension: Some(TextureViewDimension::D3),
             aspect: TextureAspect::All,
             base_mip_level: 0,
-            mip_level_count: NonZeroU32::new(VOXEL_MIPMAP_LEVEL_COUNT as u32),
+            mip_level_count: None,
             base_array_layer: 0,
             array_layer_count: None,
         });
