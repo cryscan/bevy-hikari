@@ -1,5 +1,6 @@
 use super::{
-    GpuVolume, Volume, VolumeBindings, VolumeMeta, VolumeUniformOffset, TRACING_SHADER_HANDLE,
+    GpuVolume, Volume, VolumeBindings, VolumeMeta, VolumeOverlay, VolumeUniformOffset,
+    VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
 };
 use bevy::{
     core::FloatOrd,
@@ -13,15 +14,39 @@ use bevy::{
         render_asset::RenderAssets,
         render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions, EntityPhaseItem,
-            EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase, SetItemPipeline,
-            TrackedRenderPass,
+            sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
+            DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
+            RenderPhase, SetItemPipeline, TrackedRenderPass,
         },
         render_resource::{std140::AsStd140, *},
         renderer::RenderDevice,
-        view::{ExtractedView, ViewDepthTexture, ViewTarget, VisibleEntities},
+        view::{ExtractedView, ViewDepthTexture, VisibleEntities},
+        RenderApp, RenderStage,
     },
 };
+
+pub struct TracingPlugin;
+impl Plugin for TracingPlugin {
+    fn build(&self, app: &mut App) {
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app
+                .init_resource::<TracingPipeline>()
+                .init_resource::<SpecializedPipelines<TracingPipeline>>()
+                .init_resource::<DrawFunctions<Tracing>>()
+                .add_render_command::<Tracing, DrawTracingMesh>()
+                .add_system_to_stage(
+                    RenderStage::Queue,
+                    queue_tracing.label(VoxelConeTracingSystems::QueueTracing),
+                )
+                .add_system_to_stage(
+                    RenderStage::Queue,
+                    queue_tracing_bind_groups
+                        .label(VoxelConeTracingSystems::QueueTracingBindGroups),
+                )
+                .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Tracing>);
+        }
+    }
+}
 
 pub struct TracingPipeline {
     tracing_layout: BindGroupLayout,
@@ -241,7 +266,7 @@ pub struct TracingPassNode {
     query: QueryState<
         (
             &'static RenderPhase<Tracing>,
-            &'static ViewTarget,
+            &'static VolumeOverlay,
             &'static ViewDepthTexture,
         ),
         With<ExtractedView>,
@@ -274,17 +299,23 @@ impl render_graph::Node for TracingPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (phase, target, depth) = match self.query.get_manual(world, view_entity) {
+        let (phase, overlay, depth) = match self.query.get_manual(world, view_entity) {
             Ok(query) => query,
             Err(_) => return Ok(()),
         };
 
+        let images = world.get_resource::<RenderAssets<Image>>().unwrap();
+
         let pass_descriptor = RenderPassDescriptor {
             label: Some("tracing_pass"),
-            color_attachments: &[target.get_color_attachment(Operations {
-                load: LoadOp::Load,
-                store: true,
-            })],
+            color_attachments: &[RenderPassColorAttachment {
+                view: &images[&overlay.view].texture_view,
+                resolve_target: Some(&images[&overlay.resolve_target].texture_view),
+                ops: Operations {
+                    load: LoadOp::Clear(Color::NONE.into()),
+                    store: true,
+                },
+            }],
             depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                 view: &depth.view,
                 depth_ops: Some(Operations {

@@ -1,11 +1,11 @@
 use self::{tracing::*, voxel::*};
 use bevy::{
-    core_pipeline::{self},
+    core_pipeline,
     prelude::*,
     reflect::TypeUuid,
     render::{
         render_graph::RenderGraph,
-        render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions, RenderPhase},
+        render_phase::RenderPhase,
         render_resource::{std140::AsStd140, *},
         renderer::{RenderDevice, RenderQueue},
         texture::TextureCache,
@@ -14,6 +14,7 @@ use bevy::{
 };
 use std::num::NonZeroU32;
 
+mod overlay;
 mod tracing;
 mod voxel;
 
@@ -24,6 +25,8 @@ pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
 pub const TRACING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984840);
+pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984630);
 
 pub mod draw_3d_graph {
     pub mod node {
@@ -39,7 +42,13 @@ pub struct VoxelConeTracingPlugin;
 
 impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
+        app
+            //.add_plugin(MaterialPlugin::<OverlayMaterial>::default())
+            .add_plugin(VoxelPlugin)
+            .add_plugin(TracingPlugin)
+            .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
+            .add_system_to_stage(CoreStage::PostUpdate, add_volume_overlay.exclusive_system())
+            .add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
             .add_system_to_stage(CoreStage::PostUpdate, check_visibility);
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
@@ -50,6 +59,10 @@ impl Plugin for VoxelConeTracingPlugin {
         shaders.set_untracked(
             TRACING_SHADER_HANDLE,
             Shader::from_wgsl(include_str!("../shaders/tracing.wgsl").replace("\r\n", "\n")),
+        );
+        shaders.set_untracked(
+            OVERLAY_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("../shaders/overlay.wgsl").replace("\r\n", "\n")),
         );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
@@ -64,14 +77,6 @@ impl Plugin for VoxelConeTracingPlugin {
 
         render_app
             .init_resource::<VolumeMeta>()
-            .init_resource::<VoxelPipeline>()
-            .init_resource::<SpecializedPipelines<VoxelPipeline>>()
-            .init_resource::<DrawFunctions<Voxel>>()
-            .init_resource::<TracingPipeline>()
-            .init_resource::<SpecializedPipelines<TracingPipeline>>()
-            .init_resource::<DrawFunctions<Tracing>>()
-            .add_render_command::<Voxel, DrawVoxelMesh>()
-            .add_render_command::<Tracing, DrawTracingMesh>()
             .add_system_to_stage(
                 RenderStage::Extract,
                 extract_volumes.label(VoxelConeTracingSystems::ExtractVolumes),
@@ -88,29 +93,7 @@ impl Plugin for VoxelConeTracingPlugin {
                 RenderStage::Queue,
                 queue_volume_view_bind_groups
                     .label(VoxelConeTracingSystems::QueueVolumeViewBindGroups),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_voxel_bind_groups.label(VoxelConeTracingSystems::QueueVoxelBindGroups),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_voxel.label(VoxelConeTracingSystems::QueueVoxel),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_mipmap_bind_groups.label(VoxelConeTracingSystems::QueueMipmapBindGroups),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_tracing.label(VoxelConeTracingSystems::QueueTracing),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_tracing_bind_groups.label(VoxelConeTracingSystems::QueueTracingBindGroups),
-            )
-            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>)
-            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Tracing>);
+            );
 
         let mut render_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
 
@@ -206,6 +189,12 @@ impl Default for Volume {
     }
 }
 
+#[derive(Component, Clone)]
+pub struct VolumeOverlay {
+    view: Handle<Image>,
+    resolve_target: Handle<Image>,
+}
+
 #[derive(Component)]
 pub struct VolumeView;
 
@@ -239,9 +228,59 @@ pub struct VolumeMeta {
     volume_uniforms: DynamicUniformVec<GpuVolume>,
 }
 
-pub fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
-    for (entity, volume) in volumes.iter() {
-        commands.get_or_spawn(entity).insert(volume.clone());
+pub fn add_volume_overlay(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    msaa: Res<Msaa>,
+    windows: Res<Windows>,
+    volumes: Query<(Entity, &Volume), Without<VolumeOverlay>>,
+) {
+    if let Some(window) = windows.get_primary() {
+        let width = window.width() as u32;
+        let height = window.height() as u32;
+
+        for (entity, _) in volumes.iter() {
+            let mut image = Image::new_fill(
+                Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &[0, 0, 0, 255],
+                TextureFormat::Bgra8UnormSrgb,
+            );
+            image.texture_descriptor.sample_count = msaa.samples;
+            image.texture_descriptor.usage = TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING;
+            let view = images.add(image.clone());
+
+            image.texture_descriptor.sample_count = 1;
+            let image = images.add(image);
+
+            commands.entity(entity).insert(VolumeOverlay {
+                view,
+                resolve_target: image.clone(),
+            });
+
+            commands.spawn_bundle(NodeBundle {
+                style: Style {
+                    size: Size::new(Val::Percent(100.0), Val::Percent(100.0)),
+                    ..Default::default()
+                },
+                image: UiImage(image),
+                ..Default::default()
+            });
+        }
+    }
+}
+
+pub fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume, &VolumeOverlay)>) {
+    for (entity, volume, overlay) in volumes.iter() {
+        commands
+            .get_or_spawn(entity)
+            .insert_bundle((volume.clone(), overlay.clone()));
     }
 }
 

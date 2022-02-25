@@ -30,13 +30,18 @@ struct Controller;
 /// Set up a simple 3D scene
 fn setup(
     mut commands: Commands,
+    _asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Plane
     commands.spawn_bundle(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgb(0.3, 0.5, 0.3),
+            perceptual_roughness: 0.9,
+            ..Default::default()
+        }),
         ..Default::default()
     });
 
@@ -44,7 +49,11 @@ fn setup(
     commands
         .spawn_bundle(PbrBundle {
             mesh: meshes.add(Mesh::from(shape::Cube::default())),
-            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(0.8, 0.7, 0.6),
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            }),
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
             ..Default::default()
         })
@@ -53,7 +62,7 @@ fn setup(
     const HALF_SIZE: f32 = 5.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 100000.0,
+            illuminance: 10000.0,
             shadow_projection: OrthographicProjection {
                 left: -HALF_SIZE,
                 right: HALF_SIZE,
@@ -75,6 +84,8 @@ fn setup(
         ..Default::default()
     });
 
+    // commands.spawn_scene(asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0"));
+
     // Camera
     commands
         .spawn_bundle(PerspectiveCameraBundle {
@@ -85,6 +96,8 @@ fn setup(
             Vec3::new(-2.5, -2.5, -2.5),
             Vec3::new(2.5, 2.5, 2.5),
         ));
+
+    commands.spawn_bundle(UiCameraBundle::default());
 }
 
 fn keyboard_input_system(

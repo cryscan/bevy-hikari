@@ -1,6 +1,6 @@
 use super::{
     GpuVolume, Volume, VolumeBindings, VolumeColorAttachment, VolumeMeta, VolumeUniformOffset,
-    VolumeView, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+    VolumeView, VoxelConeTracingSystems, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
 };
 use bevy::{
     core::FloatOrd,
@@ -20,16 +20,53 @@ use bevy::{
         render_asset::RenderAssets,
         render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions, EntityPhaseItem,
-            EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase, SetItemPipeline,
-            TrackedRenderPass,
+            sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
+            DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
+            RenderPhase, SetItemPipeline, TrackedRenderPass,
         },
         render_resource::{std140::AsStd140, *},
         renderer::RenderDevice,
         view::{ExtractedView, RenderLayers, ViewUniforms, VisibleEntities},
+        RenderApp, RenderStage,
     },
 };
-use std::{borrow::Cow, f32::consts::FRAC_PI_2};
+use std::{borrow::Cow, f32::consts::FRAC_PI_2, marker::PhantomData};
+
+pub struct VoxelPlugin;
+impl Plugin for VoxelPlugin {
+    fn build(&self, app: &mut App) {
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app
+                .init_resource::<VoxelPipeline>()
+                .init_resource::<SpecializedPipelines<VoxelPipeline>>()
+                .init_resource::<DrawFunctions<Voxel>>()
+                .add_system_to_stage(
+                    RenderStage::Queue,
+                    queue_voxel_bind_groups.label(VoxelConeTracingSystems::QueueVoxelBindGroups),
+                )
+                .add_system_to_stage(
+                    RenderStage::Queue,
+                    queue_mipmap_bind_groups.label(VoxelConeTracingSystems::QueueMipmapBindGroups),
+                )
+                .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>);
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct VoxelMaterialPlugin<M: SpecializedMaterial>(PhantomData<M>);
+impl<M: SpecializedMaterial> Plugin for VoxelMaterialPlugin<M> {
+    fn build(&self, app: &mut App) {
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app
+                .add_render_command::<Voxel, DrawVoxelMesh<M>>()
+                .add_system_to_stage(
+                    RenderStage::Queue,
+                    queue_voxel_meshes::<M>.label(VoxelConeTracingSystems::QueueVoxel),
+                );
+        }
+    }
+}
 
 #[derive(Component)]
 pub struct VoxelBindGroup {
@@ -429,7 +466,7 @@ pub fn queue_voxel_bind_groups(
     }
 }
 
-pub fn queue_voxel(
+pub fn queue_voxel_meshes<M: SpecializedMaterial>(
     voxel_draw_functions: Res<DrawFunctions<Voxel>>,
     voxel_pipeline: Res<VoxelPipeline>,
     meshes: Query<&Handle<Mesh>>,
@@ -441,7 +478,7 @@ pub fn queue_voxel(
 ) {
     let draw_mesh = voxel_draw_functions
         .read()
-        .get_id::<DrawVoxelMesh>()
+        .get_id::<DrawVoxelMesh<M>>()
         .unwrap();
 
     for volume in volumes.iter() {
@@ -559,10 +596,10 @@ impl CachedPipelinePhaseItem for Voxel {
     }
 }
 
-pub type DrawVoxelMesh = (
+pub type DrawVoxelMesh<M> = (
     SetItemPipeline,
     SetMeshViewBindGroup<0>,
-    SetMaterialBindGroup<StandardMaterial, 1>,
+    SetMaterialBindGroup<M, 1>,
     SetMeshBindGroup<2>,
     SetVoxelBindGroup<3>,
     DrawMesh,
