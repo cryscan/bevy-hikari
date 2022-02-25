@@ -20,6 +20,7 @@ var<private> voxel_size: f32;
 var<private> max_level: f32;
 
 let PI: f32 = 3.141592653589793;
+let SQRT3: f32 = 1.732050808;
 
 fn max_component(v: vec3<f32>) -> f32 {
     return max(max(v.x, v.y), v.z);
@@ -45,7 +46,7 @@ fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
 
 fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
     var color = vec4<f32>(0.0);
-    var distance = voxel_size;
+    var distance = voxel_size * SQRT3;
 
     loop {
         let position = origin + distance * direction;
@@ -79,7 +80,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     
     let position = normalize_position(in.world_position.xyz / in.world_position.w);
     let normal = normalize(in.world_normal);
-    let origin = position + normal * voxel_size * 2.0;
+    let origin = position + normal * voxel_size * SQRT3;
 
     let tbn = normal_basis(normal);
 

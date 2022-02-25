@@ -36,19 +36,42 @@ fn setup(
 ) {
     // Plane
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
+        mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(0.3, 0.5, 0.3),
             perceptual_roughness: 0.9,
             ..Default::default()
         }),
+        transform: Transform {
+            translation: Vec3::new(0.0, -0.5, 0.0),
+            rotation: Quat::IDENTITY,
+            scale: Vec3::new(5.0, 1.0, 5.0),
+        },
+        ..Default::default()
+    });
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Cube::default())),
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgb(1.0, 1.0, 1.0),
+            perceptual_roughness: 0.9,
+            ..Default::default()
+        }),
+        transform: Transform {
+            translation: Vec3::new(1.5, 0.0, 0.0),
+            rotation: Quat::from_rotation_z(PI / 2.0),
+            scale: Vec3::new(5.0, 1.0, 5.0),
+        },
         ..Default::default()
     });
 
     // Cube
     commands
         .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Cube::default())),
+            mesh: meshes.add(Mesh::from(shape::Torus {
+                radius: 0.5,
+                ring_radius: 0.25,
+                ..Default::default()
+            })),
             material: materials.add(StandardMaterial {
                 base_color: Color::rgb(0.8, 0.7, 0.6),
                 perceptual_roughness: 0.9,
@@ -58,6 +81,22 @@ fn setup(
             ..Default::default()
         })
         .insert(Controller);
+
+    // Emissive
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Icosphere {
+            radius: 0.4,
+            subdivisions: 2,
+        })),
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgb(0.8, 0.7, 0.6),
+            perceptual_roughness: 0.9,
+            emissive: Color::rgb(0.8, 0.7, 0.6),
+            ..Default::default()
+        }),
+        transform: Transform::from_xyz(0.3, 0.6, 1.0),
+        ..Default::default()
+    });
 
     const HALF_SIZE: f32 = 5.0;
     commands.spawn_bundle(DirectionalLightBundle {
@@ -125,7 +164,7 @@ fn keyboard_input_system(
             transform.translation -= Vec3::Y * time.delta_seconds();
         }
 
-        let speed = 0.2;
+        let speed = 0.7;
         transform.rotation = Quat::from_euler(
             EulerRot::XYZ,
             speed * time.delta_seconds(),
@@ -137,7 +176,7 @@ fn keyboard_input_system(
 
 fn light_rotate_system(time: Res<Time>, mut query: Query<&mut Transform, With<DirectionalLight>>) {
     for mut transform in query.iter_mut() {
-        let speed = 0.25;
+        let speed = 1.0;
         transform.rotation =
             Quat::from_euler(EulerRot::XYZ, 0.0, speed * time.delta_seconds(), 0.0)
                 * transform.rotation;
