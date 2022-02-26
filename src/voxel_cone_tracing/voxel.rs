@@ -75,7 +75,7 @@ pub struct VoxelBindGroup {
 
 #[derive(Component, Default, Clone)]
 pub struct MipmapBindGroup {
-    pub values: Vec<(usize, BindGroup)>,
+    pub values: Vec<BindGroup>,
     pub clear: Option<BindGroup>,
 }
 
@@ -517,9 +517,9 @@ pub fn queue_mipmap_bind_groups(
 ) {
     for (entity, volume_bindings) in volumes.iter() {
         let mut mipmap_bind_group = MipmapBindGroup::default();
-        for i in 0..VOXEL_MIPMAP_LEVEL_COUNT - 1 {
-            let ref texture_in = volume_bindings.voxel_storage_views[i];
-            let ref texture_out = volume_bindings.voxel_storage_views[i + 1];
+        for level in 0..VOXEL_MIPMAP_LEVEL_COUNT - 1 {
+            let ref texture_in = volume_bindings.voxel_storage_views[level];
+            let ref texture_out = volume_bindings.voxel_storage_views[level + 1];
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &voxel_pipeline.mipmap_layout,
@@ -538,8 +538,7 @@ pub fn queue_mipmap_bind_groups(
                     },
                 ],
             });
-            let size = (VOXEL_SIZE / 2) / (1usize << i);
-            mipmap_bind_group.values.push((size, bind_group));
+            mipmap_bind_group.values.push(bind_group);
         }
 
         mipmap_bind_group.clear = Some(render_device.create_bind_group(&BindGroupDescriptor {
@@ -719,10 +718,11 @@ impl render_graph::Node for MipmapPassNode {
         pass.set_pipeline(&pipeline.mipmap_pipeline);
 
         for mipmap_bind_group in self.volume_query.iter_manual(world) {
-            for (size, bind_group) in &mipmap_bind_group.values {
+            for (level, bind_group) in mipmap_bind_group.values.iter().enumerate() {
+                let size = (VOXEL_SIZE / (2 << level)) as u32;
+                let count = (size / 4).max(1);
                 pass.set_bind_group(0, bind_group, &[]);
-                let size = (size / 4).max(1usize) as u32;
-                pass.dispatch(size, size, size);
+                pass.dispatch(count, count, count);
             }
         }
 
@@ -757,14 +757,13 @@ impl render_graph::Node for VoxelClearPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        let size = (VOXEL_SIZE / 4) as u32;
-
         pass.set_pipeline(&pipeline.clear_pipeline);
 
         for mipmap_bind_group in self.volume_query.iter_manual(world) {
+            let count = (VOXEL_SIZE / 4) as u32;
             let bind_group = mipmap_bind_group.clear.as_ref().unwrap();
             pass.set_bind_group(0, bind_group, &[]);
-            pass.dispatch(size, size, size);
+            pass.dispatch(count, count, count);
         }
 
         Ok(())

@@ -349,13 +349,13 @@ pub fn prepare_volumes(
         );
 
         let voxel_storage_views = (0..VOXEL_MIPMAP_LEVEL_COUNT)
-            .map(|i| {
+            .map(|level| {
                 voxel_texture.texture.create_view(&TextureViewDescriptor {
-                    label: Some(&format!("voxel_texture_view_{}_{}", entity.id(), i)),
+                    label: Some(&format!("voxel_texture_view_{}_{}", entity.id(), level)),
                     format: None,
                     dimension: Some(TextureViewDimension::D3),
                     aspect: TextureAspect::All,
-                    base_mip_level: i as u32,
+                    base_mip_level: level as u32,
                     mip_level_count: NonZeroU32::new(1),
                     base_array_layer: 0,
                     array_layer_count: None,
