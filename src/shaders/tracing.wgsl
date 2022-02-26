@@ -84,12 +84,19 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     let tbn = normal_basis(normal);
 
+    let ratio = 2.0 / SQRT3;
     var color = vec4<f32>(0.);
-    color = color + cone(origin, normal, 2.0);
-    color = color + cone(origin, normalize(normal + tbn[0]), 2.0) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[0]), 2.0) * 0.707;
-    color = color + cone(origin, normalize(normal + tbn[1]), 2.0) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[1]), 2.0) * 0.707;
+    color = color + cone(origin, normal, ratio) * 0.25;
+    color = color + cone(origin, tbn * vec3<f32>(0.0, 0.866025, 0.5), ratio) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(0.823639, 0.267617, 0.5), ratio) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(0.509037, -0.700629, 0.5), ratio) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), ratio) * 0.15;
+    color = color + cone(origin, tbn * vec3<f32>(-0.823639, 0.267617, 0.5), ratio) * 0.15;
     
-    return vec4<f32>(color * 0.261);
+    // color = color + cone(origin, normalize(normal + tbn[0]), 2.0) * 0.707;
+    // color = color + cone(origin, normalize(normal - tbn[0]), 2.0) * 0.707;
+    // color = color + cone(origin, normalize(normal + tbn[1]), 2.0) * 0.707;
+    // color = color + cone(origin, normalize(normal - tbn[1]), 2.0) * 0.707;
+    
+    return vec4<f32>(color);
 }
