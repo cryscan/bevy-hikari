@@ -85,11 +85,11 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let tbn = normal_basis(normal);
 
     var color = vec4<f32>(0.);
-    color = color + cone(origin, normal, 1.0);
-    color = color + cone(origin, normalize(normal + tbn[0]), 1.0) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[0]), 1.0) * 0.707;
-    color = color + cone(origin, normalize(normal + tbn[1]), 1.0) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[1]), 1.0) * 0.707;
+    color = color + cone(origin, normal, 2.0);
+    color = color + cone(origin, normalize(normal + tbn[0]), 2.0) * 0.707;
+    color = color + cone(origin, normalize(normal - tbn[0]), 2.0) * 0.707;
+    color = color + cone(origin, normalize(normal + tbn[1]), 2.0) * 0.707;
+    color = color + cone(origin, normalize(normal - tbn[1]), 2.0) * 0.707;
     
-    return vec4<f32>(color);
+    return vec4<f32>(color * 0.261);
 }

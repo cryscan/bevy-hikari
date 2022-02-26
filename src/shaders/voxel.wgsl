@@ -143,8 +143,8 @@ struct FragmentInput {
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     var output_color = material.base_color;
-    let coord = (in.world_position.xyz - volume.min) / (volume.max - volume.min);
-    let index = vec3<i32>(0.5 + 255. * coord);
+    let coords = (in.world_position.xyz - volume.min) / (volume.max - volume.min);
+    let index = vec3<i32>(0.5 + vec3<f32>(textureDimensions(voxel_texture)) * coords);
 
     if ((material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
         var emissive = material.emissive;
