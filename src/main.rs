@@ -98,9 +98,13 @@ fn setup(
     // Cube
     commands
         .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Cube::new(0.5))),
+            mesh: meshes.add(Mesh::from(shape::Torus {
+                radius: 0.5,
+                ring_radius: 0.25,
+                ..Default::default()
+            })),
             material: materials.add(StandardMaterial {
-                base_color: Color::rgb(0.8, 0.7, 0.6),
+                base_color: Color::rgb(1.0, 1.0, 1.0),
                 perceptual_roughness: 1.0,
                 ..Default::default()
             }),
