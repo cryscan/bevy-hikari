@@ -84,6 +84,16 @@ impl FromWorld for TracingPipeline {
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
@@ -192,11 +202,19 @@ pub fn queue_tracing_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&volume_bindings.voxel_sampled_view),
+                    resource: BindingResource::TextureView(
+                        &volume_bindings.voxel_texture.default_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::Sampler(&volume_bindings.voxel_texture_sampler),
+                    resource: BindingResource::TextureView(
+                        &volume_bindings.anisotropic_texture.default_view,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
                 },
             ],
         });

@@ -8,25 +8,21 @@ use bevy::{
         render_phase::RenderPhase,
         render_resource::{std140::AsStd140, *},
         renderer::{RenderDevice, RenderQueue},
-        texture::TextureCache,
+        texture::{CachedTexture, TextureCache},
         RenderApp, RenderStage,
     },
 };
-use std::num::NonZeroU32;
 
-mod overlay;
 mod tracing;
 mod voxel;
 
 pub const VOXEL_SIZE: usize = 256;
-pub const VOXEL_MIPMAP_LEVEL_COUNT: usize = 9;
+pub const VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT: usize = 8;
 
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
 pub const TRACING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984840);
-pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984630);
 
 pub mod draw_3d_graph {
     pub mod node {
@@ -59,10 +55,6 @@ impl Plugin for VoxelConeTracingPlugin {
         shaders.set_untracked(
             TRACING_SHADER_HANDLE,
             Shader::from_wgsl(include_str!("../shaders/tracing.wgsl").replace("\r\n", "\n")),
-        );
-        shaders.set_untracked(
-            OVERLAY_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("../shaders/overlay.wgsl").replace("\r\n", "\n")),
         );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
@@ -208,13 +200,12 @@ pub struct VolumeColorAttachment {
     pub texture_view: TextureView,
 }
 
-#[derive(Component, Clone)]
+#[derive(Component)]
 pub struct VolumeBindings {
-    pub voxel_texture: Texture,
-    pub voxel_storage_views: Vec<TextureView>,
+    pub voxel_texture: CachedTexture,
+    pub anisotropic_texture: CachedTexture,
 
-    pub voxel_sampled_view: TextureView,
-    pub voxel_texture_sampler: Sampler,
+    pub texture_sampler: Sampler,
 }
 
 #[derive(Clone, AsStd140)]
@@ -334,13 +325,13 @@ pub fn prepare_volumes(
         let voxel_texture = texture_cache.get(
             &render_device,
             TextureDescriptor {
-                label: None,
+                label: Some("voxel_texture"),
                 size: Extent3d {
                     width: VOXEL_SIZE as u32,
                     height: VOXEL_SIZE as u32,
                     depth_or_array_layers: VOXEL_SIZE as u32,
                 },
-                mip_level_count: VOXEL_MIPMAP_LEVEL_COUNT as u32,
+                mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D3,
                 format: TextureFormat::Rgba8Unorm,
@@ -348,37 +339,28 @@ pub fn prepare_volumes(
             },
         );
 
-        let voxel_storage_views = (0..VOXEL_MIPMAP_LEVEL_COUNT)
-            .map(|level| {
-                voxel_texture.texture.create_view(&TextureViewDescriptor {
-                    label: Some(&format!("voxel_texture_view_{}_{}", entity.id(), level)),
-                    format: None,
-                    dimension: Some(TextureViewDimension::D3),
-                    aspect: TextureAspect::All,
-                    base_mip_level: level as u32,
-                    mip_level_count: NonZeroU32::new(1),
-                    base_array_layer: 0,
-                    array_layer_count: None,
-                })
-            })
-            .collect();
+        let anisotropic_texture = texture_cache.get(
+            &render_device,
+            TextureDescriptor {
+                label: Some("voxel_anisotropic_texture"),
+                size: Extent3d {
+                    width: (VOXEL_SIZE / 2) as u32,
+                    height: (VOXEL_SIZE / 2) as u32,
+                    depth_or_array_layers: 6 * (VOXEL_SIZE / 2) as u32,
+                },
+                mip_level_count: VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT as u32,
+                sample_count: 1,
+                dimension: TextureDimension::D3,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            },
+        );
 
-        let voxel_sampled_view = voxel_texture.texture.create_view(&TextureViewDescriptor {
-            label: Some("voxel_textur_view"),
-            format: None,
-            dimension: Some(TextureViewDimension::D3),
-            aspect: TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: None,
-            base_array_layer: 0,
-            array_layer_count: None,
-        });
-
-        let voxel_texture_sampler = render_device.create_sampler(&SamplerDescriptor {
+        let texture_sampler = render_device.create_sampler(&SamplerDescriptor {
             label: None,
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            address_mode_w: AddressMode::ClampToEdge,
+            address_mode_u: AddressMode::Repeat,
+            address_mode_v: AddressMode::Repeat,
+            address_mode_w: AddressMode::Repeat,
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
             mipmap_filter: FilterMode::Linear,
@@ -398,10 +380,9 @@ pub fn prepare_volumes(
         commands.entity(entity).insert_bundle((
             volume_uniform_offset.clone(),
             VolumeBindings {
-                voxel_texture: voxel_texture.texture,
-                voxel_storage_views,
-                voxel_sampled_view,
-                voxel_texture_sampler,
+                voxel_texture,
+                anisotropic_texture,
+                texture_sampler,
             },
             RenderPhase::<Tracing>::default(),
         ));
