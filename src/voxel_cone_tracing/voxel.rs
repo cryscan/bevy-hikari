@@ -534,7 +534,30 @@ pub fn queue_mipmap_bind_groups(
             })
             .collect::<Vec<_>>();
 
-        for level in 0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT {
+        mipmap_bind_group
+            .values
+            .push(render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &voxel_pipeline.mipmap_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(
+                            &volume_bindings.voxel_texture.default_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::TextureView(&anisotropic_views[0]),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
+                    },
+                ],
+            }));
+
+        for level in 0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT - 1 {
             let ref texture_in = anisotropic_views[level];
             let ref texture_out = anisotropic_views[level + 1];
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {

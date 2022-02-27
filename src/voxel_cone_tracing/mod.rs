@@ -331,7 +331,7 @@ pub fn prepare_volumes(
                     height: VOXEL_SIZE as u32,
                     depth_or_array_layers: VOXEL_SIZE as u32,
                 },
-                mip_level_count: 0,
+                mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D3,
                 format: TextureFormat::Rgba8Unorm,

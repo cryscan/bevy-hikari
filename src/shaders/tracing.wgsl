@@ -58,7 +58,31 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
 
         let diameter = distance * ratio;
         let level = clamp(max_level + log2(diameter), 0.0, max_level);
-        let sample = textureSampleLevel(voxel_texture, texture_sampler, position, level);
+
+        let weight = direction * direction;
+        var face: vec3<u32>;
+        face.x = u32(direction.x < 0.);
+        face.y = u32(direction.y < 0.) + 2u;
+        face.z = u32(direction.z < 0.) + 4u;
+
+        let anisotropic_level = max(level - 1., 0.);
+        var anisotropic_coords: array<vec3<f32>, 6>;
+        for (var i = 0u; i < 6u; i = i + 1u) {
+            var coords = position;
+            coords.z = (coords.z + f32(i)) / 6.;
+            anisotropic_coords[i] = coords;
+        }
+
+        var sample = vec4<f32>(0.);
+        sample = sample + weight.x * textureSampleLevel(anisotropic_texture, texture_sampler, anisotropic_coords[face.x], anisotropic_level);
+        sample = sample + weight.y * textureSampleLevel(anisotropic_texture, texture_sampler, anisotropic_coords[face.y], anisotropic_level);
+        sample = sample + weight.z * textureSampleLevel(anisotropic_texture, texture_sampler, anisotropic_coords[face.z], anisotropic_level);
+
+        if (level < 1.0) {
+            let base_sample = textureSampleLevel(voxel_texture, texture_sampler, position, 0.0);
+            sample = mix(base_sample, sample, level);
+        }
+
         color = color + (1.0 - color.a) * sample;
 
         let step_size = max(diameter, voxel_size);
@@ -86,19 +110,20 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     let tbn = normal_basis(normal);
 
-    let ratio = 2.0 / SQRT3;
+    let ratio = 1.0;
     var color = vec4<f32>(0.);
     color = color + cone(origin, normal, ratio) * 0.25;
-    color = color + cone(origin, tbn * vec3<f32>(0.0, 0.866025, 0.5), ratio) * 0.15;
-    color = color + cone(origin, tbn * vec3<f32>(0.823639, 0.267617, 0.5), ratio) * 0.15;
-    color = color + cone(origin, tbn * vec3<f32>(0.509037, -0.700629, 0.5), ratio) * 0.15;
-    color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), ratio) * 0.15;
-    color = color + cone(origin, tbn * vec3<f32>(-0.823639, 0.267617, 0.5), ratio) * 0.15;
-    
-    // color = color + cone(origin, normalize(normal + tbn[0]), 2.0) * 0.707;
-    // color = color + cone(origin, normalize(normal - tbn[0]), 2.0) * 0.707;
-    // color = color + cone(origin, normalize(normal + tbn[1]), 2.0) * 0.707;
-    // color = color + cone(origin, normalize(normal - tbn[1]), 2.0) * 0.707;
+    // color = color + cone(origin, tbn * vec3<f32>(0.0, 0.866025, 0.5), ratio) * 0.15;
+    // color = color + cone(origin, tbn * vec3<f32>(0.823639, 0.267617, 0.5), ratio) * 0.15;
+    // color = color + cone(origin, tbn * vec3<f32>(0.509037, -0.700629, 0.5), ratio) * 0.15;
+    // color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), ratio) * 0.15;
+    // color = color + cone(origin, tbn * vec3<f32>(-0.823639, 0.267617, 0.5), ratio) * 0.15;
+
+    color = color + cone(origin, normalize(normal + tbn[0]), 2.0) * 0.707;
+    color = color + cone(origin, normalize(normal - tbn[0]), 2.0) * 0.707;
+    color = color + cone(origin, normalize(normal + tbn[1]), 2.0) * 0.707;
+    color = color + cone(origin, normalize(normal - tbn[1]), 2.0) * 0.707;
+    color = color * 0.2;
     
     return vec4<f32>(color);
 }

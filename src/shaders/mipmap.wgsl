@@ -5,8 +5,13 @@ var texture_out: texture_storage_3d<rgba8unorm, write>;
 [[group(0), binding(2)]]
 var texture_sampler: sampler;
 
+var<workgroup> samples: array<vec3<f32>, 8>;
+
 [[stage(compute), workgroup_size(4, 4, 24)]]
-fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
+fn mipmap(
+    [[builtin(global_invocation_id)]] id: vec3<u32>,
+    [[builtin(local_invocation_id)]] local_id: vec3<u32>,
+) {
     if (any(vec3<i32>(id) >= textureDimensions(texture_out))) {
         return;
     }
@@ -30,12 +35,12 @@ fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
     var samples: array<vec4<f32>, 8>;
     for (var i = 0u; i < 8u; i = i + 1u) {
         var sample_coords = coords + indices[i] / out_dims;
-        sample_coords = (6. / blocks) * sample_coords;
+        sample_coords.z = (6. / blocks) * sample_coords.z;
         samples[i] = textureSampleLevel(texture_in, texture_sampler, sample_coords, 0.0);
     }
 
     var color = vec4<f32>(0.);
-    if (dir == 0u) {    
+    if (dir == 0u) {
         // +X
         color = color + samples[0] + (1. - samples[0].a) * samples[1];
         color = color + samples[2] + (1. - samples[2].a) * samples[3];
@@ -79,7 +84,7 @@ fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
 
 [[stage(compute), workgroup_size(4, 4, 4)]]
 fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
-    if (all(vec3<i32>(id) >= textureDimensions(texture_out))) {
+    if (all(vec3<i32>(id) < textureDimensions(texture_out))) {
         let clear_color = vec4<f32>(0.0);
         textureStore(texture_out, vec3<i32>(id), clear_color);
     }
