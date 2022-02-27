@@ -1,6 +1,7 @@
 use super::{
     GpuVolume, Volume, VolumeBindings, VolumeColorAttachment, VolumeMeta, VolumeUniformOffset,
-    VolumeView, VoxelConeTracingSystems, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+    VolumeView, VoxelConeTracingSystems, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE,
+    VOXEL_SIZE,
 };
 use bevy::{
     core::FloatOrd,
@@ -30,7 +31,7 @@ use bevy::{
         RenderApp, RenderStage,
     },
 };
-use std::{borrow::Cow, f32::consts::FRAC_PI_2, marker::PhantomData};
+use std::{borrow::Cow, f32::consts::FRAC_PI_2, marker::PhantomData, num::NonZeroU32};
 
 pub struct VoxelPlugin;
 impl Plugin for VoxelPlugin {
@@ -454,7 +455,9 @@ pub fn queue_voxel_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureView(&bindings.voxel_storage_views[0]),
+                        resource: BindingResource::TextureView(
+                            &bindings.voxel_texture.default_view,
+                        ),
                     },
                 ],
             });
@@ -517,9 +520,23 @@ pub fn queue_mipmap_bind_groups(
 ) {
     for (entity, volume_bindings) in volumes.iter() {
         let mut mipmap_bind_group = MipmapBindGroup::default();
-        for level in 0..VOXEL_MIPMAP_LEVEL_COUNT - 1 {
-            let ref texture_in = volume_bindings.voxel_storage_views[level];
-            let ref texture_out = volume_bindings.voxel_storage_views[level + 1];
+
+        let anisotropic_views = (0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT)
+            .map(|level| {
+                volume_bindings
+                    .anisotropic_texture
+                    .texture
+                    .create_view(&TextureViewDescriptor {
+                        base_mip_level: level as u32,
+                        mip_level_count: NonZeroU32::new(1),
+                        ..Default::default()
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        for level in 0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT {
+            let ref texture_in = anisotropic_views[level];
+            let ref texture_out = anisotropic_views[level + 1];
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &voxel_pipeline.mipmap_layout,
@@ -534,7 +551,7 @@ pub fn queue_mipmap_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 2,
-                        resource: BindingResource::Sampler(&volume_bindings.voxel_texture_sampler),
+                        resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
                     },
                 ],
             });
@@ -547,15 +564,19 @@ pub fn queue_mipmap_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&volume_bindings.voxel_storage_views[1]),
+                    resource: BindingResource::TextureView(
+                        &volume_bindings.anisotropic_texture.default_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&volume_bindings.voxel_storage_views[0]),
+                    resource: BindingResource::TextureView(
+                        &volume_bindings.voxel_texture.default_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::Sampler(&volume_bindings.voxel_texture_sampler),
+                    resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
                 },
             ],
         }));

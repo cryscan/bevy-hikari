@@ -14,7 +14,9 @@ var<uniform> volume: Volume;
 [[group(1), binding(1)]]
 var voxel_texture: texture_3d<f32>;
 [[group(1), binding(2)]]
-var voxel_texture_sampler: sampler;
+var anisotropic_texture: texture_3d<f32>;
+[[group(1), binding(3)]]
+var texture_sampler: sampler;
 
 var<private> voxel_size: f32;
 var<private> max_level: f32;
@@ -56,7 +58,7 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
 
         let diameter = distance * ratio;
         let level = clamp(max_level + log2(diameter), 0.0, max_level);
-        let sample = textureSampleLevel(voxel_texture, voxel_texture_sampler, position, level);
+        let sample = textureSampleLevel(voxel_texture, texture_sampler, position, level);
         color = color + (1.0 - color.a) * sample;
 
         let step_size = max(diameter, voxel_size);
