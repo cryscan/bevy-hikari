@@ -102,22 +102,6 @@ fn setup(
         ..Default::default()
     });
 
-    // Emissive
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Icosphere {
-            radius: 0.4,
-            subdivisions: 2,
-        })),
-        material: materials.add(StandardMaterial {
-            base_color: Color::rgb(0.8, 0.7, 0.6),
-            perceptual_roughness: 1.0,
-            emissive: Color::rgb(0.8, 0.7, 0.6),
-            ..Default::default()
-        }),
-        transform: Transform::from_xyz(1.2, 0.6, 1.0),
-        ..Default::default()
-    });
-
     // Target
     commands
         .spawn_bundle(PbrBundle {
