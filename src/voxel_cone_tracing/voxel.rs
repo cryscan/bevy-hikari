@@ -210,6 +210,10 @@ impl SpecializedPipeline for VoxelPipeline {
         ]);
         descriptor.primitive.cull_mode = None;
         descriptor.depth_stencil = None;
+        descriptor.multisample = MultisampleState {
+            count: 4,
+            ..Default::default()
+        };
 
         descriptor
     }
@@ -472,8 +476,9 @@ pub fn queue_voxel_bind_groups(
 pub fn queue_voxel_meshes<M: SpecializedMaterial>(
     voxel_draw_functions: Res<DrawFunctions<Voxel>>,
     voxel_pipeline: Res<VoxelPipeline>,
-    meshes: Query<&Handle<Mesh>>,
+    material_meshes: Query<(&Handle<M>, &Handle<Mesh>)>,
     render_meshes: Res<RenderAssets<Mesh>>,
+    render_materials: Res<RenderAssets<M>>,
     mut pipelines: ResMut<SpecializedPipelines<VoxelPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     volumes: Query<&Volume, Without<VolumeView>>,
@@ -488,7 +493,11 @@ pub fn queue_voxel_meshes<M: SpecializedMaterial>(
         for view in volume.views.iter().cloned() {
             let (visible_entities, mut phase) = view_query.get_mut(view).unwrap();
             for entity in visible_entities.entities.iter().cloned() {
-                if let Ok(mesh_handle) = meshes.get(entity) {
+                if let Ok((material_handle, mesh_handle)) = material_meshes.get(entity) {
+                    if !render_materials.contains_key(material_handle) {
+                        continue;
+                    }
+
                     let mut key = MeshPipelineKey::empty();
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
                         if mesh.has_tangents {
@@ -706,7 +715,7 @@ impl render_graph::Node for VoxelPassNode {
                 let descriptor = RenderPassDescriptor {
                     label: None,
                     color_attachments: &[RenderPassColorAttachment {
-                        view: &volume_color_attachment.texture_view,
+                        view: &volume_color_attachment.texture.default_view,
                         resolve_target: None,
                         ops: Operations {
                             load: LoadOp::Clear(Color::BLACK.into()),

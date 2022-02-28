@@ -197,7 +197,7 @@ pub struct VolumeUniformOffset {
 
 #[derive(Component)]
 pub struct VolumeColorAttachment {
-    pub texture_view: TextureView,
+    pub texture: CachedTexture,
 }
 
 #[derive(Component)]
@@ -286,35 +286,6 @@ pub fn prepare_volumes(
     volume_meta.volume_uniforms.clear();
 
     for (entity, volume) in volumes.iter_mut() {
-        let color_texture = texture_cache
-            .get(
-                &render_device,
-                TextureDescriptor {
-                    label: Some("voxel_volume_texture"),
-                    size: Extent3d {
-                        width: VOXEL_SIZE as u32,
-                        height: VOXEL_SIZE as u32,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format: TextureFormat::Bgra8UnormSrgb,
-                    usage: TextureUsages::RENDER_ATTACHMENT,
-                },
-            )
-            .texture
-            .create_view(&TextureViewDescriptor {
-                label: Some("voxel_volume_texture_view"),
-                format: None,
-                dimension: Some(TextureViewDimension::D2),
-                aspect: TextureAspect::All,
-                base_mip_level: 0,
-                mip_level_count: None,
-                base_array_layer: 0,
-                array_layer_count: None,
-            });
-
         let volume_uniform_offset = VolumeUniformOffset {
             offset: volume_meta.volume_uniforms.push(GpuVolume {
                 min: volume.min,
@@ -368,10 +339,27 @@ pub fn prepare_volumes(
         });
 
         for view in volume.views.iter().cloned() {
+            let color_texture = texture_cache.get(
+                &render_device,
+                TextureDescriptor {
+                    label: Some("voxel_volume_texture"),
+                    size: Extent3d {
+                        width: VOXEL_SIZE as u32,
+                        height: VOXEL_SIZE as u32,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 4,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Bgra8UnormSrgb,
+                    usage: TextureUsages::RENDER_ATTACHMENT,
+                },
+            );
+
             commands.entity(view).insert_bundle((
                 volume_uniform_offset.clone(),
                 VolumeColorAttachment {
-                    texture_view: color_texture.clone(),
+                    texture: color_texture,
                 },
                 RenderPhase::<Voxel>::default(),
             ));
