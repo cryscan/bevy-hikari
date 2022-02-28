@@ -80,6 +80,22 @@ fn compute_roughness(perceptual_roughness: f32) -> f32 {
     return clamped * clamped;
 }
 
+// luminance coefficients from Rec. 709.
+// https://en.wikipedia.org/wiki/Rec._709
+fn luminance(v: vec3<f32>) -> f32 {
+    return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+fn change_luminance(c_in: vec3<f32>, l_out: f32) -> vec3<f32> {
+    let l_in = luminance(c_in);
+    return c_in * (l_out / l_in);
+}
+
+fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
+    let l_old = luminance(color);
+    let l_new = l_old / (1.0 + l_old);
+    return change_luminance(color, l_new);
+}
 fn directional_light(
     light: DirectionalLight,
     roughness: f32,
@@ -142,9 +158,13 @@ struct FragmentInput {
 
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
-    var output_color = material.base_color;
     let coords = (in.world_position.xyz - volume.min) / (volume.max - volume.min);
     let index = vec3<i32>(0.5 + vec3<f32>(textureDimensions(voxel_texture)) * coords);
+
+    var output_color = material.base_color;
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
+        output_color = output_color * textureSample(base_color_texture, base_color_sampler, in.uv);
+    }
 
     if ((material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
         var emissive = material.emissive;
@@ -162,9 +182,14 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
         let roughness = compute_roughness(perceptual_roughness);
 
-        if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
-            output_color.a = 1.0;
+        var occlusion: f32 = 1.0;
+        if ((material.flags & STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT) != 0u) {
+            occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
         }
+
+        // if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
+        output_color.a = 1.0;
+        // }
 
         let N = normalize(in.world_normal);
 
@@ -196,8 +221,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         for (var i: u32 = 0u; i < lights.n_directional_lights; i = i + 1u) {
             let light = lights.directional_lights[i];
             var shadow: f32 = 1.0;
-            // if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-            if ((light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
                 shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
             }
             let light_contrib = directional_light(light, roughness, NdotV, N, V, diffuse_color);
@@ -210,6 +234,9 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         );
     }
 
+    // tone_mapping
+    output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
+    output_color = vec4<f32>(pow(output_color.rgb, vec3<f32>(1.0 / 2.2)), output_color.a);
     textureStore(voxel_texture, index, output_color);
 
     return output_color;

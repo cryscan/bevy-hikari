@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-bevy = "0.6"
+bevy = { version = "0.6", default-features = true, features = ["jpeg"] }
 bevy_mod_debugdump = "0.3.0"
+bevy_flycam = "0.6.0"

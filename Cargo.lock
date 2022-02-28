@@ -198,6 +198,7 @@ name = "bevy-hikari"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flycam",
  "bevy_mod_debugdump",
 ]
 
@@ -352,6 +353,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "bevy_flycam"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "079e6bc5fb48ae4935aea5fc3cc3d5fa9a8c38697a598f9c2f28bbbf5f375672"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]
@@ -1590,6 +1600,7 @@ dependencies = [
  "bytemuck",
  "byteorder",
  "color_quant",
+ "jpeg-decoder",
  "num-iter",
  "num-rational",
  "num-traits",
@@ -1704,6 +1715,12 @@ checksum = "af25a77299a7f711a01975c35a6a424eb6862092cc2d6c72c4ed6cbc56dfc1fa"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "jpeg-decoder"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "229d53d58899083193af11e15917b5640cd40b29ff475a1fe4ef725deb02d0f2"
 
 [[package]]
 name = "js-sys"
