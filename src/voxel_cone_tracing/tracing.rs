@@ -20,7 +20,7 @@ use bevy::{
         },
         render_resource::{std140::AsStd140, *},
         renderer::RenderDevice,
-        view::{ExtractedView, ViewDepthTexture, VisibleEntities},
+        view::{ExtractedView, VisibleEntities},
         RenderApp, RenderStage,
     },
 };
@@ -285,7 +285,7 @@ pub struct TracingPassNode {
         (
             &'static RenderPhase<Tracing>,
             &'static VolumeOverlay,
-            &'static ViewDepthTexture,
+            &'static VolumeBindings,
         ),
         With<ExtractedView>,
     >,
@@ -317,25 +317,27 @@ impl render_graph::Node for TracingPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (phase, overlay, depth) = match self.query.get_manual(world, view_entity) {
+        let (phase, overlay, bindings) = match self.query.get_manual(world, view_entity) {
             Ok(query) => query,
             Err(_) => return Ok(()),
         };
 
         let images = world.get_resource::<RenderAssets<Image>>().unwrap();
+        let ref color_attachment = images[&overlay.color_attachment].texture_view;
+        let ref resolve_target = images[&overlay.resolve_target].texture_view;
 
         let pass_descriptor = RenderPassDescriptor {
             label: Some("tracing_pass"),
             color_attachments: &[RenderPassColorAttachment {
-                view: &images[&overlay.view].texture_view,
-                resolve_target: Some(&images[&overlay.resolve_target].texture_view),
+                view: color_attachment,
+                resolve_target: Some(resolve_target),
                 ops: Operations {
                     load: LoadOp::Clear(Color::NONE.into()),
                     store: true,
                 },
             }],
             depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                view: &depth.view,
+                view: &bindings.overlay_depth_texture.default_view,
                 depth_ops: Some(Operations {
                     load: LoadOp::Clear(0.0),
                     store: false,
