@@ -30,7 +30,7 @@ struct Controller;
 /// Set up a simple 3D scene
 fn setup(
     mut commands: Commands,
-    _asset_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -95,24 +95,6 @@ fn setup(
         ..Default::default()
     });
 
-    // Cube
-    commands
-        .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Torus {
-                radius: 0.5,
-                ring_radius: 0.25,
-                ..Default::default()
-            })),
-            material: materials.add(StandardMaterial {
-                base_color: Color::rgb(1.0, 1.0, 1.0),
-                perceptual_roughness: 1.0,
-                ..Default::default()
-            }),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0),
-            ..Default::default()
-        })
-        .insert(Controller);
-
     // Emissive
     commands.spawn_bundle(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Icosphere {
@@ -154,7 +136,20 @@ fn setup(
         ..Default::default()
     });
 
-    // commands.spawn_scene(asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0"));
+    commands
+        .spawn()
+        .insert_bundle((
+            Transform {
+                translation: Vec3::new(0.0, -1.0, 0.0),
+                rotation: Quat::IDENTITY,
+                scale: Vec3::new(2.0, 2.0, 2.0),
+            },
+            GlobalTransform::default(),
+            Controller,
+        ))
+        .with_children(|parent| {
+            parent.spawn_scene(asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0"));
+        });
 
     // Camera
     commands
@@ -196,12 +191,8 @@ fn controller_system(
         }
 
         let speed = 0.7;
-        transform.rotation *= Quat::from_euler(
-            EulerRot::XYZ,
-            speed * time.delta_seconds(),
-            speed * time.delta_seconds(),
-            speed * time.delta_seconds(),
-        );
+        transform.rotation *=
+            Quat::from_euler(EulerRot::XYZ, 0.0, speed * time.delta_seconds(), 0.0);
     }
 }
 
