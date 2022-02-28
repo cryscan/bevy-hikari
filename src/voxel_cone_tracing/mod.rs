@@ -183,7 +183,8 @@ impl Default for Volume {
 
 #[derive(Component, Clone)]
 pub struct VolumeOverlay {
-    view: Handle<Image>,
+    size: Extent3d,
+    color_attachment: Handle<Image>,
     resolve_target: Handle<Image>,
 }
 
@@ -202,9 +203,9 @@ pub struct VolumeColorAttachment {
 
 #[derive(Component)]
 pub struct VolumeBindings {
+    pub overlay_depth_texture: CachedTexture,
     pub voxel_texture: CachedTexture,
     pub anisotropic_texture: CachedTexture,
-
     pub texture_sampler: Sampler,
 }
 
@@ -231,12 +232,13 @@ pub fn add_volume_overlay(
         let height = window.height() as u32;
 
         for (entity, _) in volumes.iter() {
+            let size = Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
             let mut image = Image::new_fill(
-                Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
+                size,
                 TextureDimension::D2,
                 &[0, 0, 0, 255],
                 TextureFormat::Bgra8UnormSrgb,
@@ -251,7 +253,8 @@ pub fn add_volume_overlay(
             let image = images.add(image);
 
             commands.entity(entity).insert(VolumeOverlay {
-                view,
+                size,
+                color_attachment: view,
                 resolve_target: image.clone(),
             });
 
@@ -279,13 +282,14 @@ pub fn prepare_volumes(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    msaa: Res<Msaa>,
     mut texture_cache: ResMut<TextureCache>,
-    mut volumes: Query<(Entity, &Volume)>,
+    mut volumes: Query<(Entity, &Volume, &VolumeOverlay)>,
     mut volume_meta: ResMut<VolumeMeta>,
 ) {
     volume_meta.volume_uniforms.clear();
 
-    for (entity, volume) in volumes.iter_mut() {
+    for (entity, volume, overlay) in volumes.iter_mut() {
         let volume_uniform_offset = VolumeUniformOffset {
             offset: volume_meta.volume_uniforms.push(GpuVolume {
                 min: volume.min,
@@ -365,9 +369,23 @@ pub fn prepare_volumes(
             ));
         }
 
+        let overlay_depth_texture = texture_cache.get(
+            &render_device,
+            TextureDescriptor {
+                label: Some("volume_overlay_depth_texture"),
+                size: overlay.size,
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsages::RENDER_ATTACHMENT,
+            },
+        );
+
         commands.entity(entity).insert_bundle((
             volume_uniform_offset.clone(),
             VolumeBindings {
+                overlay_depth_texture,
                 voxel_texture,
                 anisotropic_texture,
                 texture_sampler,
