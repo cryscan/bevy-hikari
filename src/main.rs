@@ -50,7 +50,7 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(0.0, -2.0, 0.0),
             rotation: Quat::IDENTITY,
-            scale: Vec3::new(5.0, 0.1, 5.0),
+            scale: Vec3::new(5.0, 0.5, 5.0),
         },
         ..Default::default()
     });
@@ -65,7 +65,7 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(2.0, 0.0, 0.0),
             rotation: Quat::from_rotation_z(PI / 2.0),
-            scale: Vec3::new(5.0, 0.1, 4.0),
+            scale: Vec3::new(5.0, 0.5, 4.0),
         },
         ..Default::default()
     });
@@ -80,7 +80,7 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(-2.0, 0.0, 0.0),
             rotation: Quat::from_rotation_z(PI / 2.0),
-            scale: Vec3::new(5.0, 0.1, 4.0),
+            scale: Vec3::new(5.0, 0.5, 4.0),
         },
         ..Default::default()
     });
@@ -95,7 +95,7 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(0.0, 0.0, -2.0),
             rotation: Quat::from_rotation_x(PI / 2.0),
-            scale: Vec3::new(4.0, 0.1, 5.0),
+            scale: Vec3::new(4.0, 0.5, 5.0),
         },
         ..Default::default()
     });
@@ -108,9 +108,9 @@ fn setup(
             ..Default::default()
         }),
         transform: Transform {
-            translation: Vec3::new(1.5, 1.5, -0.0),
+            translation: Vec3::new(1.0, 2.0, -0.0),
             rotation: Quat::IDENTITY,
-            scale: Vec3::new(1.0, 0.1, 4.0),
+            scale: Vec3::new(1.0, 0.5, 4.0),
         },
         ..Default::default()
     });
@@ -122,9 +122,9 @@ fn setup(
             ..Default::default()
         }),
         transform: Transform {
-            translation: Vec3::new(-1.5, 1.5, -0.0),
+            translation: Vec3::new(-1.0, 2.0, -0.0),
             rotation: Quat::IDENTITY,
-            scale: Vec3::new(1.0, 0.1, 4.0),
+            scale: Vec3::new(1.0, 0.5, 4.0),
         },
         ..Default::default()
     });
