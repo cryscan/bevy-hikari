@@ -85,7 +85,7 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
 
         color = color + (1.0 - color.a) * sample;
 
-        let step_size = max(diameter, voxel_size);
+        let step_size = max(diameter / 2.0, voxel_size);
         distance = distance + step_size;
     }
 
@@ -119,10 +119,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     // color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), ratio) * 0.15;
     // color = color + cone(origin, tbn * vec3<f32>(-0.823639, 0.267617, 0.5), ratio) * 0.15;
 
-    // color = color + cone(origin, normalize(normal + tbn[0]), ratio) * 0.707;
-    // color = color + cone(origin, normalize(normal - tbn[0]), ratio) * 0.707;
-    // color = color + cone(origin, normalize(normal + tbn[1]), ratio) * 0.707;
-    // color = color + cone(origin, normalize(normal - tbn[1]), ratio) * 0.707;
+    color = color + cone(origin, normalize(normal + tbn[0] + tbn[1]), ratio) * 0.707;
+    color = color + cone(origin, normalize(normal - tbn[0] + tbn[1]), ratio) * 0.707;
+    color = color + cone(origin, normalize(normal + tbn[0] - tbn[1]), ratio) * 0.707;
+    color = color + cone(origin, normalize(normal - tbn[0] - tbn[1]), ratio) * 0.707;
     
-    return vec4<f32>(color * 0.4);
+    return vec4<f32>(color * 0.1);
 }
