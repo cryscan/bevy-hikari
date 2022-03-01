@@ -20,3 +20,11 @@
 | Move Model Horizontally | `W`, `A`, `S`, `D` |
 | Move Model Up           | `E`                |
 | Move Model Down         | `Q`                |
+
+## License
+Just like Bevy, all code in this repository is dual-licensed under either:
+
+* MIT License ([LICENSE-MIT](docs/LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
+* Apache License, Version 2.0 ([LICENSE-APACHE](docs/LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+
+at your option.
