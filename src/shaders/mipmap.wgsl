@@ -16,61 +16,59 @@ fn mipmap(
         return;
     }
     
-    let in_dims = vec3<f32>(textureDimensions(texture_in));
-    let out_dims = vec3<f32>(textureDimensions(texture_out));
-    var coords = vec3<f32>(id) / out_dims;
-    let dir = u32(floor(coords.z * 6.0));
+    let in_dims = textureDimensions(texture_in);
+    let out_dims = textureDimensions(texture_out);
+    let dir = i32(id.z) / max(out_dims.x, out_dims.y);
 
-    var indices: array<vec3<f32>, 8>;
-    indices[0] = vec3<f32>(0., 0., 0.);
-    indices[1] = vec3<f32>(1., 0., 0.);
-    indices[2] = vec3<f32>(0., 1., 0.);
-    indices[3] = vec3<f32>(1., 1., 0.);
-    indices[4] = vec3<f32>(0., 0., 1.);
-    indices[5] = vec3<f32>(1., 0., 1.);
-    indices[6] = vec3<f32>(0., 1., 1.);
-    indices[7] = vec3<f32>(1., 1., 1.);
+    var indices: array<vec3<i32>, 8>;
+    indices[0] = vec3<i32>(0, 0, 0);
+    indices[1] = vec3<i32>(1, 0, 0);
+    indices[2] = vec3<i32>(0, 1, 0);
+    indices[3] = vec3<i32>(1, 1, 0);
+    indices[4] = vec3<i32>(0, 0, 1);
+    indices[5] = vec3<i32>(1, 0, 1);
+    indices[6] = vec3<i32>(0, 1, 1);
+    indices[7] = vec3<i32>(1, 1, 1);
 
-    let blocks = in_dims.z / max(in_dims.x, in_dims.y);
     var samples: array<vec4<f32>, 8>;
     for (var i = 0u; i < 8u; i = i + 1u) {
-        var sample_coords = coords + indices[i] / out_dims;
-        sample_coords.z = (6. / blocks) * sample_coords.z;
-        samples[i] = textureSampleLevel(texture_in, texture_sampler, sample_coords, 0.0);
+        var index = vec3<i32>(id) * 2 + indices[i];
+        index = vec3<i32>(index.xy, index.z % in_dims.z);
+        samples[i] = textureLoad(texture_in, index, 0);
     }
 
     var color = vec4<f32>(0.);
-    if (dir == 0u) {
+    if (dir == 0) {
         // +X
         color = color + samples[0] + (1. - samples[0].a) * samples[1];
         color = color + samples[2] + (1. - samples[2].a) * samples[3];
         color = color + samples[4] + (1. - samples[4].a) * samples[5];
         color = color + samples[6] + (1. - samples[6].a) * samples[7];
-    } else if (dir == 1u) {
+    } else if (dir == 1) {
         // -X
         color = color + samples[1] + (1. - samples[1].a) * samples[0];
         color = color + samples[3] + (1. - samples[3].a) * samples[2];
         color = color + samples[5] + (1. - samples[5].a) * samples[4];
         color = color + samples[7] + (1. - samples[7].a) * samples[6];
-    } else if (dir == 2u) {
+    } else if (dir == 2) {
         // +Y
         color = color + samples[0] + (1. - samples[0].a) * samples[2];
         color = color + samples[1] + (1. - samples[1].a) * samples[3];
         color = color + samples[4] + (1. - samples[4].a) * samples[6];
         color = color + samples[5] + (1. - samples[5].a) * samples[7];
-    } else if (dir == 3u) {
+    } else if (dir == 3) {
         // -Y
         color = color + samples[2] + (1. - samples[2].a) * samples[0];
         color = color + samples[3] + (1. - samples[3].a) * samples[1];
         color = color + samples[6] + (1. - samples[6].a) * samples[4];
         color = color + samples[7] + (1. - samples[7].a) * samples[5];
-    } else if (dir == 4u) {
+    } else if (dir == 4) {
         // +Z
         color = color + samples[0] + (1. - samples[0].a) * samples[4];
         color = color + samples[1] + (1. - samples[1].a) * samples[5];
         color = color + samples[2] + (1. - samples[2].a) * samples[6];
         color = color + samples[3] + (1. - samples[3].a) * samples[7];
-    } else if (dir == 5u) {
+    } else if (dir == 5) {
         // -Z
         color = color + samples[4] + (1. - samples[4].a) * samples[0];
         color = color + samples[5] + (1. - samples[5].a) * samples[1];

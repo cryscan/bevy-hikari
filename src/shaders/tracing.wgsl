@@ -52,7 +52,7 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
 
     loop {
         let position = origin + distance * direction;
-        if (any(position < vec3<f32>(0.)) || any(position > vec3<f32>(1.)) || color.a >= 1.0) {
+        if (any(position < vec3<f32>(0.)) || any(position > vec3<f32>(1., 1., 1.)) || color.a >= 1.0) {
             break;
         }
 
@@ -119,11 +119,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     // color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), ratio) * 0.15;
     // color = color + cone(origin, tbn * vec3<f32>(-0.823639, 0.267617, 0.5), ratio) * 0.15;
 
-    color = color + cone(origin, normalize(normal + tbn[0]), ratio) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[0]), ratio) * 0.707;
-    color = color + cone(origin, normalize(normal + tbn[1]), ratio) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[1]), ratio) * 0.707;
-    color = color * 0.12;
+    // color = color + cone(origin, normalize(normal + tbn[0]), ratio) * 0.707;
+    // color = color + cone(origin, normalize(normal - tbn[0]), ratio) * 0.707;
+    // color = color + cone(origin, normalize(normal + tbn[1]), ratio) * 0.707;
+    // color = color + cone(origin, normalize(normal - tbn[1]), ratio) * 0.707;
     
-    return vec4<f32>(color);
+    return vec4<f32>(color * 0.4);
 }
