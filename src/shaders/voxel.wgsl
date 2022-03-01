@@ -60,6 +60,11 @@ var voxel_texture: texture_storage_3d<rgba8unorm, write>;
 
 let PI: f32 = 3.141592653589793;
 
+fn face_normal(clip_position: vec4<f32>) -> vec3<f32> {
+    let position = clip_position.xyz / clip_position.w;
+    return cross(dpdx(position), dpdy(position));
+}
+
 fn saturate(value: f32) -> f32 {
     return clamp(value, 0.0, 1.0);
 }
@@ -187,10 +192,6 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
         }
 
-        // if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
-        output_color.a = 1.0;
-        // }
-
         let N = normalize(in.world_normal);
 
         var V: vec3<f32>;
@@ -232,6 +233,11 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             light_accum + emissive.rgb * output_color.a,
             output_color.a
         );
+    }
+
+    let clip_normal = abs(face_normal(in.clip_position));
+    if (clip_normal.z < max(clip_normal.x, clip_normal.y)) {
+        discard;
     }
 
     // tone_mapping
