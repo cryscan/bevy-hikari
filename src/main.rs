@@ -65,7 +65,22 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(2.0, 0.0, 0.0),
             rotation: Quat::from_rotation_z(PI / 2.0),
-            scale: Vec3::new(4.0, 0.1, 4.0),
+            scale: Vec3::new(5.0, 0.1, 4.0),
+        },
+        ..Default::default()
+    });
+    // Left
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Cube::default())),
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgb(1.0, 1.0, 1.0),
+            perceptual_roughness: 1.0,
+            ..Default::default()
+        }),
+        transform: Transform {
+            translation: Vec3::new(-2.0, 0.0, 0.0),
+            rotation: Quat::from_rotation_z(PI / 2.0),
+            scale: Vec3::new(5.0, 0.1, 4.0),
         },
         ..Default::default()
     });
@@ -94,6 +109,20 @@ fn setup(
         }),
         transform: Transform {
             translation: Vec3::new(1.5, 1.5, -0.0),
+            rotation: Quat::IDENTITY,
+            scale: Vec3::new(1.0, 0.1, 4.0),
+        },
+        ..Default::default()
+    });
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Cube::default())),
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgb(0.9, 0.9, 0.7),
+            perceptual_roughness: 1.0,
+            ..Default::default()
+        }),
+        transform: Transform {
+            translation: Vec3::new(-1.5, 1.5, -0.0),
             rotation: Quat::IDENTITY,
             scale: Vec3::new(1.0, 0.1, 4.0),
         },
