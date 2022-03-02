@@ -74,10 +74,10 @@ pub struct VoxelBindGroup {
     pub value: BindGroup,
 }
 
-#[derive(Component, Default, Clone)]
+#[derive(Component)]
 pub struct MipmapBindGroup {
-    pub values: Vec<BindGroup>,
-    pub clear: Option<BindGroup>,
+    pub mipmaps: Vec<Vec<BindGroup>>,
+    pub clear: BindGroup,
 }
 
 pub struct VoxelPipeline {
@@ -86,7 +86,7 @@ pub struct VoxelPipeline {
     mesh_pipeline: MeshPipeline,
 
     mipmap_layout: BindGroupLayout,
-    mipmap_pipeline: ComputePipeline,
+    mipmap_pipelines: Vec<ComputePipeline>,
     clear_pipeline: ComputePipeline,
 }
 
@@ -147,12 +147,6 @@ impl FromWorld for VoxelPipeline {
                     },
                     count: None,
                 },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
             ],
         });
 
@@ -170,12 +164,16 @@ impl FromWorld for VoxelPipeline {
             )),
         });
 
-        let mipmap_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("mipmap_pipeline"),
-            layout: Some(&mipmap_pipeline_layout),
-            module: &shader,
-            entry_point: "mipmap",
-        });
+        let mipmap_pipelines = (0..6)
+            .map(|direction| {
+                render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+                    label: Some(&format!("mipmap_pipeline_{direction}")),
+                    layout: Some(&mipmap_pipeline_layout),
+                    module: &shader,
+                    entry_point: &format!("mipmap_{direction}"),
+                })
+            })
+            .collect();
         let clear_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("clear_pipeline"),
             layout: Some(&mipmap_pipeline_layout),
@@ -188,7 +186,7 @@ impl FromWorld for VoxelPipeline {
             voxel_layout,
             mesh_pipeline,
             mipmap_layout,
-            mipmap_pipeline,
+            mipmap_pipelines,
             clear_pipeline,
         }
     }
@@ -528,76 +526,62 @@ pub fn queue_mipmap_bind_groups(
     volumes: Query<(Entity, &VolumeBindings), With<Volume>>,
 ) {
     for (entity, volume_bindings) in volumes.iter() {
-        let mut mipmap_bind_group = MipmapBindGroup::default();
-
-        let anisotropic_views = (0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT)
+        let anisotropic_mipmaps = (0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT)
             .map(|level| {
                 volume_bindings
-                    .anisotropic_texture
-                    .texture
-                    .create_view(&TextureViewDescriptor {
-                        base_mip_level: level as u32,
-                        mip_level_count: NonZeroU32::new(1),
-                        ..Default::default()
+                    .anisotropic_textures
+                    .iter()
+                    .map(|cached_texture| {
+                        cached_texture.texture.create_view(&TextureViewDescriptor {
+                            base_mip_level: level as u32,
+                            mip_level_count: NonZeroU32::new(1),
+                            ..Default::default()
+                        })
                     })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
 
-        mipmap_bind_group
-            .values
-            .push(render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &voxel_pipeline.mipmap_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(
-                            &volume_bindings.voxel_texture.default_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(&anisotropic_views[0]),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
-                    },
-                ],
-            }));
+        let mipmaps = (0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT)
+            .map(|level| {
+                let mut bind_groups = vec![];
 
-        for level in 0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT - 1 {
-            let ref texture_in = anisotropic_views[level];
-            let ref texture_out = anisotropic_views[level + 1];
-            let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &voxel_pipeline.mipmap_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(texture_in),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(texture_out),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
-                    },
-                ],
-            });
-            mipmap_bind_group.values.push(bind_group);
-        }
+                for direction in 0..6 {
+                    let texture_in = match level {
+                        0 => &volume_bindings.voxel_texture.default_view,
+                        level => &anisotropic_mipmaps[level - 1][direction],
+                    };
+                    let texture_out = &anisotropic_mipmaps[level][direction];
 
-        mipmap_bind_group.clear = Some(render_device.create_bind_group(&BindGroupDescriptor {
+                    let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+                        label: None,
+                        layout: &voxel_pipeline.mipmap_layout,
+                        entries: &[
+                            BindGroupEntry {
+                                binding: 0,
+                                resource: BindingResource::TextureView(texture_in),
+                            },
+                            BindGroupEntry {
+                                binding: 1,
+                                resource: BindingResource::TextureView(texture_out),
+                            },
+                        ],
+                    });
+                    bind_groups.push(bind_group);
+                }
+
+                bind_groups
+            })
+            .collect();
+
+        let clear = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &voxel_pipeline.mipmap_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &volume_bindings.anisotropic_texture.default_view,
+                        &volume_bindings.anisotropic_textures[0].default_view,
                     ),
                 },
                 BindGroupEntry {
@@ -606,14 +590,12 @@ pub fn queue_mipmap_bind_groups(
                         &volume_bindings.voxel_texture.default_view,
                     ),
                 },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
-                },
             ],
-        }));
+        });
 
-        commands.entity(entity).insert(mipmap_bind_group);
+        commands
+            .entity(entity)
+            .insert(MipmapBindGroup { mipmaps, clear });
     }
 }
 
@@ -768,14 +750,16 @@ impl render_graph::Node for MipmapPassNode {
         let mut pass = render_context
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
-        pass.set_pipeline(&pipeline.mipmap_pipeline);
 
         for mipmap_bind_group in self.volume_query.iter_manual(world) {
-            for (level, bind_group) in mipmap_bind_group.values.iter().enumerate() {
-                let size = (VOXEL_SIZE / (2 << level)) as u32;
-                let count = (size / 4).max(1);
-                pass.set_bind_group(0, bind_group, &[]);
-                pass.dispatch(count, count, count);
+            for (level, bind_groups) in mipmap_bind_group.mipmaps.iter().enumerate() {
+                for direction in 0..6 {
+                    let size = (VOXEL_SIZE / (2 << level)) as u32;
+                    let count = (size / 4).max(1);
+                    pass.set_pipeline(&pipeline.mipmap_pipelines[direction]);
+                    pass.set_bind_group(0, &bind_groups[direction], &[]);
+                    pass.dispatch(count, count, count);
+                }
             }
         }
 
@@ -814,8 +798,7 @@ impl render_graph::Node for VoxelClearPassNode {
 
         for mipmap_bind_group in self.volume_query.iter_manual(world) {
             let count = (VOXEL_SIZE / 4) as u32;
-            let bind_group = mipmap_bind_group.clear.as_ref().unwrap();
-            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
             pass.dispatch(count, count, count);
         }
 

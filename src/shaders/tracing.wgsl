@@ -14,9 +14,20 @@ var<uniform> volume: Volume;
 [[group(1), binding(1)]]
 var voxel_texture: texture_3d<f32>;
 [[group(1), binding(2)]]
-var anisotropic_texture: texture_3d<f32>;
-[[group(1), binding(3)]]
 var texture_sampler: sampler;
+
+[[group(3), binding(0)]]
+var anisotropic_texture_0: texture_3d<f32>;
+[[group(3), binding(1)]]
+var anisotropic_texture_1: texture_3d<f32>;
+[[group(3), binding(2)]]
+var anisotropic_texture_2: texture_3d<f32>;
+[[group(3), binding(3)]]
+var anisotropic_texture_3: texture_3d<f32>;
+[[group(3), binding(4)]]
+var anisotropic_texture_4: texture_3d<f32>;
+[[group(3), binding(5)]]
+var anisotropic_texture_5: texture_3d<f32>;
 
 var<private> voxel_size: f32;
 var<private> max_level: f32;
@@ -66,17 +77,23 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
         face.z = u32(direction.z < 0.) + 4u;
 
         let anisotropic_level = max(level - 1., 0.);
-        var anisotropic_coords: array<vec3<f32>, 6>;
-        for (var i = 0u; i < 6u; i = i + 1u) {
-            var coords = position;
-            coords.z = (coords.z + f32(i)) / 6.;
-            anisotropic_coords[i] = coords;
-        }
 
         var sample = vec4<f32>(0.);
-        sample = sample + weight.x * textureSampleLevel(anisotropic_texture, texture_sampler, anisotropic_coords[face.x], anisotropic_level);
-        sample = sample + weight.y * textureSampleLevel(anisotropic_texture, texture_sampler, anisotropic_coords[face.y], anisotropic_level);
-        sample = sample + weight.z * textureSampleLevel(anisotropic_texture, texture_sampler, anisotropic_coords[face.z], anisotropic_level);
+        if (direction.x > 0.0) {
+            sample = sample + weight.x * textureSampleLevel(anisotropic_texture_0, texture_sampler, position, anisotropic_level);
+        } else {
+            sample = sample + weight.x * textureSampleLevel(anisotropic_texture_1, texture_sampler, position, anisotropic_level);
+        }
+        if (direction.y > 0.0) {
+            sample = sample + weight.y * textureSampleLevel(anisotropic_texture_2, texture_sampler, position, anisotropic_level);
+        } else {
+            sample = sample + weight.y * textureSampleLevel(anisotropic_texture_3, texture_sampler, position, anisotropic_level);
+        }
+        if (direction.z > 0.0) {
+            sample = sample + weight.z * textureSampleLevel(anisotropic_texture_4, texture_sampler, position, anisotropic_level);
+        } else {
+            sample = sample + weight.z * textureSampleLevel(anisotropic_texture_5, texture_sampler, position, anisotropic_level);
+        }
 
         if (level < 1.0) {
             let base_sample = textureSampleLevel(voxel_texture, texture_sampler, position, 0.0);
