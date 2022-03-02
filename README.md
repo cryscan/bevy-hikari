@@ -1,4 +1,8 @@
 # Bevy Voxel Cone Tracing
+
+[![crates.io](https://img.shields.io/crates/v/bevy-hikari)](https://crates.io/crates/bevy-hikari)
+[![docs.rs](https://docs.rs/bevy-hikari/badge.svg)](https://docs.rs/bevy-hikari)
+
 <img src="assets/screenshots/cover.gif" width="427" height="240" />
 
 `bevy-hikari` is an implementation of voxel cone tracing global illumination with anisotropic mip-mapping in [Bevy](https://bevyengine.org/).
