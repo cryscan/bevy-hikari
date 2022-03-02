@@ -2,9 +2,12 @@
 name = "bevy-hikari"
 version = "0.1.0"
 edition = "2021"
+authors = ["Zhenyuan Zhang <cryscan@umich.edu>"]
+license = "MIT"
+description = "Voxel Cone Tracing Global Illumination for the Bevy Engine."
+keywords = ["gamedev", "graphics", "bevy", "3d"]
+categories = ["game-engines", "rendering"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 bevy = { version = "0.6", default-features = true, features = ["jpeg"] }
-bevy_mod_debugdump = "0.3.0"
 bevy_flycam = "0.6.0"

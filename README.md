@@ -3,7 +3,16 @@
 
 `bevy-hikari` is an implementation of voxel cone tracing global illumination with anisotropic mip-mapping in [Bevy](https://bevyengine.org/).
 
-## Controls
+## Bevy Version Support
+| `bevy` | `bevy-hikari` |
+| ------ | ------------- |
+| 0.6    | 0.1           |
+
+## Limitations
+- Only directional light is supported
+- Only support 256x256x256 voxel grid
+
+## Example Controls
 | Control              | Binding    |
 | -------------------- | ---------- |
 | Toggle Lock Cursor   | `Esc`      |
