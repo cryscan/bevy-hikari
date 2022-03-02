@@ -81,13 +81,13 @@ pub struct MipmapBindGroup {
 }
 
 pub struct VoxelPipeline {
-    material_layout: BindGroupLayout,
-    voxel_layout: BindGroupLayout,
-    mesh_pipeline: MeshPipeline,
+    pub material_layout: BindGroupLayout,
+    pub voxel_layout: BindGroupLayout,
+    pub mesh_pipeline: MeshPipeline,
 
-    mipmap_layout: BindGroupLayout,
-    mipmap_pipelines: Vec<ComputePipeline>,
-    clear_pipeline: ComputePipeline,
+    pub mipmap_layout: BindGroupLayout,
+    pub mipmap_pipelines: Vec<ComputePipeline>,
+    pub clear_pipeline: ComputePipeline,
 }
 
 impl FromWorld for VoxelPipeline {
@@ -160,7 +160,7 @@ impl FromWorld for VoxelPipeline {
         let shader = render_device.create_shader_module(&ShaderModuleDescriptor {
             label: None,
             source: ShaderSource::Wgsl(Cow::Borrowed(
-                &include_str!("../shaders/mipmap.wgsl").replace("\r\n", "\n"),
+                &include_str!("shaders/mipmap.wgsl").replace("\r\n", "\n"),
             )),
         });
 

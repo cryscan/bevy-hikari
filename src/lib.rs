@@ -50,11 +50,11 @@ impl Plugin for VoxelConeTracingPlugin {
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
             VOXEL_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("../shaders/voxel.wgsl").replace("\r\n", "\n")),
+            Shader::from_wgsl(include_str!("shaders/voxel.wgsl").replace("\r\n", "\n")),
         );
         shaders.set_untracked(
             TRACING_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("../shaders/tracing.wgsl").replace("\r\n", "\n")),
+            Shader::from_wgsl(include_str!("shaders/tracing.wgsl").replace("\r\n", "\n")),
         );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
@@ -183,9 +183,9 @@ impl Default for Volume {
 
 #[derive(Component, Clone)]
 pub struct VolumeOverlay {
-    size: Extent3d,
-    color_attachment: Handle<Image>,
-    resolve_target: Handle<Image>,
+    pub size: Extent3d,
+    pub color_attachment: Handle<Image>,
+    pub resolve_target: Handle<Image>,
 }
 
 #[derive(Component)]
@@ -210,7 +210,7 @@ pub struct VolumeBindings {
 }
 
 #[derive(Clone, AsStd140)]
-struct GpuVolume {
+pub struct GpuVolume {
     min: Vec3,
     max: Vec3,
 }

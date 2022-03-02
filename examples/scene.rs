@@ -1,12 +1,10 @@
-use crate::voxel_cone_tracing::Volume;
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
 };
 use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
+use bevy_hikari::{Volume, VoxelConeTracingPlugin};
 use std::f32::consts::PI;
-
-mod voxel_cone_tracing;
 
 fn main() {
     let mut app = App::new();
@@ -16,12 +14,10 @@ fn main() {
         .add_plugin(NoCameraPlayerPlugin)
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(voxel_cone_tracing::VoxelConeTracingPlugin)
+        .add_plugin(VoxelConeTracingPlugin)
         .add_startup_system(setup)
         .add_system(controller_system)
         .add_system(light_rotate_system);
-
-    // bevy_mod_debugdump::print_render_graph(&mut app);
 
     app.run();
 }

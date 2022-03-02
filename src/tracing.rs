@@ -49,9 +49,9 @@ impl Plugin for TracingPlugin {
 }
 
 pub struct TracingPipeline {
-    tracing_layout: BindGroupLayout,
-    anisotropic_layout: BindGroupLayout,
-    mesh_pipeline: MeshPipeline,
+    pub tracing_layout: BindGroupLayout,
+    pub anisotropic_layout: BindGroupLayout,
+    pub mesh_pipeline: MeshPipeline,
 }
 
 impl FromWorld for TracingPipeline {
