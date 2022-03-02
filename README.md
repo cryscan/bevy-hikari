@@ -1,5 +1,5 @@
 # Bevy Voxel Cone Tracing
-![cover](assets/screenshots/cover.png)
+![cover](assets/screenshots/cover.gif)
 
 `bevy-hikari` is an implementation of voxel cone tracing global illumination with anisotropic mip-mapping in [Bevy](https://bevyengine.org/).
 
