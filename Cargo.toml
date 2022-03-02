@@ -5,6 +5,8 @@ edition = "2021"
 authors = ["Zhenyuan Zhang <cryscan@umich.edu>"]
 license = "MIT"
 description = "Voxel Cone Tracing Global Illumination for the Bevy Engine."
+homepage = "https://github.com/cryscan/bevy-hikari"
+repository = "https://github.com/cryscan/bevy-hikari"
 keywords = ["gamedev", "graphics", "bevy", "3d"]
 categories = ["game-engines", "rendering"]
 

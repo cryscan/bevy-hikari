@@ -1,3 +1,8 @@
+//! # bevy-hikari
+//!
+//! An implementation of Voxel Cone Tracing Global Illumination for [bevy].
+//!
+
 use self::{tracing::*, voxel::*};
 use bevy::{
     core_pipeline,
