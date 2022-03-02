@@ -54,6 +54,7 @@ impl Plugin for VoxelPlugin {
     }
 }
 
+/// The plugin register the voxelization draw functions/systems for a [`SpecializedMaterial`].
 #[derive(Default)]
 pub struct VoxelMaterialPlugin<M: SpecializedMaterial>(PhantomData<M>);
 impl<M: SpecializedMaterial> Plugin for VoxelMaterialPlugin<M> {
@@ -199,7 +200,7 @@ impl SpecializedPipeline for VoxelPipeline {
         let shader = VOXEL_SHADER_HANDLE.typed::<Shader>();
 
         let mut descriptor = self.mesh_pipeline.specialize(key);
-        descriptor.fragment.as_mut().unwrap().shader = shader.clone();
+        descriptor.fragment.as_mut().unwrap().shader = shader;
         descriptor.layout = Some(vec![
             self.mesh_pipeline.view_layout.clone(),
             self.material_layout.clone(),
@@ -258,6 +259,7 @@ pub fn add_volume_views(mut commands: Commands, mut volumes: Query<&mut Volume>)
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn check_visibility(
     mut view_query: Query<
         (&mut VisibleEntities, &Frustum, Option<&RenderLayers>),
@@ -346,6 +348,7 @@ pub fn extract_views(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn queue_volume_view_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
@@ -471,6 +474,7 @@ pub fn queue_voxel_bind_groups(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn queue_voxel_meshes<M: SpecializedMaterial>(
     voxel_draw_functions: Res<DrawFunctions<Voxel>>,
     voxel_pipeline: Res<VoxelPipeline>,
@@ -740,6 +744,7 @@ impl render_graph::Node for MipmapPassNode {
         self.volume_query.update_archetypes(world);
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn run(
         &self,
         _graph: &mut render_graph::RenderGraphContext,

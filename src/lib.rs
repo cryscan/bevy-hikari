@@ -33,14 +33,17 @@ pub mod draw_3d_graph {
     }
 }
 
+pub use voxel::VoxelMaterialPlugin;
+
+/// The main plugin, registers required systems and resources.
+/// The only material registered is [`StandardMaterial`].
+/// To register custom [`Material`], add [`VoxelMaterialPlugin`] to the app.
 #[derive(Default)]
 pub struct VoxelConeTracingPlugin;
 
 impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
-        app
-            //.add_plugin(MaterialPlugin::<OverlayMaterial>::default())
-            .add_plugin(VoxelPlugin)
+        app.add_plugin(VoxelPlugin)
             .add_plugin(TracingPlugin)
             .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_overlay.exclusive_system())
@@ -158,6 +161,7 @@ pub enum VoxelConeTracingSystems {
     QueueTracingBindGroups,
 }
 
+/// A component attached to [`Camera`] to indicate the volume of voxelization.
 #[derive(Component, Clone)]
 pub struct Volume {
     pub min: Vec3,

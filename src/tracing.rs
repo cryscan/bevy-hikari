@@ -125,7 +125,7 @@ impl SpecializedPipeline for TracingPipeline {
         let shader = TRACING_SHADER_HANDLE.typed::<Shader>();
 
         let mut descriptor = self.mesh_pipeline.specialize(key);
-        descriptor.fragment.as_mut().unwrap().shader = shader.clone();
+        descriptor.fragment.as_mut().unwrap().shader = shader;
         // descriptor.fragment.as_mut().unwrap().targets[0].blend = Some(BlendState::ALPHA_BLENDING);
         descriptor.depth_stencil = Some(DepthStencilState {
             format: TextureFormat::Depth32Float,
@@ -155,6 +155,7 @@ pub struct TracingBindGroup {
     anisotropic: BindGroup,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn queue_tracing(
     tracing_draw_functions: Res<DrawFunctions<Tracing>>,
     tracing_pipeline: Res<TracingPipeline>,
@@ -348,8 +349,8 @@ impl render_graph::Node for TracingPassNode {
         };
 
         let images = world.get_resource::<RenderAssets<Image>>().unwrap();
-        let ref color_attachment = images[&overlay.color_attachment].texture_view;
-        let ref resolve_target = images[&overlay.resolve_target].texture_view;
+        let color_attachment = &images[&overlay.color_attachment].texture_view;
+        let resolve_target = &images[&overlay.resolve_target].texture_view;
 
         let pass_descriptor = RenderPassDescriptor {
             label: Some("tracing_pass"),
