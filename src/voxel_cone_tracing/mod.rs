@@ -205,7 +205,7 @@ pub struct VolumeColorAttachment {
 pub struct VolumeBindings {
     pub overlay_depth_texture: CachedTexture,
     pub voxel_texture: CachedTexture,
-    pub anisotropic_texture: CachedTexture,
+    pub anisotropic_textures: Vec<CachedTexture>,
     pub texture_sampler: Sampler,
 }
 
@@ -314,22 +314,26 @@ pub fn prepare_volumes(
             },
         );
 
-        let anisotropic_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: Some("voxel_anisotropic_texture"),
-                size: Extent3d {
-                    width: (VOXEL_SIZE / 2) as u32,
-                    height: (VOXEL_SIZE / 2) as u32,
-                    depth_or_array_layers: 6 * (VOXEL_SIZE / 2) as u32,
-                },
-                mip_level_count: VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT as u32,
-                sample_count: 1,
-                dimension: TextureDimension::D3,
-                format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            },
-        );
+        let anisotropic_textures = (0..6)
+            .map(|_| {
+                texture_cache.get(
+                    &render_device,
+                    TextureDescriptor {
+                        label: None,
+                        size: Extent3d {
+                            width: (VOXEL_SIZE / 2) as u32,
+                            height: (VOXEL_SIZE / 2) as u32,
+                            depth_or_array_layers: (VOXEL_SIZE / 2) as u32,
+                        },
+                        mip_level_count: VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT as u32,
+                        sample_count: 1,
+                        dimension: TextureDimension::D3,
+                        format: TextureFormat::Rgba8Unorm,
+                        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                    },
+                )
+            })
+            .collect();
 
         let texture_sampler = render_device.create_sampler(&SamplerDescriptor {
             label: None,
@@ -387,7 +391,7 @@ pub fn prepare_volumes(
             VolumeBindings {
                 overlay_depth_texture,
                 voxel_texture,
-                anisotropic_texture,
+                anisotropic_textures,
                 texture_sampler,
             },
             RenderPhase::<Tracing>::default(),

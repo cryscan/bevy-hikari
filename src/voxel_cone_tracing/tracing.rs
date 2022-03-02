@@ -50,6 +50,7 @@ impl Plugin for TracingPlugin {
 
 pub struct TracingPipeline {
     tracing_layout: BindGroupLayout,
+    anisotropic_layout: BindGroupLayout,
     mesh_pipeline: MeshPipeline,
 }
 
@@ -84,24 +85,34 @@ impl FromWorld for TracingPipeline {
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D3,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
         });
 
+        let anisotropic_layout_entries = (0..6)
+            .map(|direction| BindGroupLayoutEntry {
+                binding: direction,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Float { filterable: true },
+                    view_dimension: TextureViewDimension::D3,
+                    multisampled: false,
+                },
+                count: None,
+            })
+            .collect::<Vec<_>>();
+
+        let anisotropic_layout =
+            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("isotropic_layout"),
+                entries: anisotropic_layout_entries.as_slice(),
+            });
+
         Self {
             tracing_layout,
+            anisotropic_layout,
             mesh_pipeline,
         }
     }
@@ -131,6 +142,7 @@ impl SpecializedPipeline for TracingPipeline {
             self.mesh_pipeline.view_layout.clone(),
             self.tracing_layout.clone(),
             self.mesh_pipeline.mesh_layout.clone(),
+            self.anisotropic_layout.clone(),
         ]);
 
         descriptor
@@ -139,7 +151,8 @@ impl SpecializedPipeline for TracingPipeline {
 
 #[derive(Component)]
 pub struct TracingBindGroup {
-    value: BindGroup,
+    tracing: BindGroup,
+    anisotropic: BindGroup,
 }
 
 pub fn queue_tracing(
@@ -192,7 +205,7 @@ pub fn queue_tracing_bind_groups(
     volume_query: Query<(Entity, &VolumeBindings), With<Volume>>,
 ) {
     for (view, volume_bindings) in volume_query.iter() {
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+        let tracing = render_device.create_bind_group(&BindGroupDescriptor {
             label: Some("tracing_bind_group"),
             layout: &tracing_pipeline.tracing_layout,
             entries: &[
@@ -208,20 +221,31 @@ pub fn queue_tracing_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(
-                        &volume_bindings.anisotropic_texture.default_view,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 3,
                     resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
                 },
             ],
         });
 
-        commands
-            .entity(view)
-            .insert(TracingBindGroup { value: bind_group });
+        let anisotropic_bindings = (0..6)
+            .map(|direction| {
+                let view = &volume_bindings.anisotropic_textures[direction].default_view;
+                BindGroupEntry {
+                    binding: direction as u32,
+                    resource: BindingResource::TextureView(view),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let anisotropic = render_device.create_bind_group(&BindGroupDescriptor {
+            label: Some("anisotropic_bind_group"),
+            layout: &tracing_pipeline.anisotropic_layout,
+            entries: anisotropic_bindings.as_slice(),
+        });
+
+        commands.entity(view).insert(TracingBindGroup {
+            tracing,
+            anisotropic,
+        });
     }
 }
 
@@ -259,13 +283,13 @@ impl CachedPipelinePhaseItem for Tracing {
 pub type DrawTracingMesh = (
     SetItemPipeline,
     SetMeshViewBindGroup<0>,
-    SetTracingBindGroup<1>,
+    SetTracingBindGroup<1, 3>,
     SetMeshBindGroup<2>,
     DrawMesh,
 );
 
-pub struct SetTracingBindGroup<const I: usize>;
-impl<const I: usize> EntityRenderCommand for SetTracingBindGroup<I> {
+pub struct SetTracingBindGroup<const I: usize, const J: usize>;
+impl<const I: usize, const J: usize> EntityRenderCommand for SetTracingBindGroup<I, J> {
     type Param = SQuery<(Read<VolumeUniformOffset>, Read<TracingBindGroup>)>;
 
     fn render<'w>(
@@ -275,7 +299,8 @@ impl<const I: usize> EntityRenderCommand for SetTracingBindGroup<I> {
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> bevy::render::render_phase::RenderCommandResult {
         let (volume_uniform_offset, bind_group) = query.get(view).unwrap();
-        pass.set_bind_group(I, &bind_group.value, &[volume_uniform_offset.offset]);
+        pass.set_bind_group(I, &bind_group.tracing, &[volume_uniform_offset.offset]);
+        pass.set_bind_group(J, &bind_group.anisotropic, &[]);
         RenderCommandResult::Success
     }
 }
