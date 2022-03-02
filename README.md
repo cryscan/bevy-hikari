@@ -9,10 +9,15 @@
 | 0.6    | 0.1           |
 
 ## Limitations
+The implementation is very basic and have, but not limited to, the following limitations:
 - Only directional light is supported
 - Only support 256x256x256 voxel grid
+- Only with indirect diffuse light, no glossy reflections
 
-## Example Controls
+## Examples
+Two examples are included: one minimal example, one in which can move around and adjust light directions.
+
+### Controls for the Example [`scene.rs`](examples/scene.rs)
 | Control              | Binding    |
 | -------------------- | ---------- |
 | Toggle Lock Cursor   | `Esc`      |
