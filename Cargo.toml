@@ -3,7 +3,7 @@ name = "bevy-hikari"
 version = "0.1.0"
 edition = "2021"
 authors = ["Zhenyuan Zhang <cryscan@umich.edu>"]
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "Voxel Cone Tracing Global Illumination for the Bevy Engine."
 homepage = "https://github.com/cryscan/bevy-hikari"
 repository = "https://github.com/cryscan/bevy-hikari"
@@ -11,5 +11,8 @@ keywords = ["gamedev", "graphics", "bevy", "3d"]
 categories = ["game-engines", "rendering"]
 
 [dependencies]
+bevy = { version = "0.6", default-features = false, features = ["render"] }
+
+[dev-dependencies]
 bevy = { version = "0.6", default-features = true, features = ["jpeg"] }
 bevy_flycam = "0.6.0"

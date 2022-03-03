@@ -729,19 +729,20 @@ impl render_graph::Node for VoxelPassNode {
 }
 
 pub struct MipmapPassNode {
-    volume_query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
 }
 
 impl MipmapPassNode {
     pub fn new(world: &mut World) -> Self {
-        let volume_query = QueryState::new(world);
-        Self { volume_query }
+        Self {
+            query: QueryState::new(world),
+        }
     }
 }
 
 impl render_graph::Node for MipmapPassNode {
     fn update(&mut self, world: &mut World) {
-        self.volume_query.update_archetypes(world);
+        self.query.update_archetypes(world);
     }
 
     #[allow(clippy::needless_range_loop)]
@@ -756,7 +757,7 @@ impl render_graph::Node for MipmapPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for mipmap_bind_group in self.volume_query.iter_manual(world) {
+        for mipmap_bind_group in self.query.iter_manual(world) {
             for (level, bind_groups) in mipmap_bind_group.mipmaps.iter().enumerate() {
                 for direction in 0..6 {
                     let size = (VOXEL_SIZE / (2 << level)) as u32;
@@ -773,19 +774,20 @@ impl render_graph::Node for MipmapPassNode {
 }
 
 pub struct VoxelClearPassNode {
-    volume_query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
 }
 
 impl VoxelClearPassNode {
     pub fn new(world: &mut World) -> Self {
-        let volume_query = QueryState::new(world);
-        Self { volume_query }
+        Self {
+            query: QueryState::new(world),
+        }
     }
 }
 
 impl render_graph::Node for VoxelClearPassNode {
     fn update(&mut self, world: &mut World) {
-        self.volume_query.update_archetypes(world);
+        self.query.update_archetypes(world);
     }
 
     fn run(
@@ -801,7 +803,7 @@ impl render_graph::Node for VoxelClearPassNode {
 
         pass.set_pipeline(&pipeline.clear_pipeline);
 
-        for mipmap_bind_group in self.volume_query.iter_manual(world) {
+        for mipmap_bind_group in self.query.iter_manual(world) {
             let count = (VOXEL_SIZE / 4) as u32;
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
             pass.dispatch(count, count, count);
