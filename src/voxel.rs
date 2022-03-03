@@ -21,9 +21,9 @@ use bevy::{
         render_asset::RenderAssets,
         render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
-            DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
-            RenderPhase, SetItemPipeline, TrackedRenderPass,
+            AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
+            EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase,
+            SetItemPipeline, TrackedRenderPass,
         },
         render_resource::{std140::AsStd140, *},
         renderer::RenderDevice,
@@ -48,8 +48,7 @@ impl Plugin for VoxelPlugin {
                 .add_system_to_stage(
                     RenderStage::Queue,
                     queue_mipmap_bind_groups.label(VoxelConeTracingSystems::QueueMipmapBindGroups),
-                )
-                .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Voxel>);
+                );
         }
     }
 }
