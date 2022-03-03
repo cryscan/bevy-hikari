@@ -38,6 +38,7 @@ pub mod draw_3d_graph {
         pub const CLEAR_PASS: &str = "voxel_clear_pass";
         pub const MIPMAP_PASS: &str = "mipmap_pass";
         pub const TRACING_PASS: &str = "tracing_pass";
+        pub const OVERLAY_PASS: &str = "overlay_pass";
     }
 }
 
@@ -53,8 +54,8 @@ impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(VoxelPlugin)
             .add_plugin(TracingPlugin)
+            .add_plugin(OverlayPlugin)
             .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
-            .add_plugin(MaterialPlugin::<OverlayMaterial>::default())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_overlay.exclusive_system())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
             .add_system_to_stage(CoreStage::PostUpdate, check_visibility);
@@ -82,6 +83,7 @@ impl Plugin for VoxelConeTracingPlugin {
         let clear_pass_node = VoxelClearPassNode::new(&mut render_app.world);
         let mipmap_pass_node = MipmapPassNode::new(&mut render_app.world);
         let tracing_pass_node = TracingPassNode::new(&mut render_app.world);
+        let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
 
         render_app
             .init_resource::<VolumeMeta>()
@@ -117,6 +119,7 @@ impl Plugin for VoxelConeTracingPlugin {
         draw_3d_graph.add_node(draw_3d_graph::node::VOXEL_PASS, voxel_pass_node);
         draw_3d_graph.add_node(draw_3d_graph::node::MIPMAP_PASS, mipmap_pass_node);
         draw_3d_graph.add_node(draw_3d_graph::node::TRACING_PASS, tracing_pass_node);
+        draw_3d_graph.add_node(draw_3d_graph::node::OVERLAY_PASS, overlay_pass_node);
 
         draw_3d_graph
             .add_slot_edge(
@@ -156,6 +159,20 @@ impl Plugin for VoxelConeTracingPlugin {
             .add_node_edge(
                 core_pipeline::draw_3d_graph::node::MAIN_PASS,
                 draw_3d_graph::node::TRACING_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_slot_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
+                draw_3d_graph::node::OVERLAY_PASS,
+                VoxelPassNode::IN_VIEW,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph::node::TRACING_PASS,
+                draw_3d_graph::node::OVERLAY_PASS,
             )
             .unwrap();
     }
