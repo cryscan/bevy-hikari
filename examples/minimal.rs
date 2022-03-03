@@ -68,7 +68,4 @@ fn setup(
             Vec3::new(-2.5, -2.5, -2.5),
             Vec3::new(2.5, 2.5, 2.5),
         ));
-
-    // Ui camera is needed because the GI is rendered to a transparent UI node
-    commands.spawn_bundle(UiCameraBundle::default());
 }

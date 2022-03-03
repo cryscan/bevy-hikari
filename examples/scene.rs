@@ -193,8 +193,6 @@ fn setup(
             Vec3::new(2.5, 2.5, 2.5),
         ))
         .insert(FlyCam);
-
-    commands.spawn_bundle(UiCameraBundle::default());
 }
 
 fn controller_system(
