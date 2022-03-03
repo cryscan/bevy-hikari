@@ -3,7 +3,7 @@
 //! An implementation of Voxel Cone Tracing Global Illumination for [bevy].
 //!
 
-use self::{tracing::*, voxel::*};
+use self::{overlay::*, tracing::*, voxel::*};
 use bevy::{
     core_pipeline,
     prelude::*,
@@ -18,6 +18,7 @@ use bevy::{
     },
 };
 
+mod overlay;
 mod tracing;
 mod voxel;
 
@@ -25,9 +26,11 @@ pub const VOXEL_SIZE: usize = 256;
 pub const VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT: usize = 8;
 
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984738);
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984740);
 pub const TRACING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984840);
+pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984940);
 
 pub mod draw_3d_graph {
     pub mod node {
@@ -51,6 +54,7 @@ impl Plugin for VoxelConeTracingPlugin {
         app.add_plugin(VoxelPlugin)
             .add_plugin(TracingPlugin)
             .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
+            .add_plugin(MaterialPlugin::<OverlayMaterial>::default())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_overlay.exclusive_system())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
             .add_system_to_stage(CoreStage::PostUpdate, check_visibility);
@@ -63,6 +67,10 @@ impl Plugin for VoxelConeTracingPlugin {
         shaders.set_untracked(
             TRACING_SHADER_HANDLE,
             Shader::from_wgsl(include_str!("shaders/tracing.wgsl").replace("\r\n", "\n")),
+        );
+        shaders.set_untracked(
+            OVERLAY_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/overlay.wgsl").replace("\r\n", "\n")),
         );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
@@ -231,6 +239,8 @@ pub struct VolumeMeta {
 
 pub fn add_volume_overlay(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<OverlayMaterial>>,
     mut images: ResMut<Assets<Image>>,
     msaa: Res<Msaa>,
     windows: Res<Windows>,
@@ -267,12 +277,9 @@ pub fn add_volume_overlay(
                 resolve_target: image.clone(),
             });
 
-            commands.spawn_bundle(NodeBundle {
-                style: Style {
-                    size: Size::new(Val::Percent(100.0), Val::Percent(100.0)),
-                    ..Default::default()
-                },
-                image: UiImage(image),
+            commands.spawn_bundle(MaterialMeshBundle::<OverlayMaterial> {
+                mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
+                material: materials.add(OverlayMaterial(image)),
                 ..Default::default()
             });
         }
