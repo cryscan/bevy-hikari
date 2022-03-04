@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use super::{
     GpuVolume, Volume, VolumeBindings, VolumeMeta, VolumeOverlay, VolumeUniformOffset,
     VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
@@ -7,7 +9,7 @@ use bevy::{
     ecs::system::lifetimeless::{Read, SQuery},
     pbr::{
         DrawMesh, MeshPipeline, MeshPipelineKey, MeshUniform, SetMeshBindGroup,
-        SetMeshViewBindGroup,
+        SetMeshViewBindGroup, SpecializedMaterial,
     },
     prelude::*,
     render::{
@@ -36,14 +38,24 @@ impl Plugin for TracingPlugin {
                 .add_render_command::<Tracing, DrawTracingMesh>()
                 .add_system_to_stage(
                     RenderStage::Queue,
-                    queue_tracing.label(VoxelConeTracingSystems::QueueTracing),
-                )
-                .add_system_to_stage(
-                    RenderStage::Queue,
                     queue_tracing_bind_groups
                         .label(VoxelConeTracingSystems::QueueTracingBindGroups),
                 )
                 .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Tracing>);
+        }
+    }
+}
+
+/// The plugin registers the GI draw functions/systems for a [`SpecializedMaterial`].
+#[derive(Default)]
+pub struct TracingMaterialPlugin<M: SpecializedMaterial>(PhantomData<M>);
+impl<M: SpecializedMaterial> Plugin for TracingMaterialPlugin<M> {
+    fn build(&self, app: &mut App) {
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.add_system_to_stage(
+                RenderStage::Queue,
+                queue_tracing_meshes::<M>.label(VoxelConeTracingSystems::QueueTracing),
+            );
         }
     }
 }
@@ -156,11 +168,12 @@ pub struct TracingBindGroup {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn queue_tracing(
+pub fn queue_tracing_meshes<M: SpecializedMaterial>(
     tracing_draw_functions: Res<DrawFunctions<Tracing>>,
     tracing_pipeline: Res<TracingPipeline>,
-    meshes: Query<(&Handle<Mesh>, &MeshUniform)>,
+    material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform)>,
     render_meshes: Res<RenderAssets<Mesh>>,
+    render_materials: Res<RenderAssets<M>>,
     mut pipelines: ResMut<SpecializedPipelines<TracingPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     msaa: Res<Msaa>,
@@ -176,7 +189,11 @@ pub fn queue_tracing(
         let inverse_view_row_2 = inverse_view_matrix.row(2);
 
         for entity in visible_entities.entities.iter().cloned() {
-            if let Ok((mesh_handle, mesh_uniform)) = meshes.get(entity) {
+            if let Ok((material_handle, mesh_handle, mesh_uniform)) = material_meshes.get(entity) {
+                if !render_materials.contains_key(material_handle) {
+                    continue;
+                }
+
                 let mut key = MeshPipelineKey::from_msaa_samples(msaa.samples);
                 if let Some(mesh) = render_meshes.get(mesh_handle) {
                     if mesh.has_tangents {

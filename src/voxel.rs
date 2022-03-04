@@ -53,7 +53,7 @@ impl Plugin for VoxelPlugin {
     }
 }
 
-/// The plugin register the voxelization draw functions/systems for a [`SpecializedMaterial`].
+/// The plugin registers the voxel draw functions/systems for a [`SpecializedMaterial`].
 #[derive(Default)]
 pub struct VoxelMaterialPlugin<M: SpecializedMaterial>(PhantomData<M>);
 impl<M: SpecializedMaterial> Plugin for VoxelMaterialPlugin<M> {
