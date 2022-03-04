@@ -42,6 +42,7 @@ pub mod draw_3d_graph {
     }
 }
 
+pub use tracing::TracingMaterialPlugin;
 pub use voxel::VoxelMaterialPlugin;
 
 /// The main plugin, registers required systems and resources.
@@ -56,6 +57,7 @@ impl Plugin for VoxelConeTracingPlugin {
             .add_plugin(TracingPlugin)
             .add_plugin(OverlayPlugin)
             .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
+            .add_plugin(TracingMaterialPlugin::<StandardMaterial>::default())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_overlay.exclusive_system())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
             .add_system_to_stage(CoreStage::PostUpdate, check_visibility);
