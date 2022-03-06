@@ -392,7 +392,7 @@ pub fn prepare_volumes(
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
-                    sample_count: 4,
+                    sample_count: 1,
                     dimension: TextureDimension::D2,
                     format: TextureFormat::Bgra8UnormSrgb,
                     usage: TextureUsages::RENDER_ATTACHMENT,
