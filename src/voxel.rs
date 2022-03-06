@@ -209,7 +209,7 @@ impl SpecializedPipeline for VoxelPipeline {
         descriptor.primitive.cull_mode = None;
         descriptor.depth_stencil = None;
         descriptor.multisample = MultisampleState {
-            count: 4,
+            count: 1,
             ..Default::default()
         };
 
