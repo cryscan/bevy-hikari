@@ -235,6 +235,7 @@ fn controller_system(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn light_rotate_system(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,

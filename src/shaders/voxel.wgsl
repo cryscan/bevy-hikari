@@ -53,10 +53,23 @@ struct Volume {
     max: vec3<f32>;
 };
 
+struct Voxel {
+    r: atomic<u32>;
+    g: atomic<u32>;
+    b: atomic<u32>;
+    a: atomic<u32>;
+};
+
+struct VoxelBuffer {
+    data: array<Voxel>;
+};
+
 [[group(3), binding(0)]]
 var<uniform> volume: Volume;
 [[group(3), binding(1)]]
-var voxel_texture: texture_storage_3d<rgba8unorm, write>;
+var voxel_texture: texture_3d<f32>;
+[[group(3), binding(2)]]
+var<storage, read_write> voxel_buffer: VoxelBuffer;
 
 let PI: f32 = 3.141592653589793;
 
@@ -154,6 +167,11 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
 #endif
 }
 
+fn linear_index(index: vec3<i32>) -> i32 {
+    let dims = textureDimensions(voxel_texture);
+    return index.x + index.y * dims.x + index.z * dims.x * dims.y;
+}
+
 struct FragmentInput {
     [[builtin(position)]] clip_position: vec4<f32>;
     [[location(0)]] world_position: vec4<f32>;
@@ -243,7 +261,12 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     // tone_mapping
     output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
     output_color = vec4<f32>(pow(output_color.rgb, vec3<f32>(1.0 / 2.2)), output_color.a);
-    textureStore(voxel_texture, index, output_color);
+    
+    let voxel = &voxel_buffer.data[linear_index(index)];
+    atomicAdd(&(*voxel).r, u32(output_color.r * 255.));
+    atomicAdd(&(*voxel).g, u32(output_color.g * 255.));
+    atomicAdd(&(*voxel).b, u32(output_color.b * 255.));
+    atomicAdd(&(*voxel).a, u32(output_color.a * 255.));
 
     return output_color;
 }

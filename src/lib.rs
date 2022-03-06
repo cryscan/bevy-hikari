@@ -19,11 +19,13 @@ use bevy::{
 };
 
 mod overlay;
+mod storage_vec;
 mod tracing;
 mod voxel;
 
 pub const VOXEL_SIZE: usize = 256;
 pub const VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT: usize = 8;
+pub const VOXEL_COUNT: usize = 16777216;
 
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984740);
@@ -42,6 +44,7 @@ pub mod draw_3d_graph {
     }
 }
 
+pub use storage_vec::StorageVec;
 pub use tracing::TracingMaterialPlugin;
 pub use voxel::VoxelMaterialPlugin;
 
@@ -232,6 +235,11 @@ pub struct VolumeUniformOffset {
     pub offset: u32,
 }
 
+#[derive(Component, Clone)]
+pub struct VoxelBufferOffset {
+    pub offset: u32,
+}
+
 #[derive(Component)]
 pub struct VolumeColorAttachment {
     pub texture: CachedTexture,
@@ -251,9 +259,20 @@ pub struct GpuVolume {
     max: Vec3,
 }
 
+#[derive(Clone, AsStd140)]
+pub struct GpuVoxel {
+    color: [f32; 4],
+}
+
+#[derive(AsStd140)]
+pub struct GpuVoxelBuffer {
+    data: [GpuVoxel; VOXEL_COUNT],
+}
+
 #[derive(Default)]
 pub struct VolumeMeta {
     volume_uniforms: DynamicUniformVec<GpuVolume>,
+    voxel_buffers: StorageVec<GpuVoxelBuffer>,
 }
 
 pub fn add_volume_overlay(
@@ -323,6 +342,7 @@ pub fn prepare_volumes(
     mut volume_meta: ResMut<VolumeMeta>,
 ) {
     volume_meta.volume_uniforms.clear();
+    volume_meta.voxel_buffers.clear();
 
     for (entity, volume, overlay) in volumes.iter_mut() {
         let volume_uniform_offset = VolumeUniformOffset {
@@ -330,6 +350,10 @@ pub fn prepare_volumes(
                 min: volume.min,
                 max: volume.max,
             }),
+        };
+
+        let voxel_buffer_offset = VoxelBufferOffset {
+            offset: volume_meta.voxel_buffers.push(&render_device),
         };
 
         let voxel_texture = texture_cache.get(
@@ -401,6 +425,7 @@ pub fn prepare_volumes(
 
             commands.entity(view).insert_bundle((
                 volume_uniform_offset.clone(),
+                voxel_buffer_offset.clone(),
                 VolumeColorAttachment {
                     texture: color_texture,
                 },
@@ -423,6 +448,7 @@ pub fn prepare_volumes(
 
         commands.entity(entity).insert_bundle((
             volume_uniform_offset.clone(),
+            voxel_buffer_offset.clone(),
             VolumeBindings {
                 overlay_depth_texture,
                 voxel_texture,
