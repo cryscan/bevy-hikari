@@ -9,7 +9,8 @@ use std::f32::consts::PI;
 fn main() {
     let mut app = App::new();
 
-    app.insert_resource(Msaa { samples: 4 })
+    app.insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_plugin(NoCameraPlayerPlugin)
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
@@ -40,7 +41,7 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(0.6, 1.0, 0.6),
-            perceptual_roughness: 1.0,
+            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
@@ -55,7 +56,7 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(1.0, 0.5, 0.5),
-            perceptual_roughness: 1.0,
+            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
@@ -70,7 +71,7 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(1.0, 1.0, 1.0),
-            perceptual_roughness: 1.0,
+            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
@@ -85,7 +86,7 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(0.2, 0.8, 1.0),
-            perceptual_roughness: 1.0,
+            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
@@ -235,6 +236,7 @@ fn controller_system(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn light_rotate_system(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,

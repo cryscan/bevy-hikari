@@ -1,6 +1,40 @@
 #import bevy_pbr::mesh_view_bind_group
 #import bevy_pbr::mesh_struct
 
+struct StandardMaterial {
+    base_color: vec4<f32>;
+    emissive: vec4<f32>;
+    perceptual_roughness: f32;
+    metallic: f32;
+    reflectance: f32;
+    // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
+    flags: u32;
+    alpha_cutoff: f32;
+};
+
+[[group(1), binding(0)]]
+var<uniform> material: StandardMaterial;
+[[group(1), binding(1)]]
+var base_color_texture: texture_2d<f32>;
+[[group(1), binding(2)]]
+var base_color_sampler: sampler;
+[[group(1), binding(3)]]
+var emissive_texture: texture_2d<f32>;
+[[group(1), binding(4)]]
+var emissive_sampler: sampler;
+[[group(1), binding(5)]]
+var metallic_roughness_texture: texture_2d<f32>;
+[[group(1), binding(6)]]
+var metallic_roughness_sampler: sampler;
+[[group(1), binding(7)]]
+var occlusion_texture: texture_2d<f32>;
+[[group(1), binding(8)]]
+var occlusion_sampler: sampler;
+[[group(1), binding(9)]]
+var normal_map_texture: texture_2d<f32>;
+[[group(1), binding(10)]]
+var normal_map_sampler: sampler;
+
 [[group(2), binding(0)]]
 var<uniform> mesh: Mesh;
 
@@ -8,13 +42,6 @@ struct Volume {
     min: vec3<f32>;
     max: vec3<f32>;
 };
-
-[[group(1), binding(0)]]
-var<uniform> volume: Volume;
-[[group(1), binding(1)]]
-var voxel_texture: texture_3d<f32>;
-[[group(1), binding(2)]]
-var texture_sampler: sampler;
 
 [[group(3), binding(0)]]
 var anisotropic_texture_0: texture_3d<f32>;
@@ -28,6 +55,12 @@ var anisotropic_texture_3: texture_3d<f32>;
 var anisotropic_texture_4: texture_3d<f32>;
 [[group(3), binding(5)]]
 var anisotropic_texture_5: texture_3d<f32>;
+[[group(3), binding(6)]]
+var<uniform> volume: Volume;
+[[group(3), binding(7)]]
+var voxel_texture: texture_3d<f32>;
+[[group(3), binding(8)]]
+var texture_sampler: sampler;
 
 var<private> voxel_size: f32;
 var<private> max_level: f32;
@@ -55,6 +88,11 @@ fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
     	t = normalize(cross(b, n));
     }
     return mat3x3<f32>(t, b, n);
+}
+
+fn compute_roughness(perceptual_roughness: f32) -> f32 {
+    let clamped = clamp(perceptual_roughness, 0.089, 1.0);
+    return clamped * clamped;
 }
 
 fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
@@ -122,24 +160,39 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     max_level = log2(max_component(dims));
     
     let position = normalize_position(in.world_position.xyz / in.world_position.w);
-    let normal = normalize(in.world_normal);
-    let origin = position + normal * voxel_size * SQRT3;
+    let N = normalize(in.world_normal);
+    let origin = position + N * voxel_size * SQRT3;
 
-    let tbn = normal_basis(normal);
+    let tbn = normal_basis(N);
+    let T = tbn[0];
+    let B = tbn[1];
 
     let ratio = 1.0;
     var color = vec4<f32>(0.);
-    color = color + cone(origin, normal, ratio);
+    color = color + cone(origin, N, ratio);
     // color = color + cone(origin, tbn * vec3<f32>(0.0, 0.866025, 0.5), ratio) * 0.15;
     // color = color + cone(origin, tbn * vec3<f32>(0.823639, 0.267617, 0.5), ratio) * 0.15;
     // color = color + cone(origin, tbn * vec3<f32>(0.509037, -0.700629, 0.5), ratio) * 0.15;
     // color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), ratio) * 0.15;
     // color = color + cone(origin, tbn * vec3<f32>(-0.823639, 0.267617, 0.5), ratio) * 0.15;
 
-    color = color + cone(origin, normalize(normal + tbn[0] + tbn[1]), ratio) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[0] + tbn[1]), ratio) * 0.707;
-    color = color + cone(origin, normalize(normal + tbn[0] - tbn[1]), ratio) * 0.707;
-    color = color + cone(origin, normalize(normal - tbn[0] - tbn[1]), ratio) * 0.707;
+    color = color + cone(origin, normalize(N + T + B), ratio) * 0.707;
+    color = color + cone(origin, normalize(N - T + B), ratio) * 0.707;
+    color = color + cone(origin, normalize(N + T - B), ratio) * 0.707;
+    color = color + cone(origin, normalize(N - T - B), ratio) * 0.707;
+    
+    var V: vec3<f32>;
+    let is_orthographic = view.projection[3].w == 1.0;
+    if (is_orthographic) {
+        V = normalize(vec3<f32>(view.view_proj[0].z, view.view_proj[1].z, view.view_proj[2].z));
+    } else {
+        V = normalize(view.world_position.xyz - in.world_position.xyz);
+    }
+
+    let R = -reflect(V, N);
+
+    let roughness = compute_roughness(material.perceptual_roughness);
+    color = color + cone(origin, R, roughness);
     
     return vec4<f32>(color * 0.1);
 }
