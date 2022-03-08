@@ -209,8 +209,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     let R = -reflect(V, N);
 
-    let roughness = compute_roughness(material.perceptual_roughness);
-    color = color + cone(origin, R, roughness);
+    color = color + cone(origin, R, clamp(material.perceptual_roughness, 0.1, 1.0));
     
     return vec4<f32>(color * 0.1) * mesh_color.a;
 }
