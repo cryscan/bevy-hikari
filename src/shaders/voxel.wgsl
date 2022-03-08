@@ -192,6 +192,16 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
         }
 
+        if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
+            output_color.a = 1.0;
+        } else if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK) != 0u) {
+            if (output_color.a >= material.alpha_cutoff) {
+                output_color.a = 1.0;
+            } else {
+                discard;
+            }
+        }
+
         let N = normalize(in.world_normal);
 
         var V: vec3<f32>;

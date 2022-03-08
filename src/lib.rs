@@ -5,7 +5,7 @@
 
 use self::{overlay::*, tracing::*, voxel::*};
 use bevy::{
-    core_pipeline,
+    core_pipeline::{self, AlphaMask3d, Opaque3d, Transparent3d},
     prelude::*,
     reflect::TypeUuid,
     render::{
@@ -429,7 +429,9 @@ pub fn prepare_volumes(
                 anisotropic_textures,
                 texture_sampler,
             },
-            RenderPhase::<Tracing>::default(),
+            RenderPhase::<Tracing<Opaque3d>>::default(),
+            RenderPhase::<Tracing<AlphaMask3d>>::default(),
+            RenderPhase::<Tracing<Transparent3d>>::default(),
         ));
     }
 

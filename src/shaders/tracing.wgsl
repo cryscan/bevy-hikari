@@ -12,6 +12,16 @@ struct StandardMaterial {
     alpha_cutoff: f32;
 };
 
+let STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT: u32 = 1u;
+let STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT: u32 = 2u;
+let STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT: u32 = 4u;
+let STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT: u32 = 8u;
+let STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT: u32 = 16u;
+let STANDARD_MATERIAL_FLAGS_UNLIT_BIT: u32 = 32u;
+let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE: u32 = 64u;
+let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK: u32 = 128u;
+let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND: u32 = 256u;
+
 [[group(1), binding(0)]]
 var<uniform> material: StandardMaterial;
 [[group(1), binding(1)]]
@@ -151,6 +161,7 @@ struct FragmentInput {
     [[builtin(position)]] clip_position: vec4<f32>;
     [[location(0)]] world_position: vec4<f32>;
     [[location(1)]] world_normal: vec3<f32>;
+    [[location(2)]] uv: vec2<f32>;
 };
 
 [[stage(fragment)]]
@@ -166,16 +177,23 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let tbn = normal_basis(N);
     let T = tbn[0];
     let B = tbn[1];
+    
+    var mesh_color: vec4<f32> = material.base_color;
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
+        mesh_color = mesh_color * textureSample(base_color_texture, base_color_sampler, in.uv);
+    }
+
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK) != 0u) {
+        if (mesh_color.a >= material.alpha_cutoff) {
+            mesh_color.a = 1.0;
+        } else {
+            mesh_color.a = 0.0;
+        }
+    }
 
     let ratio = 1.0;
     var color = vec4<f32>(0.);
     color = color + cone(origin, N, ratio);
-    // color = color + cone(origin, tbn * vec3<f32>(0.0, 0.866025, 0.5), ratio) * 0.15;
-    // color = color + cone(origin, tbn * vec3<f32>(0.823639, 0.267617, 0.5), ratio) * 0.15;
-    // color = color + cone(origin, tbn * vec3<f32>(0.509037, -0.700629, 0.5), ratio) * 0.15;
-    // color = color + cone(origin, tbn * vec3<f32>(-0.509037, -0.700629, 0.5), ratio) * 0.15;
-    // color = color + cone(origin, tbn * vec3<f32>(-0.823639, 0.267617, 0.5), ratio) * 0.15;
-
     color = color + cone(origin, normalize(N + T + B), ratio) * 0.707;
     color = color + cone(origin, normalize(N - T + B), ratio) * 0.707;
     color = color + cone(origin, normalize(N + T - B), ratio) * 0.707;
@@ -194,5 +212,5 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let roughness = compute_roughness(material.perceptual_roughness);
     color = color + cone(origin, R, roughness);
     
-    return vec4<f32>(color * 0.1);
+    return vec4<f32>(color * 0.1) * mesh_color.a;
 }

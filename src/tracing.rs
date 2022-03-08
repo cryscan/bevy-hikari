@@ -3,7 +3,7 @@ use super::{
     VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
 };
 use bevy::{
-    core::FloatOrd,
+    core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d},
     ecs::system::lifetimeless::{Read, SQuery},
     pbr::{
         DrawMesh, MeshPipeline, MeshPipelineKey, MeshUniform, SetMaterialBindGroup,
@@ -33,13 +33,26 @@ impl Plugin for TracingPlugin {
             render_app
                 .init_resource::<TracingPipeline>()
                 .init_resource::<SpecializedPipelines<TracingPipeline>>()
-                .init_resource::<DrawFunctions<Tracing>>()
+                .init_resource::<DrawFunctions<Tracing<Opaque3d>>>()
+                .init_resource::<DrawFunctions<Tracing<AlphaMask3d>>>()
+                .init_resource::<DrawFunctions<Tracing<Transparent3d>>>()
                 .add_system_to_stage(
                     RenderStage::Queue,
                     queue_tracing_bind_groups
                         .label(VoxelConeTracingSystems::QueueTracingBindGroups),
                 )
-                .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Tracing>);
+                .add_system_to_stage(
+                    RenderStage::PhaseSort,
+                    sort_phase_system::<Tracing<Opaque3d>>,
+                )
+                .add_system_to_stage(
+                    RenderStage::PhaseSort,
+                    sort_phase_system::<Tracing<AlphaMask3d>>,
+                )
+                .add_system_to_stage(
+                    RenderStage::PhaseSort,
+                    sort_phase_system::<Tracing<Transparent3d>>,
+                );
         }
     }
 }
@@ -51,7 +64,9 @@ impl<M: SpecializedMaterial> Plugin for TracingMaterialPlugin<M> {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
-                .add_render_command::<Tracing, DrawTracingMesh<M>>()
+                .add_render_command::<Tracing<Opaque3d>, DrawTracingMesh<M>>()
+                .add_render_command::<Tracing<AlphaMask3d>, DrawTracingMesh<M>>()
+                .add_render_command::<Tracing<Transparent3d>, DrawTracingMesh<M>>()
                 .add_system_to_stage(
                     RenderStage::Queue,
                     queue_tracing_meshes::<M>.label(VoxelConeTracingSystems::QueueTracing),
@@ -167,8 +182,11 @@ pub struct TracingBindGroup {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn queue_tracing_meshes<M: SpecializedMaterial>(
-    tracing_draw_functions: Res<DrawFunctions<Tracing>>,
+    opaque_draw_functions: Res<DrawFunctions<Tracing<Opaque3d>>>,
+    alpha_mask_draw_functions: Res<DrawFunctions<Tracing<AlphaMask3d>>>,
+    transparent_draw_functions: Res<DrawFunctions<Tracing<Transparent3d>>>,
     tracing_pipeline: Res<TracingPipeline>,
     material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform)>,
     render_meshes: Res<RenderAssets<Mesh>>,
@@ -176,39 +194,75 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
     mut pipelines: ResMut<SpecializedPipelines<TracingPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     msaa: Res<Msaa>,
-    mut view_query: Query<(&ExtractedView, &VisibleEntities, &mut RenderPhase<Tracing>)>,
+    mut view_query: Query<(
+        &ExtractedView,
+        &VisibleEntities,
+        &mut RenderPhase<Tracing<Opaque3d>>,
+        &mut RenderPhase<Tracing<AlphaMask3d>>,
+        &mut RenderPhase<Tracing<Transparent3d>>,
+    )>,
 ) {
-    let draw_mesh = tracing_draw_functions
+    let draw_opaque = opaque_draw_functions
+        .read()
+        .get_id::<DrawTracingMesh<M>>()
+        .unwrap();
+    let draw_alpha_mask = alpha_mask_draw_functions
+        .read()
+        .get_id::<DrawTracingMesh<M>>()
+        .unwrap();
+    let draw_transparent = transparent_draw_functions
         .read()
         .get_id::<DrawTracingMesh<M>>()
         .unwrap();
 
-    for (view, visible_entities, mut phase) in view_query.iter_mut() {
+    for (view, visible_entities, mut opaque_phase, mut alpha_mask_phase, mut transparent_phase) in
+        view_query.iter_mut()
+    {
         let inverse_view_matrix = view.transform.compute_matrix().inverse();
         let inverse_view_row_2 = inverse_view_matrix.row(2);
 
         for entity in visible_entities.entities.iter().cloned() {
             if let Ok((material_handle, mesh_handle, mesh_uniform)) = material_meshes.get(entity) {
-                if !render_materials.contains_key(material_handle) {
-                    continue;
-                }
+                if let Some(material) = render_materials.get(material_handle) {
+                    let mut mesh_key = MeshPipelineKey::from_msaa_samples(msaa.samples);
+                    if let Some(mesh) = render_meshes.get(mesh_handle) {
+                        if mesh.has_tangents {
+                            mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
+                        }
+                        mesh_key |=
+                            MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
 
-                let mut key = MeshPipelineKey::from_msaa_samples(msaa.samples);
-                if let Some(mesh) = render_meshes.get(mesh_handle) {
-                    if mesh.has_tangents {
-                        key |= MeshPipelineKey::VERTEX_TANGENTS;
+                        let alpha_mode = M::alpha_mode(material);
+                        if let AlphaMode::Blend = alpha_mode {
+                            mesh_key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
+                        }
+
+                        let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
+                        let pipeline_id =
+                            pipelines.specialize(&mut pipeline_cache, &tracing_pipeline, mesh_key);
+
+                        match alpha_mode {
+                            AlphaMode::Opaque => opaque_phase.add(Tracing(Opaque3d {
+                                distance: -mesh_z,
+                                pipeline: pipeline_id,
+                                entity,
+                                draw_function: draw_opaque,
+                            })),
+                            AlphaMode::Mask(_) => alpha_mask_phase.add(Tracing(AlphaMask3d {
+                                distance: -mesh_z,
+                                pipeline: pipeline_id,
+                                entity,
+                                draw_function: draw_alpha_mask,
+                            })),
+                            AlphaMode::Blend => transparent_phase.add(Tracing(Transparent3d {
+                                distance: mesh_z,
+                                pipeline: pipeline_id,
+                                entity,
+                                draw_function: draw_transparent,
+                            })),
+                        }
                     }
-                    key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                 }
-
-                let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
-                let pipeline_id = pipelines.specialize(&mut pipeline_cache, &tracing_pipeline, key);
-                phase.add(Tracing {
-                    draw_function: draw_mesh,
-                    pipeline: pipeline_id,
-                    entity,
-                    distance: -mesh_z,
-                });
             }
         }
     }
@@ -260,34 +314,38 @@ pub fn queue_tracing_bind_groups(
     }
 }
 
-pub struct Tracing {
-    distance: f32,
-    entity: Entity,
-    pipeline: CachedPipelineId,
-    draw_function: DrawFunctionId,
-}
+pub struct Tracing<T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem>(T);
 
-impl PhaseItem for Tracing {
-    type SortKey = FloatOrd;
+impl<T> PhaseItem for Tracing<T>
+where
+    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+{
+    type SortKey = T::SortKey;
 
     fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
+        self.0.sort_key()
     }
 
     fn draw_function(&self) -> DrawFunctionId {
-        self.draw_function
+        self.0.draw_function()
     }
 }
 
-impl EntityPhaseItem for Tracing {
+impl<T> EntityPhaseItem for Tracing<T>
+where
+    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+{
     fn entity(&self) -> Entity {
-        self.entity
+        self.0.entity()
     }
 }
 
-impl CachedPipelinePhaseItem for Tracing {
+impl<T> CachedPipelinePhaseItem for Tracing<T>
+where
+    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+{
     fn cached_pipeline(&self) -> CachedPipelineId {
-        self.pipeline
+        self.0.cached_pipeline()
     }
 }
 
@@ -316,10 +374,13 @@ impl<const I: usize> EntityRenderCommand for SetTracingBindGroup<I> {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct TracingPassNode {
     query: QueryState<
         (
-            &'static RenderPhase<Tracing>,
+            &'static RenderPhase<Tracing<Opaque3d>>,
+            &'static RenderPhase<Tracing<AlphaMask3d>>,
+            &'static RenderPhase<Tracing<Transparent3d>>,
             &'static VolumeOverlay,
             &'static VolumeBindings,
         ),
@@ -353,44 +414,125 @@ impl render_graph::Node for TracingPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (phase, overlay, bindings) = match self.query.get_manual(world, view_entity) {
-            Ok(query) => query,
-            Err(_) => return Ok(()),
-        };
+        let (opaque_phase, alpha_mask_phase, transparent_phase, overlay, bindings) =
+            match self.query.get_manual(world, view_entity) {
+                Ok(query) => query,
+                Err(_) => return Ok(()),
+            };
 
         let images = world.get_resource::<RenderAssets<Image>>().unwrap();
         let color_attachment = &images[&overlay.color_attachment].texture_view;
         let resolve_target = &images[&overlay.resolve_target].texture_view;
 
-        let pass_descriptor = RenderPassDescriptor {
-            label: Some("tracing_pass"),
-            color_attachments: &[RenderPassColorAttachment {
-                view: color_attachment,
-                resolve_target: Some(resolve_target),
-                ops: Operations {
-                    load: LoadOp::Clear(Color::NONE.into()),
-                    store: true,
-                },
-            }],
-            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                view: &bindings.overlay_depth_texture.default_view,
-                depth_ops: Some(Operations {
-                    load: LoadOp::Clear(0.0),
-                    store: false,
+        {
+            let pass_descriptor = RenderPassDescriptor {
+                label: Some("tracing_opaque_pass"),
+                color_attachments: &[RenderPassColorAttachment {
+                    view: color_attachment,
+                    resolve_target: Some(resolve_target),
+                    ops: Operations {
+                        load: LoadOp::Clear(Color::NONE.into()),
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: &bindings.overlay_depth_texture.default_view,
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Clear(0.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
                 }),
-                stencil_ops: None,
-            }),
-        };
+            };
 
-        let draw_functions = world.get_resource::<DrawFunctions<Tracing>>().unwrap();
-        let render_pass = render_context
-            .command_encoder
-            .begin_render_pass(&pass_descriptor);
-        let mut draw_functions = draw_functions.write();
-        let mut tracked_pass = TrackedRenderPass::new(render_pass);
-        for item in &phase.items {
-            let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
-            draw_function.draw(world, &mut tracked_pass, view_entity, item);
+            let render_pass = render_context
+                .command_encoder
+                .begin_render_pass(&pass_descriptor);
+
+            let mut draw_functions = world
+                .get_resource::<DrawFunctions<Tracing<Opaque3d>>>()
+                .unwrap()
+                .write();
+            let mut tracked_pass = TrackedRenderPass::new(render_pass);
+
+            for item in &opaque_phase.items {
+                let draw_function = draw_functions.get_mut(item.0.draw_function).unwrap();
+                draw_function.draw(world, &mut tracked_pass, view_entity, item);
+            }
+        }
+
+        {
+            let pass_descriptor = RenderPassDescriptor {
+                label: Some("tracing_alpha_mask_pass"),
+                color_attachments: &[RenderPassColorAttachment {
+                    view: color_attachment,
+                    resolve_target: Some(resolve_target),
+                    ops: Operations {
+                        load: LoadOp::Load,
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: &bindings.overlay_depth_texture.default_view,
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Load,
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
+            };
+
+            let render_pass = render_context
+                .command_encoder
+                .begin_render_pass(&pass_descriptor);
+
+            let mut draw_functions = world
+                .get_resource::<DrawFunctions<Tracing<AlphaMask3d>>>()
+                .unwrap()
+                .write();
+            let mut tracked_pass = TrackedRenderPass::new(render_pass);
+
+            for item in &alpha_mask_phase.items {
+                let draw_function = draw_functions.get_mut(item.0.draw_function).unwrap();
+                draw_function.draw(world, &mut tracked_pass, view_entity, item);
+            }
+        }
+
+        {
+            let pass_descriptor = RenderPassDescriptor {
+                label: Some("tracing_transparent_pass"),
+                color_attachments: &[RenderPassColorAttachment {
+                    view: color_attachment,
+                    resolve_target: Some(resolve_target),
+                    ops: Operations {
+                        load: LoadOp::Load,
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: &bindings.overlay_depth_texture.default_view,
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Load,
+                        store: false,
+                    }),
+                    stencil_ops: None,
+                }),
+            };
+
+            let render_pass = render_context
+                .command_encoder
+                .begin_render_pass(&pass_descriptor);
+
+            let mut draw_functions = world
+                .get_resource::<DrawFunctions<Tracing<Transparent3d>>>()
+                .unwrap()
+                .write();
+            let mut tracked_pass = TrackedRenderPass::new(render_pass);
+
+            for item in &transparent_phase.items {
+                let draw_function = draw_functions.get_mut(item.0.draw_function).unwrap();
+                draw_function.draw(world, &mut tracked_pass, view_entity, item);
+            }
         }
 
         Ok(())
