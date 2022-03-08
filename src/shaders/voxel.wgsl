@@ -240,7 +240,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
 
         output_color = vec4<f32>(
-            light_accum + emissive.rgb * output_color.a,
+            (light_accum + emissive.rgb) * output_color.a,
             output_color.a
         );
     }
