@@ -41,7 +41,6 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(0.6, 1.0, 0.6),
-            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
@@ -56,7 +55,6 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(1.0, 0.5, 0.5),
-            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
@@ -71,7 +69,6 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(1.0, 1.0, 1.0),
-            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
@@ -86,7 +83,6 @@ fn setup(
         mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(0.2, 0.8, 1.0),
-            perceptual_roughness: 0.4,
             ..Default::default()
         }),
         transform: Transform {
