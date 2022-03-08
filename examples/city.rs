@@ -1,6 +1,14 @@
-use bevy::prelude::*;
-use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
+use bevy::{
+    input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
+    prelude::*,
+};
 use bevy_hikari::{Volume, VoxelConeTracingPlugin};
+use smooth_bevy_cameras::{
+    controllers::orbit::{
+        ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
+    },
+    LookTransform, LookTransformPlugin,
+};
 use std::f32::consts::PI;
 
 fn main() {
@@ -9,11 +17,12 @@ fn main() {
     app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
-        .add_plugin(NoCameraPlayerPlugin)
+        .add_plugin(LookTransformPlugin)
+        .add_plugin(OrbitCameraPlugin::new(true))
         .add_plugin(VoxelConeTracingPlugin)
         .add_startup_system(setup)
-        .add_system(controller_system)
-        .add_system(light_rotate_system);
+        .add_system(light_rotate_system)
+        .add_system(camera_input_map);
 
     app.run();
 }
@@ -49,10 +58,10 @@ fn setup(
         })
         .insert(DirectionalLightTarget);
 
-    const HALF_SIZE: f32 = 15.0;
+    const HALF_SIZE: f32 = 20.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 10000.0,
+            illuminance: 100000.0,
             shadow_projection: OrthographicProjection {
                 left: -HALF_SIZE,
                 right: HALF_SIZE,
@@ -89,72 +98,43 @@ fn setup(
 
     // Camera
     commands
-        .spawn_bundle(PerspectiveCameraBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..Default::default()
-        })
+        .spawn_bundle(OrbitCameraBundle::new(
+            OrbitCameraController::default(),
+            PerspectiveCameraBundle {
+                transform: Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+                ..Default::default()
+            },
+            Vec3::new(0.0, 30.0, 30.0),
+            Vec3::ZERO,
+        ))
         .insert(Volume::new(
             Vec3::new(-15.0, -5.0, -15.0),
             Vec3::new(15.0, 25.0, 15.0),
-        ))
-        .insert(FlyCam);
-}
-
-fn controller_system(
-    windows: Res<Windows>,
-    keyboard_input: Res<Input<KeyCode>>,
-    time: Res<Time>,
-    mut controller_query: Query<&mut Transform, With<Controller>>,
-) {
-    let right = Vec3::X;
-    let forward = -Vec3::Z;
-    let speed = 2.0;
-
-    let window = windows.get_primary().unwrap();
-
-    for mut transform in controller_query.iter_mut() {
-        if !window.cursor_locked() {
-            if keyboard_input.pressed(KeyCode::W) {
-                transform.translation += forward * speed * time.delta_seconds();
-            }
-            if keyboard_input.pressed(KeyCode::A) {
-                transform.translation -= right * speed * time.delta_seconds();
-            }
-            if keyboard_input.pressed(KeyCode::S) {
-                transform.translation -= forward * speed * time.delta_seconds();
-            }
-            if keyboard_input.pressed(KeyCode::D) {
-                transform.translation += right * speed * time.delta_seconds();
-            }
-            if keyboard_input.pressed(KeyCode::E) {
-                transform.translation += Vec3::Y * speed * time.delta_seconds();
-            }
-            if keyboard_input.pressed(KeyCode::Q) {
-                transform.translation -= Vec3::Y * speed * time.delta_seconds();
-            }
-        }
-
-        let speed = 0.7;
-        transform.rotation *=
-            Quat::from_euler(EulerRot::XYZ, 0.0, speed * time.delta_seconds(), 0.0);
-    }
+        ));
 }
 
 #[allow(clippy::type_complexity)]
 fn light_rotate_system(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
-    mut query: QuerySet<(
+    mut queries: QuerySet<(
+        QueryState<&LookTransform, With<Camera>>,
         QueryState<&mut Transform, With<DirectionalLight>>,
         QueryState<&mut Transform, With<DirectionalLightTarget>>,
     )>,
 ) {
-    let mut target_query = query.q1();
-    let mut target = target_query.single_mut();
+    let query = queries.q0();
+    let look = query.single();
 
-    let right = Vec3::X;
-    let forward = -Vec3::Z;
+    let mut forward = look.target - look.eye;
+    forward.y = 0.0;
+    forward = forward.normalize_or_zero();
+    let right = forward.cross(Vec3::Y);
+
     let speed = 4.0;
+
+    let mut query = queries.q2();
+    let mut target = query.single_mut();
 
     if keyboard_input.pressed(KeyCode::Up) {
         target.translation += forward * speed * time.delta_seconds();
@@ -170,8 +150,61 @@ fn light_rotate_system(
     }
     let target = target.translation;
 
-    let mut light_query = query.q0();
-    let mut light = light_query.single_mut();
+    let mut query = queries.q1();
+    let mut light = query.single_mut();
 
     light.look_at(target, Vec3::Y);
+}
+
+pub fn camera_input_map(
+    mut events: EventWriter<ControlEvent>,
+    mut mouse_wheel_reader: EventReader<MouseWheel>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mouse_buttons: Res<Input<MouseButton>>,
+    controllers: Query<&OrbitCameraController>,
+) {
+    // Can only control one camera at a time.
+    let controller = if let Some(controller) = controllers.iter().next() {
+        controller
+    } else {
+        return;
+    };
+    let OrbitCameraController {
+        enabled,
+        mouse_rotate_sensitivity,
+        mouse_translate_sensitivity,
+        mouse_wheel_zoom_sensitivity,
+        pixels_per_line,
+        ..
+    } = *controller;
+
+    if !enabled {
+        return;
+    }
+
+    let mut cursor_delta = Vec2::ZERO;
+    for event in mouse_motion_events.iter() {
+        cursor_delta += event.delta;
+    }
+
+    if mouse_buttons.pressed(MouseButton::Left) {
+        events.send(ControlEvent::Orbit(mouse_rotate_sensitivity * cursor_delta));
+    }
+
+    if mouse_buttons.pressed(MouseButton::Right) {
+        events.send(ControlEvent::TranslateTarget(
+            mouse_translate_sensitivity * cursor_delta,
+        ));
+    }
+
+    let mut scalar = 1.0;
+    for event in mouse_wheel_reader.iter() {
+        // scale the event magnitude per pixel or per line
+        let scroll_amount = match event.unit {
+            MouseScrollUnit::Line => event.y,
+            MouseScrollUnit::Pixel => event.y / pixels_per_line,
+        };
+        scalar *= 1.0 - scroll_amount * mouse_wheel_zoom_sensitivity;
+    }
+    events.send(ControlEvent::Zoom(scalar));
 }
