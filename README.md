@@ -21,6 +21,8 @@ The implementation is very basic and have, but not limited to, the following lim
 ## Examples
 Two examples are included: one minimal example, one in which can move around and adjust light directions.
 
+You can download and test the compiled examples [here](https://github.com/cryscan/bevy-hikari/releases).
+
 ### Controls for the Example [`scene.rs`](examples/scene.rs)
 | Control              | Binding    |
 | -------------------- | ---------- |
