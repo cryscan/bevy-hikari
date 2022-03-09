@@ -1,9 +1,10 @@
 use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
+    scene::InstanceId,
 };
 use bevy_full_throttle::FullThrottlePlugin;
-use bevy_hikari::{Volume, VoxelConeTracingPlugin};
+use bevy_hikari::{NotGiReceiver, Volume, VoxelConeTracingPlugin};
 use smooth_bevy_cameras::{
     controllers::orbit::{
         ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
@@ -11,17 +12,22 @@ use smooth_bevy_cameras::{
     LookTransform, LookTransformBundle, LookTransformPlugin, Smoother,
 };
 
+#[derive(Default)]
+struct SceneInstance(Option<InstanceId>);
+
 fn main() {
     let mut app = App::new();
 
     app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa { samples: 4 })
+        .init_resource::<SceneInstance>()
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(true))
         .add_plugin(VoxelConeTracingPlugin)
         .add_plugin(FullThrottlePlugin)
         .add_startup_system(setup)
+        .add_system(scene_update)
         .add_system(light_rotate_system)
         .add_system(camera_input_map);
 
@@ -40,6 +46,8 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut scene_spawner: ResMut<SceneSpawner>,
+    mut scene_instance: ResMut<SceneInstance>,
 ) {
     // Target
     commands
@@ -86,7 +94,7 @@ fn setup(
             smoother: Smoother::new(0.8),
         });
 
-    commands
+    let parent = commands
         .spawn()
         .insert_bundle((
             Transform {
@@ -96,9 +104,11 @@ fn setup(
             },
             GlobalTransform::default(),
         ))
-        .with_children(|parent| {
-            parent.spawn_scene(asset_server.load("models/City/scene.gltf#Scene0"));
-        });
+        .id();
+
+    let scene_id =
+        scene_spawner.spawn_as_child(asset_server.load("models/City/scene.gltf#Scene0"), parent);
+    scene_instance.0 = Some(scene_id);
 
     // Camera
     commands
@@ -115,6 +125,33 @@ fn setup(
             Vec3::new(-15.0, -5.0, -15.0),
             Vec3::new(15.0, 25.0, 15.0),
         ));
+}
+
+fn scene_update(
+    mut commands: Commands,
+    query: Query<(&Name, &Children)>,
+    scene_spawner: Res<SceneSpawner>,
+    scene_instance: Res<SceneInstance>,
+    mut done: Local<bool>,
+) {
+    if !*done {
+        if let Some(instance_id) = scene_instance.0 {
+            let city_tree_name = Name::new("CityTree_T_Leaves_D_0");
+            let tree_name = Name::new("Tree_T_Leaves_D_0");
+            if let Some(entities) = scene_spawner.iter_instance_entities(instance_id) {
+                for entity in entities {
+                    if let Ok((name, children)) = query.get(entity) {
+                        if *name == city_tree_name || *name == tree_name {
+                            for child in children.iter() {
+                                commands.entity(*child).insert(NotGiReceiver);
+                            }
+                        }
+                    }
+                }
+                *done = true;
+            }
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
