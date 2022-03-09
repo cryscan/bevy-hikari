@@ -9,6 +9,7 @@ homepage = "https://github.com/cryscan/bevy-hikari"
 repository = "https://github.com/cryscan/bevy-hikari"
 keywords = ["gamedev", "graphics", "bevy", "3d"]
 categories = ["game-engines", "rendering"]
+exclude = ["assets"]
 
 [dependencies]
 bevy = { version = "0.6", default-features = false, features = ["render"] }
