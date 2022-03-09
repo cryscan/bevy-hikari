@@ -153,7 +153,6 @@ impl SpecializedPipeline for TracingPipeline {
 
         let mut descriptor = self.mesh_pipeline.specialize(key);
         descriptor.fragment.as_mut().unwrap().shader = shader;
-        // descriptor.fragment.as_mut().unwrap().targets[0].blend = Some(BlendState::ALPHA_BLENDING);
         descriptor.depth_stencil = Some(DepthStencilState {
             format: TextureFormat::Depth32Float,
             depth_write_enabled: true,

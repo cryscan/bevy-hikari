@@ -35,5 +35,7 @@ fn vertex([[builtin(vertex_index)]] id: u32) -> VertexOutput {
 
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-    return textureSample(texture, textuer_sampler, in.uv);
+    var color = textureSample(texture, textuer_sampler, in.uv);
+    color.a = color.a * 0.5;
+    return color;
 }
