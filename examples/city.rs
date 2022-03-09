@@ -2,6 +2,7 @@ use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
 };
+use bevy_full_throttle::FullThrottlePlugin;
 use bevy_hikari::{Volume, VoxelConeTracingPlugin};
 use smooth_bevy_cameras::{
     controllers::orbit::{
@@ -20,6 +21,7 @@ fn main() {
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(true))
         .add_plugin(VoxelConeTracingPlugin)
+        .add_plugin(FullThrottlePlugin)
         .add_startup_system(setup)
         .add_system(light_rotate_system)
         .add_system(camera_input_map);
