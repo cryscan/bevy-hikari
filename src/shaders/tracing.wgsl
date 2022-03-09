@@ -210,6 +210,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let R = -reflect(V, N);
 
     color = color + cone(origin, R, clamp(material.perceptual_roughness, 0.1, 1.0));
-    
-    return color * base_color * 0.13;
+
+    var output_color = color * base_color;
+    return vec4<f32>(output_color.rgb, 0.12);
 }
