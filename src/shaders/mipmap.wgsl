@@ -1,7 +1,20 @@
+struct Voxel {
+    r: atomic<u32>;
+    g: atomic<u32>;
+    b: atomic<u32>;
+    a: atomic<u32>;
+};
+
+struct VoxelBuffer {
+    data: array<Voxel>;
+};
+
 [[group(0), binding(0)]]
 var texture_in: texture_3d<f32>;
 [[group(0), binding(1)]]
 var texture_out: texture_storage_3d<rgba8unorm, write>;
+[[group(0), binding(2)]]
+var<storage, read_write> voxel_buffer: VoxelBuffer;
 
 var<workgroup> samples: array<vec3<f32>, 8>;
 
@@ -103,10 +116,41 @@ fn mipmap_5([[builtin(global_invocation_id)]] id: vec3<u32>) {
     mipmap(id, 5);
 }
 
+fn linear_index(index: vec3<i32>) -> i32 {
+    let dims = textureDimensions(texture_out);
+    return index.x + index.y * dims.x + index.z * dims.x * dims.y;
+}
+
 [[stage(compute), workgroup_size(4, 4, 4)]]
 fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
-    if (all(vec3<i32>(id) < textureDimensions(texture_out))) {
-        let clear_color = vec4<f32>(0.0);
-        textureStore(texture_out, vec3<i32>(id), clear_color);
+    let coords = vec3<i32>(id);
+    if (all(coords < textureDimensions(texture_out))) {
+        let index = linear_index(coords);
+        let voxel = &voxel_buffer.data[index];
+        atomicStore(&(*voxel).r, 0u);
+        atomicStore(&(*voxel).g, 0u);
+        atomicStore(&(*voxel).b, 0u);
+        atomicStore(&(*voxel).a, 0u);
+    }
+}
+
+[[stage(compute), workgroup_size(4, 4, 4)]]
+fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
+    let coords = vec3<i32>(id);
+    if (all(coords < textureDimensions(texture_out))) {
+        let index = linear_index(coords);
+        let voxel = &voxel_buffer.data[index];
+        
+        var color: vec4<f32>;
+        color.r = f32(atomicLoad(&(*voxel).r)) / 255.;
+        color.g = f32(atomicLoad(&(*voxel).g)) / 255.;
+        color.b = f32(atomicLoad(&(*voxel).b)) / 255.;
+        color.a = f32(atomicLoad(&(*voxel).a)) / 255.;
+
+        if (color.a > 1.0) {
+            color = color / color.a;
+        }
+
+        textureStore(texture_out, coords, color);
     }
 }

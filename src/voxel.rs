@@ -3,6 +3,7 @@ use super::{
     VolumeView, VoxelConeTracingSystems, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE,
     VOXEL_SIZE,
 };
+use crate::{GpuVoxelBuffer, VoxelBufferOffset};
 use bevy::{
     core::FloatOrd,
     ecs::system::{
@@ -88,6 +89,7 @@ pub struct VoxelPipeline {
     pub mipmap_layout: BindGroupLayout,
     pub mipmap_pipelines: Vec<ComputePipeline>,
     pub clear_pipeline: ComputePipeline,
+    pub fill_pipeline: ComputePipeline,
 }
 
 impl FromWorld for VoxelPipeline {
@@ -114,10 +116,22 @@ impl FromWorld for VoxelPipeline {
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
                         view_dimension: TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: true,
+                        min_binding_size: BufferSize::new(
+                            GpuVoxelBuffer::std140_size_static() as u64
+                        ),
                     },
                     count: None,
                 },
@@ -144,6 +158,18 @@ impl FromWorld for VoxelPipeline {
                         access: StorageTextureAccess::WriteOnly,
                         format: TextureFormat::Rgba8Unorm,
                         view_dimension: TextureViewDimension::D3,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: true,
+                        min_binding_size: BufferSize::new(
+                            GpuVoxelBuffer::std140_size_static() as u64
+                        ),
                     },
                     count: None,
                 },
@@ -174,11 +200,19 @@ impl FromWorld for VoxelPipeline {
                 })
             })
             .collect();
+
         let clear_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("clear_pipeline"),
             layout: Some(&mipmap_pipeline_layout),
             module: &shader,
             entry_point: "clear",
+        });
+
+        let fill_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("fill_pipeline"),
+            layout: Some(&mipmap_pipeline_layout),
+            module: &shader,
+            entry_point: "fill",
         });
 
         Self {
@@ -188,6 +222,7 @@ impl FromWorld for VoxelPipeline {
             mipmap_layout,
             mipmap_pipelines,
             clear_pipeline,
+            fill_pipeline,
         }
     }
 }
@@ -463,6 +498,10 @@ pub fn queue_voxel_bind_groups(
                             &bindings.voxel_texture.default_view,
                         ),
                     },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: volume_meta.voxel_buffers.binding().unwrap(),
+                    },
                 ],
             });
 
@@ -526,6 +565,7 @@ pub fn queue_mipmap_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     voxel_pipeline: Res<VoxelPipeline>,
+    volume_meta: Res<VolumeMeta>,
     volumes: Query<(Entity, &VolumeBindings), With<Volume>>,
 ) {
     for (entity, volume_bindings) in volumes.iter() {
@@ -568,6 +608,10 @@ pub fn queue_mipmap_bind_groups(
                                 binding: 1,
                                 resource: BindingResource::TextureView(texture_out),
                             },
+                            BindGroupEntry {
+                                binding: 2,
+                                resource: volume_meta.voxel_buffers.binding().unwrap(),
+                            },
                         ],
                     });
                     bind_groups.push(bind_group);
@@ -592,6 +636,10 @@ pub fn queue_mipmap_bind_groups(
                     resource: BindingResource::TextureView(
                         &volume_bindings.voxel_texture.default_view,
                     ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: volume_meta.voxel_buffers.binding().unwrap(),
                 },
             ],
         });
@@ -644,7 +692,11 @@ pub type DrawVoxelMesh<M> = (
 
 pub struct SetVoxelBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
-    type Param = SQuery<(Read<VolumeUniformOffset>, Read<VoxelBindGroup>)>;
+    type Param = SQuery<(
+        Read<VolumeUniformOffset>,
+        Read<VoxelBufferOffset>,
+        Read<VoxelBindGroup>,
+    )>;
 
     fn render<'w>(
         view: Entity,
@@ -652,8 +704,12 @@ impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
         query: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (volume_uniform_offset, bind_group) = query.get(view).unwrap();
-        pass.set_bind_group(I, &bind_group.value, &[volume_uniform_offset.offset]);
+        let (volume_uniform_offset, voxel_buffer_offset, bind_group) = query.get(view).unwrap();
+        pass.set_bind_group(
+            I,
+            &bind_group.value,
+            &[volume_uniform_offset.offset, voxel_buffer_offset.offset],
+        );
         RenderCommandResult::Success
     }
 }
@@ -728,7 +784,7 @@ impl render_graph::Node for VoxelPassNode {
 }
 
 pub struct MipmapPassNode {
-    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+    query: QueryState<(&'static MipmapBindGroup, &'static VoxelBufferOffset), With<Volume>>,
 }
 
 impl MipmapPassNode {
@@ -756,13 +812,18 @@ impl render_graph::Node for MipmapPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for mipmap_bind_group in self.query.iter_manual(world) {
+        for (mipmap_bind_group, voxel_buffer_offset) in self.query.iter_manual(world) {
+            let count = (VOXEL_SIZE / 4) as u32;
+            pass.set_pipeline(&pipeline.fill_pipeline);
+            pass.set_bind_group(0, &mipmap_bind_group.clear, &[voxel_buffer_offset.offset]);
+            pass.dispatch(count, count, count);
+
             for (level, bind_groups) in mipmap_bind_group.mipmaps.iter().enumerate() {
                 for direction in 0..6 {
                     let size = (VOXEL_SIZE / (2 << level)) as u32;
                     let count = (size / 4).max(1);
                     pass.set_pipeline(&pipeline.mipmap_pipelines[direction]);
-                    pass.set_bind_group(0, &bind_groups[direction], &[]);
+                    pass.set_bind_group(0, &bind_groups[direction], &[voxel_buffer_offset.offset]);
                     pass.dispatch(count, count, count);
                 }
             }
@@ -773,7 +834,7 @@ impl render_graph::Node for MipmapPassNode {
 }
 
 pub struct VoxelClearPassNode {
-    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+    query: QueryState<(&'static MipmapBindGroup, &'static VoxelBufferOffset), With<Volume>>,
 }
 
 impl VoxelClearPassNode {
@@ -800,11 +861,10 @@ impl render_graph::Node for VoxelClearPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        pass.set_pipeline(&pipeline.clear_pipeline);
-
-        for mipmap_bind_group in self.query.iter_manual(world) {
+        for (mipmap_bind_group, voxel_buffer_offset) in self.query.iter_manual(world) {
             let count = (VOXEL_SIZE / 4) as u32;
-            pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
+            pass.set_pipeline(&pipeline.clear_pipeline);
+            pass.set_bind_group(0, &mipmap_bind_group.clear, &[voxel_buffer_offset.offset]);
             pass.dispatch(count, count, count);
         }
 
