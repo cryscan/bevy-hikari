@@ -17,6 +17,7 @@ The implementation is very basic and have, but not limited to, the following lim
 - [ ] Only directional light is supported
 - [ ] Only support 256x256x256 voxel grid
 - [x] Glossy reflections implemented
+- [x] Fix flickering
 
 ## Examples
 Two examples are included: one minimal example, one in which can move around and adjust light directions.
