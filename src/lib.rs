@@ -187,6 +187,7 @@ impl Plugin for VoxelConeTracingPlugin {
 pub enum VoxelConeTracingSystems {
     ExtractVolumes,
     ExtractViews,
+    ExtractReceiverFilter,
     PrepareVolumes,
     QueueVolumeViewBindGroups,
     QueueVoxelBindGroups,
@@ -195,6 +196,12 @@ pub enum VoxelConeTracingSystems {
     QueueTracing,
     QueueTracingBindGroups,
 }
+
+#[derive(Component)]
+pub struct NotGiCaster;
+
+#[derive(Component)]
+pub struct NotGiReceiver;
 
 /// A component attached to [`Camera`] to indicate the volume of voxelization.
 #[derive(Component, Clone)]

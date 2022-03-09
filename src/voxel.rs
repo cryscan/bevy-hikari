@@ -3,7 +3,7 @@ use super::{
     VolumeView, VoxelConeTracingSystems, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE,
     VOXEL_SIZE,
 };
-use crate::{GpuVoxelBuffer, VoxelBufferOffset};
+use crate::{GpuVoxelBuffer, NotGiCaster, VoxelBufferOffset};
 use bevy::{
     core::FloatOrd,
     ecs::system::{
@@ -301,14 +301,17 @@ pub fn check_visibility(
     >,
     mut visible_entity_query: QuerySet<(
         QueryState<&mut ComputedVisibility>,
-        QueryState<(
-            Entity,
-            &Visibility,
-            &mut ComputedVisibility,
-            Option<&RenderLayers>,
-            Option<&Aabb>,
-            Option<&GlobalTransform>,
-        )>,
+        QueryState<
+            (
+                Entity,
+                &Visibility,
+                &mut ComputedVisibility,
+                Option<&RenderLayers>,
+                Option<&Aabb>,
+                Option<&GlobalTransform>,
+            ),
+            Without<NotGiCaster>,
+        >,
     )>,
 ) {
     // Reset the computed visibility to false

@@ -1,3 +1,5 @@
+use crate::NotGiReceiver;
+
 use super::{
     GpuVolume, Volume, VolumeBindings, VolumeMeta, VolumeOverlay, VolumeUniformOffset,
     VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
@@ -36,6 +38,10 @@ impl Plugin for TracingPlugin {
                 .init_resource::<DrawFunctions<Tracing<Opaque3d>>>()
                 .init_resource::<DrawFunctions<Tracing<AlphaMask3d>>>()
                 .init_resource::<DrawFunctions<Tracing<Transparent3d>>>()
+                .add_system_to_stage(
+                    RenderStage::Extract,
+                    extract_receiver_filter.label(VoxelConeTracingSystems::ExtractReceiverFilter),
+                )
                 .add_system_to_stage(
                     RenderStage::Queue,
                     queue_tracing_bind_groups
@@ -180,6 +186,15 @@ pub struct TracingBindGroup {
     value: BindGroup,
 }
 
+pub fn extract_receiver_filter(
+    mut commands: Commands,
+    query: Query<(Entity, &Handle<Mesh>), With<NotGiReceiver>>,
+) {
+    for (entity, _) in query.iter() {
+        commands.get_or_spawn(entity).insert(NotGiReceiver);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn queue_tracing_meshes<M: SpecializedMaterial>(
@@ -187,7 +202,7 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
     alpha_mask_draw_functions: Res<DrawFunctions<Tracing<AlphaMask3d>>>,
     transparent_draw_functions: Res<DrawFunctions<Tracing<Transparent3d>>>,
     tracing_pipeline: Res<TracingPipeline>,
-    material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform)>,
+    material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform), Without<NotGiReceiver>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<M>>,
     mut pipelines: ResMut<SpecializedPipelines<TracingPipeline>>,
