@@ -24,6 +24,15 @@ Two examples are included: one minimal example, one in which can move around and
 
 You can download and test the compiled examples [here](https://github.com/cryscan/bevy-hikari/releases).
 
+### Effects
+No GI:
+
+<img src="assets/screenshots/no-gi.png" width="427" height="240" />
+
+Has GI:
+
+<img src="assets/screenshots/has-gi.png" width="427" height="240" />
+
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
 
