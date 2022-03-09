@@ -187,7 +187,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         if (base_color.a >= material.alpha_cutoff) {
             base_color.a = 1.0;
         } else {
-            base_color.a = 0.0;
+            discard;
         }
     }
 
@@ -212,5 +212,5 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     color = color + cone(origin, R, clamp(material.perceptual_roughness, 0.1, 1.0));
 
     var output_color = color * base_color;
-    return vec4<f32>(output_color.rgb, 0.12);
+    return vec4<f32>(output_color.rgb, base_color.a);
 }
