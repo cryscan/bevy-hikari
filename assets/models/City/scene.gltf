@@ -8403,7 +8403,8 @@
       }
     },
     {
-      "alphaMode": "BLEND",
+      "alphaMode": "MASK",
+      "alphaCutoff": 0.5,
       "doubleSided": true,
       "emissiveFactor": [
         0.02961725734536419,
@@ -8482,7 +8483,8 @@
       }
     },
     {
-      "alphaMode": "BLEND",
+      "alphaMode": "MASK",
+      "alphaCutoff": 0.5,
       "doubleSided": true,
       "name": "T_Plant1_D",
       "pbrMetallicRoughness": {
@@ -8501,7 +8503,8 @@
       }
     },
     {
-      "alphaMode": "BLEND",
+      "alphaMode": "MASK",
+      "alphaCutoff": 0.5,
       "doubleSided": true,
       "name": "T_Plant2_D",
       "pbrMetallicRoughness": {
@@ -8538,7 +8541,8 @@
       }
     },
     {
-      "alphaMode": "BLEND",
+      "alphaMode": "MASK",
+      "alphaCutoff": 0.5,
       "doubleSided": true,
       "emissiveFactor": [
         0.017634682377816201,
