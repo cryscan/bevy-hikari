@@ -178,16 +178,16 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let T = tbn[0];
     let B = tbn[1];
     
-    var mesh_color: vec4<f32> = material.base_color;
+    var base_color: vec4<f32> = material.base_color;
     if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
-        mesh_color = mesh_color * textureSample(base_color_texture, base_color_sampler, in.uv);
+        base_color = base_color * textureSample(base_color_texture, base_color_sampler, in.uv);
     }
 
     if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK) != 0u) {
-        if (mesh_color.a >= material.alpha_cutoff) {
-            mesh_color.a = 1.0;
+        if (base_color.a >= material.alpha_cutoff) {
+            base_color.a = 1.0;
         } else {
-            mesh_color.a = 0.0;
+            base_color.a = 0.0;
         }
     }
 
@@ -211,5 +211,5 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     color = color + cone(origin, R, clamp(material.perceptual_roughness, 0.1, 1.0));
     
-    return vec4<f32>(color * 0.1) * mesh_color.a;
+    return color * base_color * 0.13;
 }
