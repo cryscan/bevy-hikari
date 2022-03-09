@@ -2,7 +2,6 @@ use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
 };
-use bevy_atmosphere::{AtmosphereMat, AtmospherePlugin};
 use bevy_full_throttle::FullThrottlePlugin;
 use bevy_hikari::{Volume, VoxelConeTracingPlugin};
 use smooth_bevy_cameras::{
@@ -16,14 +15,12 @@ fn main() {
     let mut app = App::new();
 
     app.insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(AtmosphereMat::default())
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(true))
         .add_plugin(VoxelConeTracingPlugin)
         .add_plugin(FullThrottlePlugin)
-        .add_plugin(AtmospherePlugin { dynamic: false })
         .add_startup_system(setup)
         .add_system(light_rotate_system)
         .add_system(camera_input_map);
@@ -66,7 +63,7 @@ fn setup(
     commands
         .spawn_bundle(DirectionalLightBundle {
             directional_light: DirectionalLight {
-                illuminance: 100000.0,
+                illuminance: 200000.0,
                 shadow_projection: OrthographicProjection {
                     left: -HALF_SIZE,
                     right: HALF_SIZE,
