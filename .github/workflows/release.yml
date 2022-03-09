@@ -15,7 +15,7 @@ env:
 
   # Space separated paths to include in the archive.
   RELEASE_ADDS: README.md LICENSE assets
-  EXAMPLE_BINS: minimal scene
+  EXAMPLE_BINS: minimal scene city
 
 jobs:
   build:
