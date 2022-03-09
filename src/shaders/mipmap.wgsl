@@ -1,8 +1,6 @@
 struct Voxel {
-    r: atomic<u32>;
-    g: atomic<u32>;
-    b: atomic<u32>;
-    a: atomic<u32>;
+    top: u32;
+    bot: u32;
 };
 
 struct VoxelBuffer {
@@ -127,10 +125,8 @@ fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
     if (all(coords < textureDimensions(texture_out))) {
         let index = linear_index(coords);
         let voxel = &voxel_buffer.data[index];
-        atomicStore(&(*voxel).r, 0u);
-        atomicStore(&(*voxel).g, 0u);
-        atomicStore(&(*voxel).b, 0u);
-        atomicStore(&(*voxel).a, 0u);
+        (*voxel).top = 0u;
+        (*voxel).bot = 0u;
     }
 }
 
@@ -142,10 +138,13 @@ fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
         let voxel = &voxel_buffer.data[index];
         
         var color: vec4<f32>;
-        color.r = f32(atomicLoad(&(*voxel).r)) / 255.;
-        color.g = f32(atomicLoad(&(*voxel).g)) / 255.;
-        color.b = f32(atomicLoad(&(*voxel).b)) / 255.;
-        color.a = f32(atomicLoad(&(*voxel).a)) / 255.;
+        let top = (*voxel).top;
+        let bot = (*voxel).bot;
+        let mask = 0xffffu;
+        color.r = f32(top >> 16u) / 255.;
+        color.g = f32(top & mask) / 255.;
+        color.b = f32(bot >> 16u) / 255.;
+        color.a = f32(bot & mask) / 255.;
 
         if (color.a > 1.0) {
             color = color / color.a;

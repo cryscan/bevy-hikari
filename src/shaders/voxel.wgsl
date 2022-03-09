@@ -54,10 +54,8 @@ struct Volume {
 };
 
 struct Voxel {
-    r: atomic<u32>;
-    g: atomic<u32>;
-    b: atomic<u32>;
-    a: atomic<u32>;
+    top: atomic<u32>;
+    bot: atomic<u32>;
 };
 
 struct VoxelBuffer {
@@ -273,10 +271,9 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     output_color = vec4<f32>(pow(output_color.rgb, vec3<f32>(1.0 / 2.2)), output_color.a);
     
     let voxel = &voxel_buffer.data[linear_index(index)];
-    atomicAdd(&(*voxel).r, u32(output_color.r * 255.));
-    atomicAdd(&(*voxel).g, u32(output_color.g * 255.));
-    atomicAdd(&(*voxel).b, u32(output_color.b * 255.));
-    atomicAdd(&(*voxel).a, u32(output_color.a * 255.));
+    let converted = vec4<u32>((output_color + 0.5) * 255.);
+    atomicAdd(&(*voxel).top, (converted.r << 16u) + converted.g);
+    atomicAdd(&(*voxel).bot, (converted.b << 16u) + converted.a);
 
     return output_color;
 }
