@@ -2,26 +2,28 @@ use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
 };
+use bevy_atmosphere::{AtmosphereMat, AtmospherePlugin};
 use bevy_full_throttle::FullThrottlePlugin;
 use bevy_hikari::{Volume, VoxelConeTracingPlugin};
 use smooth_bevy_cameras::{
     controllers::orbit::{
         ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
     },
-    LookTransform, LookTransformPlugin,
+    LookTransform, LookTransformBundle, LookTransformPlugin, Smoother,
 };
-use std::f32::consts::PI;
 
 fn main() {
     let mut app = App::new();
 
     app.insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(AtmosphereMat::default())
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(true))
         .add_plugin(VoxelConeTracingPlugin)
         .add_plugin(FullThrottlePlugin)
+        .add_plugin(AtmospherePlugin { dynamic: false })
         .add_startup_system(setup)
         .add_system(light_rotate_system)
         .add_system(camera_input_map);
@@ -61,28 +63,31 @@ fn setup(
         .insert(DirectionalLightTarget);
 
     const HALF_SIZE: f32 = 20.0;
-    commands.spawn_bundle(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 100000.0,
-            shadow_projection: OrthographicProjection {
-                left: -HALF_SIZE,
-                right: HALF_SIZE,
-                bottom: -HALF_SIZE,
-                top: HALF_SIZE,
-                near: -10.0 * HALF_SIZE,
-                far: 10.0 * HALF_SIZE,
+    commands
+        .spawn_bundle(DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                illuminance: 100000.0,
+                shadow_projection: OrthographicProjection {
+                    left: -HALF_SIZE,
+                    right: HALF_SIZE,
+                    bottom: -HALF_SIZE,
+                    top: HALF_SIZE,
+                    near: -10.0 * HALF_SIZE,
+                    far: 10.0 * HALF_SIZE,
+                    ..Default::default()
+                },
+                shadows_enabled: true,
                 ..Default::default()
             },
-            shadows_enabled: true,
             ..Default::default()
-        },
-        transform: Transform {
-            translation: Vec3::new(0.0, 5.0, 0.0),
-            rotation: Quat::from_euler(EulerRot::XYZ, -PI / 8.0, -PI / 4.0, 0.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert_bundle(LookTransformBundle {
+            transform: LookTransform {
+                eye: Vec3::new(0.0, 5.0, 0.0),
+                target: Vec3::ZERO,
+            },
+            smoother: Smoother::new(0.8),
+        });
 
     commands
         .spawn()
@@ -121,7 +126,7 @@ fn light_rotate_system(
     time: Res<Time>,
     mut queries: QuerySet<(
         QueryState<&LookTransform, With<Camera>>,
-        QueryState<&mut Transform, With<DirectionalLight>>,
+        QueryState<&mut LookTransform, With<DirectionalLight>>,
         QueryState<&mut Transform, With<DirectionalLightTarget>>,
     )>,
 ) {
@@ -155,7 +160,7 @@ fn light_rotate_system(
     let mut query = queries.q1();
     let mut light = query.single_mut();
 
-    light.look_at(target, Vec3::Y);
+    light.target = target;
 }
 
 pub fn camera_input_map(
