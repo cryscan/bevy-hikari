@@ -23,24 +23,6 @@ Two examples are included: one minimal example, one in which can move around and
 
 You can download and test the compiled examples [here](https://github.com/cryscan/bevy-hikari/releases).
 
-### Controls for the Example [`scene.rs`](examples/scene.rs)
-| Control              | Binding    |
-| -------------------- | ---------- |
-| Toggle Lock Cursor   | `Esc`      |
-| Move Light Direction | Arrow Keys |
-
-| Cursor Locked            |                    |
-| ------------------------ | ------------------ |
-| Move Camera Horizontally | `W`, `A`, `S`, `D` |
-| Move Camera Up           | `Space`            |
-| Move Camera Down         | `Shift`            |
-
-| Cursor Unlocked         |                    |
-| ----------------------- | ------------------ |
-| Move Model Horizontally | `W`, `A`, `S`, `D` |
-| Move Model Up           | `E`                |
-| Move Model Down         | `Q`                |
-
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
 
