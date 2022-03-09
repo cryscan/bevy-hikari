@@ -261,7 +261,7 @@ pub struct GpuVolume {
 
 #[derive(Clone, AsStd140)]
 pub struct GpuVoxel {
-    color: [f32; 4],
+    color: [u32; 2],
 }
 
 #[derive(AsStd140)]
