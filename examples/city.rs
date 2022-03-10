@@ -94,20 +94,7 @@ fn setup(
             smoother: Smoother::new(0.8),
         });
 
-    let parent = commands
-        .spawn()
-        .insert_bundle((
-            Transform {
-                translation: Vec3::ZERO,
-                rotation: Quat::IDENTITY,
-                scale: Vec3::new(0.01, 0.01, 0.01),
-            },
-            GlobalTransform::default(),
-        ))
-        .id();
-
-    let scene_id =
-        scene_spawner.spawn_as_child(asset_server.load("models/City/scene.gltf#Scene0"), parent);
+    let scene_id = scene_spawner.spawn(asset_server.load("models/City/scene.gltf#Scene0"));
     scene_instance.0 = Some(scene_id);
 
     // Camera
