@@ -119,6 +119,26 @@ fn linear_index(index: vec3<i32>) -> i32 {
     return index.x + index.y * dims.x + index.z * dims.x * dims.y;
 }
 
+fn unpack_color(voxel: Voxel) -> vec4<f32> {
+    var color: vec4<f32>;
+    let top = voxel.top;
+    let bot = voxel.bot;
+    let mask = 0xffffu;
+    color.r = f32(top >> 16u) / 255.;
+    color.g = f32(top & mask) / 255.;
+    color.b = f32(bot >> 16u) / 255.;
+    color.a = f32(bot & mask) / 255.;
+    return color;
+}
+
+fn pack_color(color: vec4<f32>) -> Voxel {
+    var voxel: Voxel;
+    let converted = vec4<u32>((color + 0.5) * 255.);
+    voxel.top = (converted.r << 16u) + converted.g;
+    voxel.bot = (converted.b << 16u) + converted.a;
+    return voxel;
+}
+
 [[stage(compute), workgroup_size(4, 4, 4)]]
 fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
     let coords = vec3<i32>(id);
@@ -137,15 +157,7 @@ fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
         let index = linear_index(coords);
         let voxel = &voxel_buffer.data[index];
         
-        var color: vec4<f32>;
-        let top = (*voxel).top;
-        let bot = (*voxel).bot;
-        let mask = 0xffffu;
-        color.r = f32(top >> 16u) / 255.;
-        color.g = f32(top & mask) / 255.;
-        color.b = f32(bot >> 16u) / 255.;
-        color.a = f32(bot & mask) / 255.;
-
+        var color = unpack_color(*voxel);
         if (color.a > 1.0) {
             color = color / color.a;
         }
