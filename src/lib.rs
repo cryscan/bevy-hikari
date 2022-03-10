@@ -197,9 +197,11 @@ pub enum VoxelConeTracingSystems {
     QueueTracingBindGroups,
 }
 
+/// Marker component for meshes not casting GI.
 #[derive(Component)]
 pub struct NotGiCaster;
 
+/// Marker component for meshes not receiving GI.
 #[derive(Component)]
 pub struct NotGiReceiver;
 

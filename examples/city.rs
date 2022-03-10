@@ -135,6 +135,7 @@ fn scene_update(
     mut done: Local<bool>,
 ) {
     if !*done {
+        // Rendering GI for those two meshes are extremely slow, so disable them in tracing
         let names = vec![
             Name::new("CityTree_T_Leaves_D_0"),
             Name::new("Tree_T_Leaves_D_0"),
