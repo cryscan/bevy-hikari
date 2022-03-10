@@ -151,14 +151,24 @@ impl FromWorld for TracingPipeline {
     }
 }
 
-impl SpecializedPipeline for TracingPipeline {
-    type Key = MeshPipelineKey;
+#[derive(Default, Hash, PartialEq, Eq, Clone, Copy)]
+pub struct TracingPipelineKey {
+    pub not_gi_receiver: bool,
+}
 
-    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+impl SpecializedPipeline for TracingPipeline {
+    type Key = (MeshPipelineKey, TracingPipelineKey);
+
+    fn specialize(&self, (mesh_key, tracing_key): Self::Key) -> RenderPipelineDescriptor {
         let shader = TRACING_SHADER_HANDLE.typed::<Shader>();
 
-        let mut descriptor = self.mesh_pipeline.specialize(key);
-        descriptor.fragment.as_mut().unwrap().shader = shader;
+        let mut descriptor = self.mesh_pipeline.specialize(mesh_key);
+        let mut fragment = descriptor.fragment.as_mut().unwrap();
+        fragment.shader = shader;
+        if tracing_key.not_gi_receiver {
+            fragment.shader_defs.push("NOT_GI_RECEIVER".to_string());
+        }
+
         descriptor.depth_stencil = Some(DepthStencilState {
             format: TextureFormat::Depth32Float,
             depth_write_enabled: true,
@@ -203,6 +213,10 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
     transparent_draw_functions: Res<DrawFunctions<Tracing<Transparent3d>>>,
     tracing_pipeline: Res<TracingPipeline>,
     material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform), Without<NotGiReceiver>>,
+    material_meshes_not_receiver: Query<
+        (&Handle<M>, &Handle<Mesh>, &MeshUniform),
+        With<NotGiReceiver>,
+    >,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<M>>,
     mut pipelines: ResMut<SpecializedPipelines<TracingPipeline>>,
@@ -251,9 +265,14 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                             mesh_key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
                         }
 
+                        let tracing_key = TracingPipelineKey::default();
+
                         let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
-                        let pipeline_id =
-                            pipelines.specialize(&mut pipeline_cache, &tracing_pipeline, mesh_key);
+                        let pipeline_id = pipelines.specialize(
+                            &mut pipeline_cache,
+                            &tracing_pipeline,
+                            (mesh_key, tracing_key),
+                        );
 
                         match alpha_mode {
                             AlphaMode::Opaque => opaque_phase.add(Tracing(Opaque3d {
@@ -275,6 +294,53 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                                 draw_function: draw_transparent,
                             })),
                         }
+                    }
+                }
+            }
+
+            if let Ok((material_handle, mesh_handle, mesh_uniform)) =
+                material_meshes_not_receiver.get(entity)
+            {
+                if let Some(material) = render_materials.get(material_handle) {
+                    let mut mesh_key = MeshPipelineKey::from_msaa_samples(msaa.samples);
+                    if let Some(mesh) = render_meshes.get(mesh_handle) {
+                        if mesh.has_tangents {
+                            mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
+                        }
+                        mesh_key |=
+                            MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                    }
+
+                    let tracing_key = TracingPipelineKey {
+                        not_gi_receiver: true,
+                    };
+
+                    let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
+                    let pipeline_id = pipelines.specialize(
+                        &mut pipeline_cache,
+                        &tracing_pipeline,
+                        (mesh_key, tracing_key),
+                    );
+
+                    match M::alpha_mode(material) {
+                        AlphaMode::Opaque => opaque_phase.add(Tracing(Opaque3d {
+                            distance: -mesh_z,
+                            pipeline: pipeline_id,
+                            entity,
+                            draw_function: draw_opaque,
+                        })),
+                        AlphaMode::Mask(_) => alpha_mask_phase.add(Tracing(AlphaMask3d {
+                            distance: -mesh_z,
+                            pipeline: pipeline_id,
+                            entity,
+                            draw_function: draw_alpha_mask,
+                        })),
+                        AlphaMode::Blend => transparent_phase.add(Tracing(Transparent3d {
+                            distance: mesh_z,
+                            pipeline: pipeline_id,
+                            entity,
+                            draw_function: draw_transparent,
+                        })),
                     }
                 }
             }

@@ -135,13 +135,16 @@ fn scene_update(
     mut done: Local<bool>,
 ) {
     if !*done {
+        let names = vec![
+            Name::new("CityTree_T_Leaves_D_0"),
+            Name::new("Tree_T_Leaves_D_0"),
+        ];
+
         if let Some(instance_id) = scene_instance.0 {
-            let city_tree_name = Name::new("CityTree_T_Leaves_D_0");
-            let tree_name = Name::new("Tree_T_Leaves_D_0");
             if let Some(entities) = scene_spawner.iter_instance_entities(instance_id) {
                 for entity in entities {
                     if let Ok((name, children)) = query.get(entity) {
-                        if *name == city_tree_name || *name == tree_name {
+                        if names.contains(name) {
                             for child in children.iter() {
                                 commands.entity(*child).insert(NotGiReceiver);
                             }
@@ -172,21 +175,25 @@ fn light_rotate_system(
     forward = forward.normalize_or_zero();
     let right = forward.cross(Vec3::Y);
 
-    let speed = 4.0;
+    let speed = if keyboard_input.pressed(KeyCode::LShift) {
+        4.0
+    } else {
+        1.0
+    };
 
     let mut query = queries.q2();
     let mut target = query.single_mut();
 
-    if keyboard_input.pressed(KeyCode::Up) {
+    if keyboard_input.pressed(KeyCode::Up) || keyboard_input.pressed(KeyCode::W) {
         target.translation += forward * speed * time.delta_seconds();
     }
-    if keyboard_input.pressed(KeyCode::Down) {
+    if keyboard_input.pressed(KeyCode::Down) || keyboard_input.pressed(KeyCode::S) {
         target.translation -= forward * speed * time.delta_seconds();
     }
-    if keyboard_input.pressed(KeyCode::Left) {
+    if keyboard_input.pressed(KeyCode::Left) || keyboard_input.pressed(KeyCode::A) {
         target.translation -= right * speed * time.delta_seconds();
     }
-    if keyboard_input.pressed(KeyCode::Right) {
+    if keyboard_input.pressed(KeyCode::Right) || keyboard_input.pressed(KeyCode::D) {
         target.translation += right * speed * time.delta_seconds();
     }
     let target = target.translation;
