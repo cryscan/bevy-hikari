@@ -191,6 +191,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
     }
 
+#ifdef NOT_GI_RECEIVER
+    return vec4<f32>(0.0);
+#else
+
     let ratio = 1.0;
     var color = vec4<f32>(0.);
     color = color + cone(origin, N, ratio);
@@ -216,4 +220,6 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     var output_color = color * base_color;
     return vec4<f32>(output_color.rgb, base_color.a);
+
+#endif
 }
