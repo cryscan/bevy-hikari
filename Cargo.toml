@@ -19,4 +19,4 @@ bevy = { version = "0.6", default-features = true, features = ["jpeg"] }
 bevy_full_throttle = { git = "https://github.com/lightsoutgames/bevy_full_throttle" }
 bevy_flycam = "0.6.0"
 smooth-bevy-cameras = "0.2.0"
-bevy_atmosphere = "0.2.2"
+bevy_atmosphere = { git = "https://github.com/cryscan/bevy_atmosphere" }
