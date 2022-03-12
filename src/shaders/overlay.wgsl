@@ -5,9 +5,13 @@
 var<uniform> mesh: Mesh;
 
 [[group(1), binding(0)]]
-var texture: texture_2d<f32>;
+var irradiance_texture: texture_2d<f32>;
 [[group(1), binding(1)]]
-var textuer_sampler: sampler;
+var irradiance_sampler: sampler;
+[[group(1), binding(2)]]
+var albedo_texture: texture_2d<f32>;
+[[group(1), binding(3)]]
+var albedo_sampler: sampler;
 
 let POSITIONS: array<vec3<f32>, 4> = array<vec3<f32>, 4>(
     vec3<f32>(1., 1., 0.),
@@ -35,6 +39,7 @@ fn vertex([[builtin(vertex_index)]] id: u32) -> VertexOutput {
 
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-    var color = textureSample(texture, textuer_sampler, in.uv);
-    return color;
+    var irradiance = textureSample(irradiance_texture, irradiance_sampler, in.uv);
+    var base_color = textureSample(albedo_texture, albedo_sampler, in.uv);
+    return irradiance * base_color;
 }
