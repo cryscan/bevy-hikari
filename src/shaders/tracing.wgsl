@@ -105,13 +105,13 @@ fn compute_roughness(perceptual_roughness: f32) -> f32 {
     return clamped * clamped;
 }
 
-fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32) -> vec4<f32> {
+fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
     var color = vec4<f32>(0.0);
     var distance = voxel_size * SQRT3;
 
     loop {
         let position = origin + distance * direction;
-        if (any(position < vec3<f32>(0.)) || any(position > vec3<f32>(1., 1., 1.)) || color.a >= 1.0) {
+        if (any(position < vec3<f32>(0.)) || any(position > vec3<f32>(1., 1., 1.)) || color.a >= 1.0 || distance > max_distance) {
             break;
         }
 
@@ -191,17 +191,30 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
     }
 
+#ifdef AMBIENT_OCCLUSION
+
+    let ratio = 1.0;
+    var color = vec4<f32>(0.);
+    color = color + cone(origin, N, ratio, 0.02);
+    color = color + cone(origin, normalize(N + T + B), ratio, 0.02) * 0.707;
+    color = color + cone(origin, normalize(N - T + B), ratio, 0.02) * 0.707;
+    color = color + cone(origin, normalize(N + T - B), ratio, 0.02) * 0.707;
+    color = color + cone(origin, normalize(N - T - B), ratio, 0.02) * 0.707;
+    return color * 0.1;
+
+#else
+
 #ifdef NOT_GI_RECEIVER
     return vec4<f32>(0.0);
 #else
 
     let ratio = 1.0;
     var color = vec4<f32>(0.);
-    color = color + cone(origin, N, ratio);
-    color = color + cone(origin, normalize(N + T + B), ratio) * 0.707;
-    color = color + cone(origin, normalize(N - T + B), ratio) * 0.707;
-    color = color + cone(origin, normalize(N + T - B), ratio) * 0.707;
-    color = color + cone(origin, normalize(N - T - B), ratio) * 0.707;
+    color = color + cone(origin, N, ratio, 0.3);
+    color = color + cone(origin, normalize(N + T + B), ratio, 0.3) * 0.707;
+    color = color + cone(origin, normalize(N - T + B), ratio, 0.3) * 0.707;
+    color = color + cone(origin, normalize(N + T - B), ratio, 0.3) * 0.707;
+    color = color + cone(origin, normalize(N - T - B), ratio, 0.3) * 0.707;
     
     var V: vec3<f32>;
     let is_orthographic = view.projection[3].w == 1.0;
@@ -215,11 +228,12 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     let roughness = clamp(material.perceptual_roughness, 0.1, 1.0);
     if (roughness < 0.5) {
-        color = color + cone(origin, R, roughness);
+        color = color + cone(origin, R, roughness, 1.0);
     }
 
     var output_color = color * base_color;
     return vec4<f32>(output_color.rgb, base_color.a);
 
+#endif
 #endif
 }

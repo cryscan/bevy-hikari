@@ -5,6 +5,7 @@ use super::{
     VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
 };
 use bevy::{
+    core::FloatOrd,
     core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d},
     ecs::system::lifetimeless::{Read, SQuery},
     pbr::{
@@ -38,6 +39,7 @@ impl Plugin for TracingPlugin {
                 .init_resource::<DrawFunctions<Tracing<Opaque3d>>>()
                 .init_resource::<DrawFunctions<Tracing<AlphaMask3d>>>()
                 .init_resource::<DrawFunctions<Tracing<Transparent3d>>>()
+                .init_resource::<DrawFunctions<AmbientOcclusion>>()
                 .add_system_to_stage(
                     RenderStage::Extract,
                     extract_receiver_filter.label(VoxelConeTracingSystems::ExtractReceiverFilter),
@@ -58,6 +60,10 @@ impl Plugin for TracingPlugin {
                 .add_system_to_stage(
                     RenderStage::PhaseSort,
                     sort_phase_system::<Tracing<Transparent3d>>,
+                )
+                .add_system_to_stage(
+                    RenderStage::PhaseSort,
+                    sort_phase_system::<AmbientOcclusion>,
                 );
         }
     }
@@ -73,6 +79,7 @@ impl<M: SpecializedMaterial> Plugin for TracingMaterialPlugin<M> {
                 .add_render_command::<Tracing<Opaque3d>, DrawTracingMesh<M>>()
                 .add_render_command::<Tracing<AlphaMask3d>, DrawTracingMesh<M>>()
                 .add_render_command::<Tracing<Transparent3d>, DrawTracingMesh<M>>()
+                .add_render_command::<AmbientOcclusion, DrawTracingMesh<M>>()
                 .add_system_to_stage(
                     RenderStage::Queue,
                     queue_tracing_meshes::<M>.label(VoxelConeTracingSystems::QueueTracing),
@@ -154,6 +161,7 @@ impl FromWorld for TracingPipeline {
 #[derive(Default, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct TracingPipelineKey {
     pub not_gi_receiver: bool,
+    pub ambient_occlusion: bool,
 }
 
 impl SpecializedPipeline for TracingPipeline {
@@ -167,6 +175,10 @@ impl SpecializedPipeline for TracingPipeline {
         fragment.shader = shader;
         if tracing_key.not_gi_receiver {
             fragment.shader_defs.push("NOT_GI_RECEIVER".to_string());
+        }
+        if tracing_key.ambient_occlusion {
+            fragment.shader_defs.push("AMBIENT_OCCLUSION".to_string());
+            fragment.targets[0].write_mask = ColorWrites::ALPHA;
         }
 
         descriptor.depth_stencil = Some(DepthStencilState {
@@ -211,6 +223,7 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
     opaque_draw_functions: Res<DrawFunctions<Tracing<Opaque3d>>>,
     alpha_mask_draw_functions: Res<DrawFunctions<Tracing<AlphaMask3d>>>,
     transparent_draw_functions: Res<DrawFunctions<Tracing<Transparent3d>>>,
+    ambient_occlusion_draw_functions: Res<DrawFunctions<AmbientOcclusion>>,
     tracing_pipeline: Res<TracingPipeline>,
     material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform), Without<NotGiReceiver>>,
     material_meshes_not_receiver: Query<
@@ -228,6 +241,7 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
         &mut RenderPhase<Tracing<Opaque3d>>,
         &mut RenderPhase<Tracing<AlphaMask3d>>,
         &mut RenderPhase<Tracing<Transparent3d>>,
+        &mut RenderPhase<AmbientOcclusion>,
     )>,
 ) {
     let draw_opaque = opaque_draw_functions
@@ -242,9 +256,19 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
         .read()
         .get_id::<DrawTracingMesh<M>>()
         .unwrap();
+    let draw_ambient_occlusion = ambient_occlusion_draw_functions
+        .read()
+        .get_id::<DrawTracingMesh<M>>()
+        .unwrap();
 
-    for (view, visible_entities, mut opaque_phase, mut alpha_mask_phase, mut transparent_phase) in
-        view_query.iter_mut()
+    for (
+        view,
+        visible_entities,
+        mut opaque_phase,
+        mut alpha_mask_phase,
+        mut transparent_phase,
+        mut ambient_occlusion_phase,
+    ) in view_query.iter_mut()
     {
         let inverse_view_matrix = view.transform.compute_matrix().inverse();
         let inverse_view_row_2 = inverse_view_matrix.row(2);
@@ -254,11 +278,30 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                 if let Some(material) = render_materials.get(material_handle) {
                     let mut mesh_key = MeshPipelineKey::from_msaa_samples(msaa.samples);
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
+                        let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
+
                         if mesh.has_tangents {
                             mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
                         }
                         mesh_key |=
                             MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+                        let tracing_key = TracingPipelineKey {
+                            not_gi_receiver: false,
+                            ambient_occlusion: true,
+                        };
+                        let pipeline_id = pipelines.specialize(
+                            &mut pipeline_cache,
+                            &tracing_pipeline,
+                            (mesh_key, tracing_key),
+                        );
+
+                        ambient_occlusion_phase.add(AmbientOcclusion {
+                            distance: -mesh_z,
+                            entity,
+                            pipeline: pipeline_id,
+                            draw_function: draw_ambient_occlusion,
+                        });
 
                         let alpha_mode = M::alpha_mode(material);
                         if let AlphaMode::Blend = alpha_mode {
@@ -266,8 +309,6 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                         }
 
                         let tracing_key = TracingPipelineKey::default();
-
-                        let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
                         let pipeline_id = pipelines.specialize(
                             &mut pipeline_cache,
                             &tracing_pipeline,
@@ -311,11 +352,12 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                             MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                     }
 
+                    let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
+
                     let tracing_key = TracingPipelineKey {
                         not_gi_receiver: true,
+                        ambient_occlusion: false,
                     };
-
-                    let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
                     let pipeline_id = pipelines.specialize(
                         &mut pipeline_cache,
                         &tracing_pipeline,
@@ -342,6 +384,23 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                             draw_function: draw_transparent,
                         })),
                     }
+
+                    let tracing_key = TracingPipelineKey {
+                        not_gi_receiver: true,
+                        ambient_occlusion: true,
+                    };
+                    let pipeline_id = pipelines.specialize(
+                        &mut pipeline_cache,
+                        &tracing_pipeline,
+                        (mesh_key, tracing_key),
+                    );
+
+                    ambient_occlusion_phase.add(AmbientOcclusion {
+                        distance: -mesh_z,
+                        entity,
+                        pipeline: pipeline_id,
+                        draw_function: draw_ambient_occlusion,
+                    });
                 }
             }
         }
@@ -429,6 +488,37 @@ where
     }
 }
 
+pub struct AmbientOcclusion {
+    distance: f32,
+    entity: Entity,
+    pipeline: CachedPipelineId,
+    draw_function: DrawFunctionId,
+}
+
+impl PhaseItem for AmbientOcclusion {
+    type SortKey = FloatOrd;
+
+    fn sort_key(&self) -> Self::SortKey {
+        FloatOrd(self.distance)
+    }
+
+    fn draw_function(&self) -> DrawFunctionId {
+        self.draw_function
+    }
+}
+
+impl EntityPhaseItem for AmbientOcclusion {
+    fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
+impl CachedPipelinePhaseItem for AmbientOcclusion {
+    fn cached_pipeline(&self) -> CachedPipelineId {
+        self.pipeline
+    }
+}
+
 pub type DrawTracingMesh<M> = (
     SetItemPipeline,
     SetMeshViewBindGroup<0>,
@@ -461,6 +551,7 @@ pub struct TracingPassNode {
             &'static RenderPhase<Tracing<Opaque3d>>,
             &'static RenderPhase<Tracing<AlphaMask3d>>,
             &'static RenderPhase<Tracing<Transparent3d>>,
+            &'static RenderPhase<AmbientOcclusion>,
             &'static VolumeOverlay,
             &'static VolumeBindings,
         ),
@@ -494,11 +585,17 @@ impl render_graph::Node for TracingPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (opaque_phase, alpha_mask_phase, transparent_phase, overlay, bindings) =
-            match self.query.get_manual(world, view_entity) {
-                Ok(query) => query,
-                Err(_) => return Ok(()),
-            };
+        let (
+            opaque_phase,
+            alpha_mask_phase,
+            transparent_phase,
+            ambient_occlusion_phase,
+            overlay,
+            bindings,
+        ) = match self.query.get_manual(world, view_entity) {
+            Ok(query) => query,
+            Err(_) => return Ok(()),
+        };
 
         let images = world.get_resource::<RenderAssets<Image>>().unwrap();
         let color_attachment = &images[&overlay.color_attachment].texture_view;
@@ -611,6 +708,43 @@ impl render_graph::Node for TracingPassNode {
 
             for item in &transparent_phase.items {
                 let draw_function = draw_functions.get_mut(item.0.draw_function).unwrap();
+                draw_function.draw(world, &mut tracked_pass, view_entity, item);
+            }
+        }
+
+        {
+            let pass_descriptor = RenderPassDescriptor {
+                label: Some("tracing_ambient_occlusion_pass"),
+                color_attachments: &[RenderPassColorAttachment {
+                    view: color_attachment,
+                    resolve_target: Some(resolve_target),
+                    ops: Operations {
+                        load: LoadOp::Load,
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: &bindings.overlay_depth_texture.default_view,
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Clear(0.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
+            };
+
+            let render_pass = render_context
+                .command_encoder
+                .begin_render_pass(&pass_descriptor);
+
+            let mut draw_functions = world
+                .get_resource::<DrawFunctions<AmbientOcclusion>>()
+                .unwrap()
+                .write();
+            let mut tracked_pass = TrackedRenderPass::new(render_pass);
+
+            for item in &ambient_occlusion_phase.items {
+                let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
                 draw_function.draw(world, &mut tracked_pass, view_entity, item);
             }
         }
