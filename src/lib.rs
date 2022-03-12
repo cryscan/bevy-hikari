@@ -467,6 +467,7 @@ pub fn prepare_volumes(
             RenderPhase::<Tracing<Opaque3d>>::default(),
             RenderPhase::<Tracing<AlphaMask3d>>::default(),
             RenderPhase::<Tracing<Transparent3d>>::default(),
+            RenderPhase::<AmbientOcclusion>::default(),
         ));
     }
 

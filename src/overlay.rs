@@ -92,7 +92,11 @@ impl RenderAsset for OverlayMaterial {
     }
 }
 
-impl Material for OverlayMaterial {
+impl SpecializedMaterial for OverlayMaterial {
+    type Key = ();
+
+    fn key(_material: &<Self as RenderAsset>::PreparedAsset) -> Self::Key {}
+
     fn vertex_shader(_asset_server: &AssetServer) -> Option<Handle<Shader>> {
         Some(OVERLAY_SHADER_HANDLE.typed())
     }
@@ -126,6 +130,21 @@ impl Material for OverlayMaterial {
                 },
             ],
             label: Some("overlay_layout"),
+        })
+    }
+
+    fn specialize(_key: Self::Key, descriptor: &mut RenderPipelineDescriptor) {
+        descriptor.fragment.as_mut().unwrap().targets[0].blend = Some(BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::Zero,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
         })
     }
 

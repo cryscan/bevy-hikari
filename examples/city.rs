@@ -77,7 +77,7 @@ fn setup(
     commands
         .spawn_bundle(DirectionalLightBundle {
             directional_light: DirectionalLight {
-                illuminance: 200000.0,
+                illuminance: 100000.0,
                 shadow_projection: OrthographicProjection {
                     left: -HALF_SIZE,
                     right: HALF_SIZE,
