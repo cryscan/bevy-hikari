@@ -3,7 +3,7 @@
 //! An implementation of Voxel Cone Tracing Global Illumination for [bevy].
 //!
 
-use self::{overlay::*, tracing::*, voxel::*};
+use self::{deferred::*, overlay::*, tracing::*, voxel::*};
 use bevy::{
     core_pipeline::{self, AlphaMask3d, Opaque3d, Transparent3d},
     prelude::*,
@@ -13,11 +13,12 @@ use bevy::{
         render_phase::RenderPhase,
         render_resource::{std140::AsStd140, *},
         renderer::{RenderDevice, RenderQueue},
-        texture::{CachedTexture, TextureCache},
+        texture::{BevyDefault, CachedTexture, TextureCache},
         RenderApp, RenderStage,
     },
 };
 
+mod deferred;
 mod overlay;
 mod storage_vec;
 mod tracing;
@@ -33,6 +34,8 @@ pub const TRACING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984840);
 pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984940);
+pub const ALBEDO_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984640);
 
 pub mod draw_3d_graph {
     pub mod node {
@@ -41,9 +44,11 @@ pub mod draw_3d_graph {
         pub const MIPMAP_PASS: &str = "mipmap_pass";
         pub const TRACING_PASS: &str = "tracing_pass";
         pub const OVERLAY_PASS: &str = "overlay_pass";
+        pub const DEFERRED_PASS: &str = "deferred_pass";
     }
 }
 
+pub use deferred::DeferredMaterialPlugin;
 pub use storage_vec::StorageVec;
 pub use tracing::TracingMaterialPlugin;
 pub use voxel::VoxelMaterialPlugin;
@@ -57,8 +62,10 @@ pub struct VoxelConeTracingPlugin;
 impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(VoxelPlugin)
+            .add_plugin(DeferredPlugin)
             .add_plugin(TracingPlugin)
             .add_plugin(OverlayPlugin)
+            .add_plugin(DeferredMaterialPlugin::<StandardMaterial>::default())
             .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
             .add_plugin(TracingMaterialPlugin::<StandardMaterial>::default())
             .add_system_to_stage(CoreStage::PostUpdate, add_volume_overlay.exclusive_system())
@@ -78,6 +85,10 @@ impl Plugin for VoxelConeTracingPlugin {
             OVERLAY_SHADER_HANDLE,
             Shader::from_wgsl(include_str!("shaders/overlay.wgsl").replace("\r\n", "\n")),
         );
+        shaders.set_untracked(
+            ALBEDO_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/albedo.wgsl").replace("\r\n", "\n")),
+        );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
             Ok(render_app) => render_app,
@@ -89,6 +100,7 @@ impl Plugin for VoxelConeTracingPlugin {
         let mipmap_pass_node = MipmapPassNode::new(&mut render_app.world);
         let tracing_pass_node = TracingPassNode::new(&mut render_app.world);
         let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
+        let deferred_pass_node = DeferredPassNode::new(&mut render_app.world);
 
         render_app
             .init_resource::<VolumeMeta>()
@@ -125,6 +137,7 @@ impl Plugin for VoxelConeTracingPlugin {
         draw_3d_graph.add_node(draw_3d_graph::node::MIPMAP_PASS, mipmap_pass_node);
         draw_3d_graph.add_node(draw_3d_graph::node::TRACING_PASS, tracing_pass_node);
         draw_3d_graph.add_node(draw_3d_graph::node::OVERLAY_PASS, overlay_pass_node);
+        draw_3d_graph.add_node(draw_3d_graph::node::DEFERRED_PASS, deferred_pass_node);
 
         draw_3d_graph
             .add_slot_edge(
@@ -140,6 +153,7 @@ impl Plugin for VoxelConeTracingPlugin {
                 draw_3d_graph::node::VOXEL_PASS,
             )
             .unwrap();
+
         draw_3d_graph
             .add_node_edge(
                 draw_3d_graph::node::VOXEL_PASS,
@@ -152,6 +166,7 @@ impl Plugin for VoxelConeTracingPlugin {
                 core_pipeline::draw_3d_graph::node::MAIN_PASS,
             )
             .unwrap();
+
         draw_3d_graph
             .add_slot_edge(
                 draw_3d_graph.input_node().unwrap().id,
@@ -166,6 +181,16 @@ impl Plugin for VoxelConeTracingPlugin {
                 draw_3d_graph::node::TRACING_PASS,
             )
             .unwrap();
+
+        draw_3d_graph
+            .add_slot_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
+                draw_3d_graph::node::DEFERRED_PASS,
+                VoxelPassNode::IN_VIEW,
+            )
+            .unwrap();
+
         draw_3d_graph
             .add_slot_edge(
                 draw_3d_graph.input_node().unwrap().id,
@@ -177,6 +202,12 @@ impl Plugin for VoxelConeTracingPlugin {
         draw_3d_graph
             .add_node_edge(
                 draw_3d_graph::node::TRACING_PASS,
+                draw_3d_graph::node::OVERLAY_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph::node::DEFERRED_PASS,
                 draw_3d_graph::node::OVERLAY_PASS,
             )
             .unwrap();
@@ -195,6 +226,7 @@ pub enum VoxelConeTracingSystems {
     QueueMipmapBindGroups,
     QueueTracing,
     QueueTracingBindGroups,
+    QueueDeferred,
 }
 
 /// Marker component for meshes not casting GI.
@@ -231,9 +263,13 @@ impl Default for Volume {
 
 #[derive(Component, Clone)]
 pub struct VolumeOverlay {
-    pub size: Extent3d,
-    pub color_attachment: Handle<Image>,
-    pub resolve_target: Handle<Image>,
+    pub irradiance_size: Extent3d,
+    pub irradiance: Handle<Image>,
+    pub irradiance_resolve: Handle<Image>,
+
+    pub albedo_size: Extent3d,
+    pub albedo: Handle<Image>,
+    pub albedo_resolve: Handle<Image>,
 }
 
 #[derive(Component)]
@@ -256,7 +292,8 @@ pub struct VolumeColorAttachment {
 
 #[derive(Component)]
 pub struct VolumeBindings {
-    pub overlay_depth_texture: CachedTexture,
+    pub irradiance_depth_texture: CachedTexture,
+    pub albedo_depth_texture: CachedTexture,
     pub voxel_texture: CachedTexture,
     pub anisotropic_textures: Vec<CachedTexture>,
     pub texture_sampler: Sampler,
@@ -298,36 +335,66 @@ pub fn add_volume_overlay(
         let height = window.height() as u32;
 
         for (entity, _) in volumes.iter() {
-            let size = Extent3d {
+            let irradiance_size = Extent3d {
+                width: width >> 1,
+                height: height >> 1,
+                depth_or_array_layers: 1,
+            };
+            let mut image = Image::new_fill(
+                irradiance_size,
+                TextureDimension::D2,
+                &[0, 0, 0, 255],
+                TextureFormat::bevy_default(),
+            );
+            image.texture_descriptor.usage = TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING;
+
+            image.texture_descriptor.sample_count = msaa.samples;
+            let irradiance = images.add(image.clone());
+
+            image.texture_descriptor.sample_count = 1;
+            let irradiance_resolve = images.add(image);
+
+            let albedo_size = Extent3d {
                 width,
                 height,
                 depth_or_array_layers: 1,
             };
             let mut image = Image::new_fill(
-                size,
+                albedo_size,
                 TextureDimension::D2,
                 &[0, 0, 0, 255],
-                TextureFormat::Bgra8UnormSrgb,
+                TextureFormat::bevy_default(),
             );
-            image.texture_descriptor.sample_count = msaa.samples;
             image.texture_descriptor.usage = TextureUsages::COPY_DST
                 | TextureUsages::RENDER_ATTACHMENT
                 | TextureUsages::TEXTURE_BINDING;
-            let view = images.add(image.clone());
+            image.sampler_descriptor.mag_filter = FilterMode::Linear;
+            image.sampler_descriptor.min_filter = FilterMode::Linear;
+
+            image.texture_descriptor.sample_count = msaa.samples;
+            let albedo = images.add(image.clone());
 
             image.texture_descriptor.sample_count = 1;
-            let image = images.add(image);
-
-            commands.entity(entity).insert(VolumeOverlay {
-                size,
-                color_attachment: view,
-                resolve_target: image.clone(),
-            });
+            let albedo_resolve = images.add(image);
 
             commands.spawn_bundle(MaterialMeshBundle::<OverlayMaterial> {
                 mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
-                material: materials.add(OverlayMaterial(image)),
+                material: materials.add(OverlayMaterial {
+                    irradiance_image: irradiance_resolve.clone(),
+                    albedo_image: albedo_resolve.clone(),
+                }),
                 ..Default::default()
+            });
+
+            commands.entity(entity).insert(VolumeOverlay {
+                irradiance_size,
+                irradiance,
+                irradiance_resolve,
+                albedo_size,
+                albedo,
+                albedo_resolve,
             });
         }
     }
@@ -341,6 +408,7 @@ pub fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume, 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_volumes(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
@@ -427,7 +495,7 @@ pub fn prepare_volumes(
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: TextureDimension::D2,
-                    format: TextureFormat::Bgra8UnormSrgb,
+                    format: TextureFormat::bevy_default(),
                     usage: TextureUsages::RENDER_ATTACHMENT,
                 },
             );
@@ -442,16 +510,29 @@ pub fn prepare_volumes(
             ));
         }
 
-        let overlay_depth_texture = texture_cache.get(
+        let irradiance_depth_texture = texture_cache.get(
             &render_device,
             TextureDescriptor {
                 label: Some("volume_overlay_depth_texture"),
-                size: overlay.size,
+                size: overlay.irradiance_size,
                 mip_level_count: 1,
                 sample_count: msaa.samples,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Depth32Float,
-                usage: TextureUsages::RENDER_ATTACHMENT,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            },
+        );
+
+        let albedo_depth_texture = texture_cache.get(
+            &render_device,
+            TextureDescriptor {
+                label: Some("volume_overlay_depth_texture"),
+                size: overlay.albedo_size,
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
             },
         );
 
@@ -459,15 +540,19 @@ pub fn prepare_volumes(
             volume_uniform_offset.clone(),
             voxel_buffer_offset.clone(),
             VolumeBindings {
-                overlay_depth_texture,
+                irradiance_depth_texture,
+                albedo_depth_texture,
                 voxel_texture,
                 anisotropic_textures,
-                texture_sampler,
+                texture_sampler: texture_sampler.clone(),
             },
             RenderPhase::<Tracing<Opaque3d>>::default(),
             RenderPhase::<Tracing<AlphaMask3d>>::default(),
             RenderPhase::<Tracing<Transparent3d>>::default(),
             RenderPhase::<AmbientOcclusion>::default(),
+            RenderPhase::<Deferred<Opaque3d>>::default(),
+            RenderPhase::<Deferred<AlphaMask3d>>::default(),
+            RenderPhase::<Deferred<Transparent3d>>::default(),
         ));
     }
 

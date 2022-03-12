@@ -44,13 +44,17 @@ impl Plugin for OverlayPlugin {
 
 #[derive(Debug, Clone, TypeUuid)]
 #[uuid = "3eb25222-95fd-11ec-b909-0242ac120002"]
-pub struct OverlayMaterial(pub Handle<Image>);
+pub struct OverlayMaterial {
+    pub irradiance_image: Handle<Image>,
+    pub albedo_image: Handle<Image>,
+}
 
 #[derive(Clone)]
 pub struct GpuOverlayMaterial {
     bind_group: BindGroup,
 }
 
+#[allow(clippy::type_complexity)]
 impl RenderAsset for OverlayMaterial {
     type ExtractedAsset = OverlayMaterial;
     type PreparedAsset = GpuOverlayMaterial;
@@ -67,7 +71,13 @@ impl RenderAsset for OverlayMaterial {
         material: Self::ExtractedAsset,
         (render_device, material_pipeline, images): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        let image = if let Some(result) = images.get(&material.0) {
+        let irradiance = if let Some(result) = images.get(&material.irradiance_image) {
+            result
+        } else {
+            return Err(PrepareAssetError::RetryNextUpdate(material));
+        };
+
+        let albedo = if let Some(result) = images.get(&material.albedo_image) {
             result
         } else {
             return Err(PrepareAssetError::RetryNextUpdate(material));
@@ -77,11 +87,19 @@ impl RenderAsset for OverlayMaterial {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&image.texture_view),
+                    resource: BindingResource::TextureView(&irradiance.texture_view),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&image.sampler),
+                    resource: BindingResource::Sampler(&irradiance.sampler),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&albedo.texture_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&albedo.sampler),
                 },
             ],
             label: Some("overlay_bind_group"),
@@ -124,6 +142,22 @@ impl SpecializedMaterial for OverlayMaterial {
                 },
                 BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
