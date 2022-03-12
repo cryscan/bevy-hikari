@@ -119,11 +119,6 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) 
         let level = clamp(max_level + log2(diameter), 0.0, max_level);
 
         let weight = direction * direction;
-        var face: vec3<u32>;
-        face.x = u32(direction.x < 0.);
-        face.y = u32(direction.y < 0.) + 2u;
-        face.z = u32(direction.z < 0.) + 4u;
-
         let anisotropic_level = max(level - 1., 0.);
 
         var sample = vec4<f32>(0.);
@@ -157,6 +152,52 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) 
     return color;
 }
 
+fn cone_single(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
+    var color = vec4<f32>(0.0);
+    var distance = voxel_size * SQRT3;
+
+    loop {
+        let position = origin + distance * direction;
+        if (any(position < vec3<f32>(0.)) || any(position > vec3<f32>(1., 1., 1.)) || color.a >= 1.0 || distance > max_distance) {
+            break;
+        }
+
+        let diameter = distance * ratio;
+        let level = clamp(max_level + log2(diameter), 0.0, max_level);
+
+        let anisotropic_level = max(level - 1., 0.);
+
+        var sample = vec4<f32>(0.);
+        if (direction.x > 0.5) {
+            sample = sample + textureSampleLevel(anisotropic_texture_0, texture_sampler, position, anisotropic_level);
+        } else if (direction.x < -0.5) {
+            sample = sample + textureSampleLevel(anisotropic_texture_1, texture_sampler, position, anisotropic_level);
+        }
+        if (direction.y > 0.5) {
+            sample = sample + textureSampleLevel(anisotropic_texture_2, texture_sampler, position, anisotropic_level);
+        } else if (direction.y < -0.5) {
+            sample = sample + textureSampleLevel(anisotropic_texture_3, texture_sampler, position, anisotropic_level);
+        }
+        if (direction.z > 0.5) {
+            sample = sample + textureSampleLevel(anisotropic_texture_4, texture_sampler, position, anisotropic_level);
+        } else if (direction.z < -0.5) {
+            sample = sample + textureSampleLevel(anisotropic_texture_5, texture_sampler, position, anisotropic_level);
+        }
+
+        if (level < 1.0) {
+            let base_sample = textureSampleLevel(voxel_texture, texture_sampler, position, 0.0);
+            sample = mix(base_sample, sample, level);
+        }
+
+        color = color + (1.0 - color.a) * sample;
+
+        let step_size = max(diameter / 2.0, voxel_size);
+        distance = distance + step_size;
+    }
+
+    return color;
+}
+
 struct FragmentInput {
     [[builtin(position)]] clip_position: vec4<f32>;
     [[location(0)]] world_position: vec4<f32>;
@@ -173,10 +214,6 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let position = normalize_position(in.world_position.xyz / in.world_position.w);
     let N = normalize(in.world_normal);
     let origin = position + N * voxel_size * SQRT3;
-
-    let tbn = normal_basis(N);
-    let T = tbn[0];
-    let B = tbn[1];
     
     var base_color: vec4<f32> = material.base_color;
     if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
@@ -191,15 +228,33 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
     }
 
+    var directions: array<vec3<f32>, 14>;
+    directions[0] = vec3<f32>(1.0, 1.0, 1.0);
+    directions[1] = vec3<f32>(1.0, -1.0, 1.0);
+    directions[2] = vec3<f32>(1.0, 1.0, -1.0);
+    directions[3] = vec3<f32>(1.0, -1.0, -1.0);
+    directions[4] = vec3<f32>(-1.0, 1.0, 1.0);
+    directions[5] = vec3<f32>(-1.0, -1.0, 1.0);
+    directions[6] = vec3<f32>(-1.0, 1.0, -1.0);
+    directions[7] = vec3<f32>(-1.0, -1.0, -1.0);
+    directions[8] = vec3<f32>(1.0, 0.0, 0.0);
+    directions[9] = vec3<f32>(0.0, 1.0, 0.0);
+    directions[10] = vec3<f32>(0.0, 0.0, 1.0);
+    directions[11] = vec3<f32>(-1.0, 0.0, 0.0);
+    directions[12] = vec3<f32>(0.0, -1.0, 0.0);
+    directions[13] = vec3<f32>(0.0, 0.0, -1.0);
+
 #ifdef AMBIENT_OCCLUSION
 
     let ratio = 1.0;
     var color = vec4<f32>(0.);
-    color = color + cone(origin, N, ratio, 0.02);
-    color = color + cone(origin, normalize(N + T + B), ratio, 0.02) * 0.707;
-    color = color + cone(origin, normalize(N - T + B), ratio, 0.02) * 0.707;
-    color = color + cone(origin, normalize(N + T - B), ratio, 0.02) * 0.707;
-    color = color + cone(origin, normalize(N - T - B), ratio, 0.02) * 0.707;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let direction = normalize(directions[i]);
+        let factor = dot(N, direction);
+        if (factor > 0.0) {
+            color = color + cone(origin, direction, ratio, 0.02) * factor;
+        }
+    }
     return color * 0.1;
 
 #else
@@ -210,11 +265,25 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     let ratio = 1.0;
     var color = vec4<f32>(0.);
-    color = color + cone(origin, N, ratio, 0.3);
-    color = color + cone(origin, normalize(N + T + B), ratio, 0.3) * 0.707;
-    color = color + cone(origin, normalize(N - T + B), ratio, 0.3) * 0.707;
-    color = color + cone(origin, normalize(N + T - B), ratio, 0.3) * 0.707;
-    color = color + cone(origin, normalize(N - T - B), ratio, 0.3) * 0.707;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let direction = normalize(directions[i]);
+        let factor = dot(N, direction);
+        if (factor > 0.0) {
+            color = color + cone(origin, direction, ratio, 0.3) * factor;
+        }
+    }
+    for (var i = 8u; i < 14u; i = i + 1u) {
+        let direction = directions[i];
+        let factor = dot(N, direction);
+        if (factor > 0.0) {
+            color = color + cone_single(origin, direction, ratio, 0.3) * factor;
+        }
+    }
+    color = color * 0.5;
+    // color = color + cone(origin, normalize(N + T + B), ratio, 0.3) * 0.707;
+    // color = color + cone(origin, normalize(N - T + B), ratio, 0.3) * 0.707;
+    // color = color + cone(origin, normalize(N + T - B), ratio, 0.3) * 0.707;
+    // color = color + cone(origin, normalize(N - T - B), ratio, 0.3) * 0.707;
     
     var V: vec3<f32>;
     let is_orthographic = view.projection[3].w == 1.0;
