@@ -256,7 +256,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         let direction = normalize(directions[i]);
         let factor = dot(N, direction);
         if (factor > 0.0) {
-            color = color + cone(origin, direction, ratio, 0.015) * factor;
+            color = color + cone(origin, direction, ratio, 0.02) * factor;
         }
     }
     return color * 0.2;
@@ -298,7 +298,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     
     color = vec4<f32>(pow(color.rgb, vec3<f32>(1.0 / 2.2)), color.a);
 
-    var output_color = color * base_color;
+    var output_color = color;
     return vec4<f32>(output_color.rgb, base_color.a);
 
 #endif

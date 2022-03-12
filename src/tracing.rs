@@ -1,8 +1,6 @@
-use crate::NotGiReceiver;
-
-use super::{
-    GpuVolume, Volume, VolumeBindings, VolumeMeta, VolumeOverlay, VolumeUniformOffset,
-    VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
+use crate::{
+    GpuVolume, NotGiReceiver, Volume, VolumeBindings, VolumeMeta, VolumeOverlay,
+    VolumeUniformOffset, VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
 };
 use bevy::{
     core::FloatOrd,
@@ -42,7 +40,7 @@ impl Plugin for TracingPlugin {
                 .init_resource::<DrawFunctions<AmbientOcclusion>>()
                 .add_system_to_stage(
                     RenderStage::Extract,
-                    extract_receiver_filter.label(VoxelConeTracingSystems::ExtractReceiverFilter),
+                    extract_receiver.label(VoxelConeTracingSystems::ExtractReceiverFilter),
                 )
                 .add_system_to_stage(
                     RenderStage::Queue,
@@ -160,7 +158,7 @@ impl FromWorld for TracingPipeline {
 
 #[derive(Default, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct TracingPipelineKey {
-    pub not_gi_receiver: bool,
+    pub not_receiver: bool,
     pub ambient_occlusion: bool,
 }
 
@@ -173,7 +171,7 @@ impl SpecializedPipeline for TracingPipeline {
         let mut descriptor = self.mesh_pipeline.specialize(mesh_key);
         let mut fragment = descriptor.fragment.as_mut().unwrap();
         fragment.shader = shader;
-        if tracing_key.not_gi_receiver {
+        if tracing_key.not_receiver {
             fragment.shader_defs.push("NOT_GI_RECEIVER".to_string());
         }
         if tracing_key.ambient_occlusion {
@@ -208,7 +206,7 @@ pub struct TracingBindGroup {
     value: BindGroup,
 }
 
-pub fn extract_receiver_filter(
+pub fn extract_receiver(
     mut commands: Commands,
     query: Query<(Entity, &Handle<Mesh>), With<NotGiReceiver>>,
 ) {
@@ -225,11 +223,12 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
     transparent_draw_functions: Res<DrawFunctions<Tracing<Transparent3d>>>,
     ambient_occlusion_draw_functions: Res<DrawFunctions<AmbientOcclusion>>,
     tracing_pipeline: Res<TracingPipeline>,
-    material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform), Without<NotGiReceiver>>,
-    material_meshes_not_receiver: Query<
-        (&Handle<M>, &Handle<Mesh>, &MeshUniform),
-        With<NotGiReceiver>,
-    >,
+    material_meshes: Query<(
+        &Handle<M>,
+        &Handle<Mesh>,
+        &MeshUniform,
+        Option<&NotGiReceiver>,
+    )>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<M>>,
     mut pipelines: ResMut<SpecializedPipelines<TracingPipeline>>,
@@ -274,11 +273,14 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
         let inverse_view_row_2 = inverse_view_matrix.row(2);
 
         for entity in visible_entities.entities.iter().cloned() {
-            if let Ok((material_handle, mesh_handle, mesh_uniform)) = material_meshes.get(entity) {
+            if let Ok((material_handle, mesh_handle, mesh_uniform, not_receiver)) =
+                material_meshes.get(entity)
+            {
                 if let Some(material) = render_materials.get(material_handle) {
                     let mut mesh_key = MeshPipelineKey::from_msaa_samples(msaa.samples);
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
                         let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
+                        let not_receiver = not_receiver.is_some();
 
                         if mesh.has_tangents {
                             mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
@@ -287,7 +289,7 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                             MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
 
                         let tracing_key = TracingPipelineKey {
-                            not_gi_receiver: false,
+                            not_receiver,
                             ambient_occlusion: true,
                         };
                         let pipeline_id = pipelines.specialize(
@@ -308,7 +310,10 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                             mesh_key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
                         }
 
-                        let tracing_key = TracingPipelineKey::default();
+                        let tracing_key = TracingPipelineKey {
+                            not_receiver,
+                            ambient_occlusion: false,
+                        };
                         let pipeline_id = pipelines.specialize(
                             &mut pipeline_cache,
                             &tracing_pipeline,
@@ -336,71 +341,6 @@ pub fn queue_tracing_meshes<M: SpecializedMaterial>(
                             })),
                         }
                     }
-                }
-            }
-
-            if let Ok((material_handle, mesh_handle, mesh_uniform)) =
-                material_meshes_not_receiver.get(entity)
-            {
-                if let Some(material) = render_materials.get(material_handle) {
-                    let mut mesh_key = MeshPipelineKey::from_msaa_samples(msaa.samples);
-                    if let Some(mesh) = render_meshes.get(mesh_handle) {
-                        if mesh.has_tangents {
-                            mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
-                        }
-                        mesh_key |=
-                            MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
-                    }
-
-                    let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
-
-                    let tracing_key = TracingPipelineKey {
-                        not_gi_receiver: true,
-                        ambient_occlusion: false,
-                    };
-                    let pipeline_id = pipelines.specialize(
-                        &mut pipeline_cache,
-                        &tracing_pipeline,
-                        (mesh_key, tracing_key),
-                    );
-
-                    match M::alpha_mode(material) {
-                        AlphaMode::Opaque => opaque_phase.add(Tracing(Opaque3d {
-                            distance: -mesh_z,
-                            pipeline: pipeline_id,
-                            entity,
-                            draw_function: draw_opaque,
-                        })),
-                        AlphaMode::Mask(_) => alpha_mask_phase.add(Tracing(AlphaMask3d {
-                            distance: -mesh_z,
-                            pipeline: pipeline_id,
-                            entity,
-                            draw_function: draw_alpha_mask,
-                        })),
-                        AlphaMode::Blend => transparent_phase.add(Tracing(Transparent3d {
-                            distance: mesh_z,
-                            pipeline: pipeline_id,
-                            entity,
-                            draw_function: draw_transparent,
-                        })),
-                    }
-
-                    let tracing_key = TracingPipelineKey {
-                        not_gi_receiver: true,
-                        ambient_occlusion: true,
-                    };
-                    let pipeline_id = pipelines.specialize(
-                        &mut pipeline_cache,
-                        &tracing_pipeline,
-                        (mesh_key, tracing_key),
-                    );
-
-                    ambient_occlusion_phase.add(AmbientOcclusion {
-                        distance: -mesh_z,
-                        entity,
-                        pipeline: pipeline_id,
-                        draw_function: draw_ambient_occlusion,
-                    });
                 }
             }
         }
@@ -598,14 +538,14 @@ impl render_graph::Node for TracingPassNode {
         };
 
         let images = world.get_resource::<RenderAssets<Image>>().unwrap();
-        let color_attachment = &images[&overlay.color_attachment].texture_view;
-        let resolve_target = &images[&overlay.resolve_target].texture_view;
+        let view = &images[&overlay.irradiance].texture_view;
+        let resolve_target = &images[&overlay.irradiance_resolve].texture_view;
 
         {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_opaque_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view: color_attachment,
+                    view,
                     resolve_target: Some(resolve_target),
                     ops: Operations {
                         load: LoadOp::Clear(Color::NONE.into()),
@@ -613,7 +553,7 @@ impl render_graph::Node for TracingPassNode {
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.overlay_depth_texture.default_view,
+                    view: &bindings.irradiance_depth_texture.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Clear(0.0),
                         store: true,
@@ -642,7 +582,7 @@ impl render_graph::Node for TracingPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_alpha_mask_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view: color_attachment,
+                    view,
                     resolve_target: Some(resolve_target),
                     ops: Operations {
                         load: LoadOp::Load,
@@ -650,7 +590,7 @@ impl render_graph::Node for TracingPassNode {
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.overlay_depth_texture.default_view,
+                    view: &bindings.irradiance_depth_texture.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Load,
                         store: true,
@@ -679,7 +619,7 @@ impl render_graph::Node for TracingPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_transparent_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view: color_attachment,
+                    view,
                     resolve_target: Some(resolve_target),
                     ops: Operations {
                         load: LoadOp::Load,
@@ -687,7 +627,7 @@ impl render_graph::Node for TracingPassNode {
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.overlay_depth_texture.default_view,
+                    view: &bindings.irradiance_depth_texture.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Load,
                         store: false,
@@ -716,7 +656,7 @@ impl render_graph::Node for TracingPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_ambient_occlusion_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view: color_attachment,
+                    view,
                     resolve_target: Some(resolve_target),
                     ops: Operations {
                         load: LoadOp::Load,
@@ -724,7 +664,7 @@ impl render_graph::Node for TracingPassNode {
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.overlay_depth_texture.default_view,
+                    view: &bindings.irradiance_depth_texture.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Clear(0.0),
                         store: true,
