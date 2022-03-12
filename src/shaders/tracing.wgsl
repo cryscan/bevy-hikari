@@ -228,6 +228,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
     }
 
+#ifdef NOT_GI_RECEIVER
+    return vec4<f32>(0.0);
+#else
+
     var directions: array<vec3<f32>, 14>;
     directions[0] = vec3<f32>(1.0, 1.0, 1.0);
     directions[1] = vec3<f32>(1.0, -1.0, 1.0);
@@ -252,15 +256,11 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         let direction = normalize(directions[i]);
         let factor = dot(N, direction);
         if (factor > 0.0) {
-            color = color + cone(origin, direction, ratio, 0.02) * factor;
+            color = color + cone(origin, direction, ratio, 0.015) * factor;
         }
     }
-    return color * 0.1;
+    return color * 0.2;
 
-#else
-
-#ifdef NOT_GI_RECEIVER
-    return vec4<f32>(0.0);
 #else
 
     let ratio = 1.0;
@@ -280,10 +280,6 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
     }
     color = color * 0.5;
-    // color = color + cone(origin, normalize(N + T + B), ratio, 0.3) * 0.707;
-    // color = color + cone(origin, normalize(N - T + B), ratio, 0.3) * 0.707;
-    // color = color + cone(origin, normalize(N + T - B), ratio, 0.3) * 0.707;
-    // color = color + cone(origin, normalize(N - T - B), ratio, 0.3) * 0.707;
     
     var V: vec3<f32>;
     let is_orthographic = view.projection[3].w == 1.0;
@@ -299,6 +295,8 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     if (roughness < 0.5) {
         color = color + cone(origin, R, roughness, 1.0);
     }
+    
+    color = vec4<f32>(pow(color.rgb, vec3<f32>(1.0 / 2.2)), color.a);
 
     var output_color = color * base_color;
     return vec4<f32>(output_color.rgb, base_color.a);
