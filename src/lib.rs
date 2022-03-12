@@ -294,8 +294,8 @@ pub fn add_volume_overlay(
     volumes: Query<(Entity, &Volume), Without<VolumeOverlay>>,
 ) {
     if let Some(window) = windows.get_primary() {
-        let width = window.width() as u32;
-        let height = window.height() as u32;
+        let width = (window.width() as u32) >> 2;
+        let height = (window.height() as u32) >> 2;
 
         for (entity, _) in volumes.iter() {
             let size = Extent3d {
