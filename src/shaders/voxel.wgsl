@@ -80,17 +80,6 @@ fn saturate(value: f32) -> f32 {
     return clamp(value, 0.0, 1.0);
 }
 
-fn schlick(f0: f32, f90: f32, VoH: f32) -> f32 {
-    return mix(f0, f90, pow(1.0 - VoH, 5.0));
-}
-
-fn burley(roughness: f32, NoV: f32, NoL: f32, LoH: f32) -> f32 {
-    let f90 = 0.5 + 2.0 * roughness * LoH * LoH;
-    let light_scatter = schlick(1.0, f90, NoL);
-    let view_scatter = schlick(1.0, f90, NoV);
-    return light_scatter * view_scatter * (1.0 / PI);
-}
-
 fn compute_roughness(perceptual_roughness: f32) -> f32 {
     let clamped = clamp(perceptual_roughness, 0.089, 1.0);
     return clamped * clamped;
@@ -112,23 +101,15 @@ fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
     let l_new = l_old / (1.0 + l_old);
     return change_luminance(color, l_new);
 }
+
 fn directional_light(
     light: DirectionalLight,
-    roughness: f32,
-    NdotV: f32,
     normal: vec3<f32>,
-    view: vec3<f32>,
     diffuse_color: vec3<f32>,
 ) -> vec3<f32> {
     let incident_light = light.direction_to_light.xyz;
-
-    let half_vector = normalize(incident_light + view);
     let NoL = saturate(dot(normal, incident_light));
-    let NoH = saturate(dot(normal, half_vector));
-    let LoH = saturate(dot(incident_light, half_vector));
-
-    let diffuse = diffuse_color * burley(roughness, NdotV, NoL, LoH);
-    return diffuse * light.color.rgb * NoL;
+    return diffuse_color * light.color.rgb * NoL;
 }
 
 fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
@@ -220,30 +201,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
         let N = normalize(in.world_normal);
 
-        var V: vec3<f32>;
-        // If the projection is not orthographic
-        let is_orthographic = view.projection[3].w == 1.0;
-        if (is_orthographic) {
-            // Orthographic view vector
-            V = normalize(vec3<f32>(view.view_proj[0].z, view.view_proj[1].z, view.view_proj[2].z));
-        } else {
-            // Only valid for a perpective projection
-            V = normalize(view.world_position.xyz - in.world_position.xyz);
-        }
-
-        let NdotV = max(dot(N, V), 0.0001);
-
         let diffuse_color = output_color.rgb * (1.0 - metallic);
 
         // accumulate color
         var light_accum: vec3<f32> = vec3<f32>(0.0);
-
-        let view_z = dot(vec4<f32>(
-            view.inverse_view[0].z,
-            view.inverse_view[1].z,
-            view.inverse_view[2].z,
-            view.inverse_view[3].z,
-        ), in.world_position);
 
         for (var i: u32 = 0u; i < lights.n_directional_lights; i = i + 1u) {
             let light = lights.directional_lights[i];
@@ -251,7 +212,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
                 shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
             }
-            let light_contrib = directional_light(light, roughness, NdotV, N, V, diffuse_color);
+            let light_contrib = directional_light(light, N, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;
         }
 
