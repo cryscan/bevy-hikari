@@ -1,8 +1,8 @@
-use super::{
-    GpuVolume, Volume, VolumeBindings, VolumeColorAttachment, VolumeMeta, VolumeUniformOffset,
-    VolumeView, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+use crate::{
+    GpuVolume, GpuVoxelBuffer, NotGiCaster, Volume, VolumeBindings, VolumeColorAttachment,
+    VolumeMeta, VolumeUniformOffset, VoxelBufferOffset, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT,
+    VOXEL_SHADER_HANDLE, VOXEL_SIZE,
 };
-use crate::{GpuVoxelBuffer, NotGiCaster, VoxelBufferOffset};
 use bevy::{
     core::FloatOrd,
     ecs::system::{
@@ -62,6 +62,9 @@ impl<M: SpecializedMaterial> Plugin for VoxelMaterialPlugin<M> {
         }
     }
 }
+
+#[derive(Component)]
+pub struct VolumeView;
 
 #[derive(Component)]
 pub struct VoxelBindGroup {

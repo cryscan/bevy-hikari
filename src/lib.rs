@@ -230,9 +230,6 @@ impl Default for Volume {
     }
 }
 
-#[derive(Component)]
-pub struct VolumeView;
-
 #[derive(Component, Clone)]
 pub struct VolumeUniformOffset {
     pub offset: u32,
