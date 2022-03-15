@@ -1,4 +1,4 @@
-use crate::{VolumeBindings, VolumeOverlay, VoxelConeTracingSystems, ALBEDO_SHADER_HANDLE};
+use crate::{overlay::ScreenOverlay, VolumeBindings, ALBEDO_SHADER_HANDLE};
 use bevy::{
     core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d},
     pbr::{
@@ -58,10 +58,7 @@ impl<M: SpecializedMaterial> Plugin for DeferredMaterialPlugin<M> {
                 .add_render_command::<Deferred<Opaque3d>, DrawDeferredMesh<M>>()
                 .add_render_command::<Deferred<AlphaMask3d>, DrawDeferredMesh<M>>()
                 .add_render_command::<Deferred<Transparent3d>, DrawDeferredMesh<M>>()
-                .add_system_to_stage(
-                    RenderStage::Queue,
-                    queue_deferred_meshes::<M>.label(VoxelConeTracingSystems::QueueDeferred),
-                );
+                .add_system_to_stage(RenderStage::Queue, queue_deferred_meshes::<M>);
         }
     }
 }
@@ -148,7 +145,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub fn queue_deferred_meshes<M: SpecializedMaterial>(
+fn queue_deferred_meshes<M: SpecializedMaterial>(
     opaque_draw_functions: Res<DrawFunctions<Deferred<Opaque3d>>>,
     alpha_mask_draw_functions: Res<DrawFunctions<Deferred<AlphaMask3d>>>,
     transparent_draw_functions: Res<DrawFunctions<Deferred<Transparent3d>>>,
@@ -241,7 +238,6 @@ pub struct DeferredPassNode {
             &'static RenderPhase<Deferred<Opaque3d>>,
             &'static RenderPhase<Deferred<AlphaMask3d>>,
             &'static RenderPhase<Deferred<Transparent3d>>,
-            &'static VolumeOverlay,
             &'static VolumeBindings,
         ),
         With<ExtractedView>,
@@ -274,12 +270,13 @@ impl render_graph::Node for DeferredPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (opaque_phase, alpha_mask_phase, transparent_phase, overlay, bindings) =
+        let (opaque_phase, alpha_mask_phase, transparent_phase, bindings) =
             match self.query.get_manual(world, view_entity) {
                 Ok(query) => query,
                 Err(_) => return Ok(()),
             };
 
+        let overlay = world.get_resource::<ScreenOverlay>().unwrap();
         let images = world.get_resource::<RenderAssets<Image>>().unwrap();
         let view = &images[&overlay.albedo].texture_view;
         let resolve_target = &images[&overlay.albedo_resolve].texture_view;

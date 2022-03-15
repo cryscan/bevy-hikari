@@ -18,6 +18,7 @@ use bevy::{
         },
         render_resource::*,
         renderer::RenderDevice,
+        texture::BevyDefault,
         view::{ExtractedView, ViewDepthTexture, ViewTarget},
         RenderApp, RenderStage,
     },
@@ -29,15 +30,120 @@ impl Plugin for OverlayPlugin {
     fn build(&self, app: &mut App) {
         app.add_asset::<OverlayMaterial>()
             .add_plugin(ExtractComponentPlugin::<Handle<OverlayMaterial>>::default())
-            .add_plugin(RenderAssetPlugin::<OverlayMaterial>::default());
+            .add_plugin(RenderAssetPlugin::<OverlayMaterial>::default())
+            .init_resource::<ScreenOverlay>()
+            .add_startup_system(setup);
+
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<DrawFunctions<Overlay>>()
                 .init_resource::<MaterialPipeline<OverlayMaterial>>()
                 .init_resource::<SpecializedPipelines<MaterialPipeline<OverlayMaterial>>>()
                 .add_render_command::<Overlay, DrawMaterial<OverlayMaterial>>()
+                .add_system_to_stage(RenderStage::Extract, extract_screen_overlay)
                 .add_system_to_stage(RenderStage::Prepare, prepare_overlay_phase)
                 .add_system_to_stage(RenderStage::Queue, queue_material_meshes);
+        }
+    }
+}
+
+fn setup(
+    mut commands: Commands,
+    overlay: Res<ScreenOverlay>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<OverlayMaterial>>,
+) {
+    let irradiance_resolve = overlay.irradiance_resolve.clone();
+    let albedo_resolve = overlay.albedo_resolve.clone();
+
+    commands.spawn_bundle(MaterialMeshBundle {
+        mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
+        material: materials.add(OverlayMaterial {
+            irradiance_image: irradiance_resolve,
+            albedo_image: albedo_resolve,
+        }),
+        ..Default::default()
+    });
+}
+
+fn extract_screen_overlay(mut commands: Commands, screen_overlay: Res<ScreenOverlay>) {
+    commands.insert_resource(screen_overlay.clone());
+}
+
+#[derive(Debug, Clone)]
+pub struct ScreenOverlay {
+    pub irradiance_size: Extent3d,
+    pub irradiance: Handle<Image>,
+    pub irradiance_resolve: Handle<Image>,
+
+    pub albedo_size: Extent3d,
+    pub albedo: Handle<Image>,
+    pub albedo_resolve: Handle<Image>,
+}
+
+impl FromWorld for ScreenOverlay {
+    fn from_world(world: &mut World) -> Self {
+        let windows = world.get_resource::<Windows>().unwrap();
+        let window = windows.get_primary().unwrap();
+        let width = window.width() as u32;
+        let height = window.height() as u32;
+
+        let msaa = world.get_resource::<Msaa>().unwrap();
+        let samples = msaa.samples;
+
+        let mut images = world.get_resource_mut::<Assets<Image>>().unwrap();
+
+        let irradiance_size = Extent3d {
+            width: width >> 1,
+            height: height >> 1,
+            depth_or_array_layers: 1,
+        };
+        let mut image = Image::new_fill(
+            irradiance_size,
+            TextureDimension::D2,
+            &[0, 0, 0, 255],
+            TextureFormat::bevy_default(),
+        );
+        image.texture_descriptor.usage = TextureUsages::COPY_DST
+            | TextureUsages::RENDER_ATTACHMENT
+            | TextureUsages::TEXTURE_BINDING;
+
+        image.texture_descriptor.sample_count = samples;
+        let irradiance = images.add(image.clone());
+
+        image.texture_descriptor.sample_count = 1;
+        let irradiance_resolve = images.add(image);
+
+        let albedo_size = Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let mut image = Image::new_fill(
+            albedo_size,
+            TextureDimension::D2,
+            &[0, 0, 0, 255],
+            TextureFormat::bevy_default(),
+        );
+        image.texture_descriptor.usage = TextureUsages::COPY_DST
+            | TextureUsages::RENDER_ATTACHMENT
+            | TextureUsages::TEXTURE_BINDING;
+        image.sampler_descriptor.mag_filter = FilterMode::Linear;
+        image.sampler_descriptor.min_filter = FilterMode::Linear;
+
+        image.texture_descriptor.sample_count = samples;
+        let albedo = images.add(image.clone());
+
+        image.texture_descriptor.sample_count = 1;
+        let albedo_resolve = images.add(image);
+
+        Self {
+            irradiance_size,
+            irradiance,
+            irradiance_resolve,
+            albedo_size,
+            albedo,
+            albedo_resolve,
         }
     }
 }

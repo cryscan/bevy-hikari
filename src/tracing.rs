@@ -1,6 +1,6 @@
 use crate::{
-    GpuVolume, NotGiReceiver, Volume, VolumeBindings, VolumeMeta, VolumeOverlay,
-    VolumeUniformOffset, VoxelConeTracingSystems, TRACING_SHADER_HANDLE,
+    overlay::ScreenOverlay, GpuVolume, NotGiReceiver, Volume, VolumeBindings, VolumeMeta,
+    VolumeUniformOffset, TRACING_SHADER_HANDLE,
 };
 use bevy::{
     core::FloatOrd,
@@ -38,15 +38,8 @@ impl Plugin for TracingPlugin {
                 .init_resource::<DrawFunctions<Tracing<AlphaMask3d>>>()
                 .init_resource::<DrawFunctions<Tracing<Transparent3d>>>()
                 .init_resource::<DrawFunctions<AmbientOcclusion>>()
-                .add_system_to_stage(
-                    RenderStage::Extract,
-                    extract_receiver.label(VoxelConeTracingSystems::ExtractReceiverFilter),
-                )
-                .add_system_to_stage(
-                    RenderStage::Queue,
-                    queue_tracing_bind_groups
-                        .label(VoxelConeTracingSystems::QueueTracingBindGroups),
-                )
+                .add_system_to_stage(RenderStage::Extract, extract_receiver)
+                .add_system_to_stage(RenderStage::Queue, queue_tracing_bind_groups)
                 .add_system_to_stage(
                     RenderStage::PhaseSort,
                     sort_phase_system::<Tracing<Opaque3d>>,
@@ -78,10 +71,7 @@ impl<M: SpecializedMaterial> Plugin for TracingMaterialPlugin<M> {
                 .add_render_command::<Tracing<AlphaMask3d>, DrawTracingMesh<M>>()
                 .add_render_command::<Tracing<Transparent3d>, DrawTracingMesh<M>>()
                 .add_render_command::<AmbientOcclusion, DrawTracingMesh<M>>()
-                .add_system_to_stage(
-                    RenderStage::Queue,
-                    queue_tracing_meshes::<M>.label(VoxelConeTracingSystems::QueueTracing),
-                );
+                .add_system_to_stage(RenderStage::Queue, queue_tracing_meshes::<M>);
         }
     }
 }
@@ -206,7 +196,7 @@ pub struct TracingBindGroup {
     value: BindGroup,
 }
 
-pub fn extract_receiver(
+fn extract_receiver(
     mut commands: Commands,
     query: Query<(Entity, &Handle<Mesh>), With<NotGiReceiver>>,
 ) {
@@ -217,7 +207,7 @@ pub fn extract_receiver(
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub fn queue_tracing_meshes<M: SpecializedMaterial>(
+fn queue_tracing_meshes<M: SpecializedMaterial>(
     opaque_draw_functions: Res<DrawFunctions<Tracing<Opaque3d>>>,
     alpha_mask_draw_functions: Res<DrawFunctions<Tracing<AlphaMask3d>>>,
     transparent_draw_functions: Res<DrawFunctions<Tracing<Transparent3d>>>,
@@ -492,7 +482,6 @@ pub struct TracingPassNode {
             &'static RenderPhase<Tracing<AlphaMask3d>>,
             &'static RenderPhase<Tracing<Transparent3d>>,
             &'static RenderPhase<AmbientOcclusion>,
-            &'static VolumeOverlay,
             &'static VolumeBindings,
         ),
         With<ExtractedView>,
@@ -525,18 +514,13 @@ impl render_graph::Node for TracingPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (
-            opaque_phase,
-            alpha_mask_phase,
-            transparent_phase,
-            ambient_occlusion_phase,
-            overlay,
-            bindings,
-        ) = match self.query.get_manual(world, view_entity) {
-            Ok(query) => query,
-            Err(_) => return Ok(()),
-        };
+        let (opaque_phase, alpha_mask_phase, transparent_phase, ambient_occlusion_phase, bindings) =
+            match self.query.get_manual(world, view_entity) {
+                Ok(query) => query,
+                Err(_) => return Ok(()),
+            };
 
+        let overlay = world.get_resource::<ScreenOverlay>().unwrap();
         let images = world.get_resource::<RenderAssets<Image>>().unwrap();
         let view = &images[&overlay.irradiance].texture_view;
         let resolve_target = &images[&overlay.irradiance_resolve].texture_view;

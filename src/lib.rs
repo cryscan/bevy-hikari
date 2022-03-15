@@ -67,10 +67,7 @@ impl Plugin for VoxelConeTracingPlugin {
             .add_plugin(OverlayPlugin)
             .add_plugin(DeferredMaterialPlugin::<StandardMaterial>::default())
             .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
-            .add_plugin(TracingMaterialPlugin::<StandardMaterial>::default())
-            .add_system_to_stage(CoreStage::PostUpdate, add_volume_overlay.exclusive_system())
-            .add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
-            .add_system_to_stage(CoreStage::PostUpdate, check_visibility);
+            .add_plugin(TracingMaterialPlugin::<StandardMaterial>::default());
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
@@ -104,23 +101,10 @@ impl Plugin for VoxelConeTracingPlugin {
 
         render_app
             .init_resource::<VolumeMeta>()
-            .add_system_to_stage(
-                RenderStage::Extract,
-                extract_volumes.label(VoxelConeTracingSystems::ExtractVolumes),
-            )
-            .add_system_to_stage(
-                RenderStage::Extract,
-                extract_views.label(VoxelConeTracingSystems::ExtractViews),
-            )
-            .add_system_to_stage(
-                RenderStage::Prepare,
-                prepare_volumes.label(VoxelConeTracingSystems::PrepareVolumes),
-            )
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_volume_view_bind_groups
-                    .label(VoxelConeTracingSystems::QueueVolumeViewBindGroups),
-            );
+            .add_system_to_stage(RenderStage::Extract, extract_volumes)
+            .add_system_to_stage(RenderStage::Extract, extract_views)
+            .add_system_to_stage(RenderStage::Prepare, prepare_volumes)
+            .add_system_to_stage(RenderStage::Queue, queue_volume_view_bind_groups);
 
         let mut render_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
 
@@ -214,21 +198,6 @@ impl Plugin for VoxelConeTracingPlugin {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
-pub enum VoxelConeTracingSystems {
-    ExtractVolumes,
-    ExtractViews,
-    ExtractReceiverFilter,
-    PrepareVolumes,
-    QueueVolumeViewBindGroups,
-    QueueVoxelBindGroups,
-    QueueVoxel,
-    QueueMipmapBindGroups,
-    QueueTracing,
-    QueueTracingBindGroups,
-    QueueDeferred,
-}
-
 /// Marker component for meshes not casting GI.
 #[derive(Component)]
 pub struct NotGiCaster;
@@ -259,17 +228,6 @@ impl Default for Volume {
     fn default() -> Self {
         Self::new(Vec3::new(-5.0, -5.0, -5.0), Vec3::new(5.0, 5.0, 5.0))
     }
-}
-
-#[derive(Component, Clone)]
-pub struct VolumeOverlay {
-    pub irradiance_size: Extent3d,
-    pub irradiance: Handle<Image>,
-    pub irradiance_resolve: Handle<Image>,
-
-    pub albedo_size: Extent3d,
-    pub albedo: Handle<Image>,
-    pub albedo_resolve: Handle<Image>,
 }
 
 #[derive(Component)]
@@ -321,90 +279,9 @@ pub struct VolumeMeta {
     voxel_buffers: StorageVec<GpuVoxelBuffer>,
 }
 
-pub fn add_volume_overlay(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<OverlayMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    msaa: Res<Msaa>,
-    windows: Res<Windows>,
-    volumes: Query<(Entity, &Volume), Without<VolumeOverlay>>,
-) {
-    if let Some(window) = windows.get_primary() {
-        let width = window.width() as u32;
-        let height = window.height() as u32;
-
-        for (entity, _) in volumes.iter() {
-            let irradiance_size = Extent3d {
-                width: width >> 1,
-                height: height >> 1,
-                depth_or_array_layers: 1,
-            };
-            let mut image = Image::new_fill(
-                irradiance_size,
-                TextureDimension::D2,
-                &[0, 0, 0, 255],
-                TextureFormat::bevy_default(),
-            );
-            image.texture_descriptor.usage = TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING;
-
-            image.texture_descriptor.sample_count = msaa.samples;
-            let irradiance = images.add(image.clone());
-
-            image.texture_descriptor.sample_count = 1;
-            let irradiance_resolve = images.add(image);
-
-            let albedo_size = Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            };
-            let mut image = Image::new_fill(
-                albedo_size,
-                TextureDimension::D2,
-                &[0, 0, 0, 255],
-                TextureFormat::bevy_default(),
-            );
-            image.texture_descriptor.usage = TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING;
-            image.sampler_descriptor.mag_filter = FilterMode::Linear;
-            image.sampler_descriptor.min_filter = FilterMode::Linear;
-
-            image.texture_descriptor.sample_count = msaa.samples;
-            let albedo = images.add(image.clone());
-
-            image.texture_descriptor.sample_count = 1;
-            let albedo_resolve = images.add(image);
-
-            commands.spawn_bundle(MaterialMeshBundle::<OverlayMaterial> {
-                mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
-                material: materials.add(OverlayMaterial {
-                    irradiance_image: irradiance_resolve.clone(),
-                    albedo_image: albedo_resolve.clone(),
-                }),
-                ..Default::default()
-            });
-
-            commands.entity(entity).insert(VolumeOverlay {
-                irradiance_size,
-                irradiance,
-                irradiance_resolve,
-                albedo_size,
-                albedo,
-                albedo_resolve,
-            });
-        }
-    }
-}
-
-pub fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume, &VolumeOverlay)>) {
-    for (entity, volume, overlay) in volumes.iter() {
-        commands
-            .get_or_spawn(entity)
-            .insert_bundle((volume.clone(), overlay.clone()));
+pub fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
+    for (entity, volume) in volumes.iter() {
+        commands.get_or_spawn(entity).insert(volume.clone());
     }
 }
 
@@ -414,14 +291,15 @@ pub fn prepare_volumes(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     msaa: Res<Msaa>,
+    overlay: Res<ScreenOverlay>,
     mut texture_cache: ResMut<TextureCache>,
-    mut volumes: Query<(Entity, &Volume, &VolumeOverlay)>,
+    mut volumes: Query<(Entity, &Volume)>,
     mut volume_meta: ResMut<VolumeMeta>,
 ) {
     volume_meta.volume_uniforms.clear();
     volume_meta.voxel_buffers.clear();
 
-    for (entity, volume, overlay) in volumes.iter_mut() {
+    for (entity, volume) in volumes.iter_mut() {
         let volume_uniform_offset = VolumeUniformOffset {
             offset: volume_meta.volume_uniforms.push(GpuVolume {
                 min: volume.min,

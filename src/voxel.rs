@@ -1,7 +1,6 @@
 use super::{
     GpuVolume, Volume, VolumeBindings, VolumeColorAttachment, VolumeMeta, VolumeUniformOffset,
-    VolumeView, VoxelConeTracingSystems, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE,
-    VOXEL_SIZE,
+    VolumeView, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
 };
 use crate::{GpuVoxelBuffer, NotGiCaster, VoxelBufferOffset};
 use bevy::{
@@ -37,19 +36,16 @@ use std::{borrow::Cow, f32::consts::FRAC_PI_2, marker::PhantomData, num::NonZero
 pub struct VoxelPlugin;
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
+        app.add_system_to_stage(CoreStage::PostUpdate, add_volume_views.exclusive_system())
+            .add_system_to_stage(CoreStage::PostUpdate, check_visibility);
+
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<VoxelPipeline>()
                 .init_resource::<SpecializedPipelines<VoxelPipeline>>()
                 .init_resource::<DrawFunctions<Voxel>>()
-                .add_system_to_stage(
-                    RenderStage::Queue,
-                    queue_voxel_bind_groups.label(VoxelConeTracingSystems::QueueVoxelBindGroups),
-                )
-                .add_system_to_stage(
-                    RenderStage::Queue,
-                    queue_mipmap_bind_groups.label(VoxelConeTracingSystems::QueueMipmapBindGroups),
-                );
+                .add_system_to_stage(RenderStage::Queue, queue_voxel_bind_groups)
+                .add_system_to_stage(RenderStage::Queue, queue_mipmap_bind_groups);
         }
     }
 }
@@ -62,10 +58,7 @@ impl<M: SpecializedMaterial> Plugin for VoxelMaterialPlugin<M> {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .add_render_command::<Voxel, DrawVoxelMesh<M>>()
-                .add_system_to_stage(
-                    RenderStage::Queue,
-                    queue_voxel_meshes::<M>.label(VoxelConeTracingSystems::QueueVoxel),
-                );
+                .add_system_to_stage(RenderStage::Queue, queue_voxel_meshes::<M>);
         }
     }
 }
@@ -252,7 +245,7 @@ impl SpecializedPipeline for VoxelPipeline {
     }
 }
 
-pub fn add_volume_views(mut commands: Commands, mut volumes: Query<&mut Volume>) {
+fn add_volume_views(mut commands: Commands, mut volumes: Query<&mut Volume>) {
     for mut volume in volumes.iter_mut() {
         if !volume.views.is_empty() {
             continue;
@@ -294,7 +287,7 @@ pub fn add_volume_views(mut commands: Commands, mut volumes: Query<&mut Volume>)
 }
 
 #[allow(clippy::type_complexity)]
-pub fn check_visibility(
+fn check_visibility(
     mut view_query: Query<
         (&mut VisibleEntities, &Frustum, Option<&RenderLayers>),
         With<VolumeView>,
