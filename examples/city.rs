@@ -87,6 +87,7 @@ fn setup(
                     ..Default::default()
                 },
                 shadows_enabled: true,
+                shadow_normal_bias: 0.1,
                 ..Default::default()
             },
             ..Default::default()
