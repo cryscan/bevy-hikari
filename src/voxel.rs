@@ -44,6 +44,8 @@ impl Plugin for VoxelPlugin {
                 .init_resource::<VoxelPipeline>()
                 .init_resource::<SpecializedPipelines<VoxelPipeline>>()
                 .init_resource::<DrawFunctions<Voxel>>()
+                .add_system_to_stage(RenderStage::Extract, extract_views)
+                .add_system_to_stage(RenderStage::Queue, queue_volume_view_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_voxel_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_mipmap_bind_groups);
         }
@@ -353,7 +355,7 @@ fn check_visibility(
     }
 }
 
-pub fn extract_views(
+fn extract_views(
     mut commands: Commands,
     query: Query<
         (
@@ -382,7 +384,7 @@ pub fn extract_views(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn queue_volume_view_bind_groups(
+fn queue_volume_view_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     mesh_pipeline: Res<MeshPipeline>,
@@ -474,7 +476,7 @@ pub fn queue_volume_view_bind_groups(
     }
 }
 
-pub fn queue_voxel_bind_groups(
+fn queue_voxel_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     voxel_pipeline: Res<VoxelPipeline>,

@@ -102,9 +102,7 @@ impl Plugin for VoxelConeTracingPlugin {
         render_app
             .init_resource::<VolumeMeta>()
             .add_system_to_stage(RenderStage::Extract, extract_volumes)
-            .add_system_to_stage(RenderStage::Extract, extract_views)
-            .add_system_to_stage(RenderStage::Prepare, prepare_volumes)
-            .add_system_to_stage(RenderStage::Queue, queue_volume_view_bind_groups);
+            .add_system_to_stage(RenderStage::Prepare, prepare_volumes);
 
         let mut render_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
 
@@ -276,14 +274,14 @@ pub struct VolumeMeta {
     voxel_buffers: StorageVec<GpuVoxelBuffer>,
 }
 
-pub fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
+fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
     for (entity, volume) in volumes.iter() {
         commands.get_or_spawn(entity).insert(volume.clone());
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn prepare_volumes(
+fn prepare_volumes(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
