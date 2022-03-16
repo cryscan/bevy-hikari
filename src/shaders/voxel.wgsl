@@ -146,9 +146,27 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
 #endif
 }
 
+fn spatial_index(position: vec3<f32>) -> vec3<i32> {
+    let dims = vec3<f32>(textureDimensions(voxel_texture));
+    let coords = (position - volume.min) / (volume.max - volume.min);
+    return vec3<i32>(0.5 + (dims - vec3<f32>(1.0)) * coords);
+}
+
 fn linear_index(index: vec3<i32>) -> i32 {
-    let dims = textureDimensions(voxel_texture);
-    return index.x + index.y * dims.x + index.z * dims.x * dims.y;
+    var spatial = vec3<u32>(index);
+    var morton = 0u;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let coords = spatial & vec3<u32>(1u);
+        let offset = 3u * i;
+
+        morton = morton | (coords.x << offset);
+        morton = morton | (coords.y << (offset + 1u));
+        morton = morton | (coords.z << (offset + 2u));
+
+        spatial = spatial >> vec3<u32>(1u);
+    }
+
+    return i32(morton);
 }
 
 struct FragmentInput {
@@ -160,9 +178,6 @@ struct FragmentInput {
 
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
-    let coords = (in.world_position.xyz - volume.min) / (volume.max - volume.min);
-    let index = vec3<i32>(0.5 + vec3<f32>(textureDimensions(voxel_texture)) * coords);
-
     var output_color = material.base_color;
     if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
         output_color = output_color * textureSample(base_color_texture, base_color_sampler, in.uv);
@@ -230,6 +245,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     // tone_mapping
     output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
     
+    let index = spatial_index(in.world_position.xyz);
     let voxel = &voxel_buffer.data[linear_index(index)];
     let converted = vec4<u32>((output_color + 0.5) * 255.);
     atomicAdd(&(*voxel).top, (converted.r << 16u) + converted.g);

@@ -115,8 +115,20 @@ fn mipmap_5([[builtin(global_invocation_id)]] id: vec3<u32>) {
 }
 
 fn linear_index(index: vec3<i32>) -> i32 {
-    let dims = textureDimensions(texture_out);
-    return index.x + index.y * dims.x + index.z * dims.x * dims.y;
+    var spatial = vec3<u32>(index);
+    var morton = 0u;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let coord = spatial & vec3<u32>(1u);
+        let offset = 3u * i;
+
+        morton = morton | (coord.x << offset);
+        morton = morton | (coord.y << (offset + 1u));
+        morton = morton | (coord.z << (offset + 2u));
+
+        spatial = spatial >> vec3<u32>(1u);
+    }
+
+    return i32(morton);
 }
 
 fn unpack_color(voxel: Voxel) -> vec4<f32> {
