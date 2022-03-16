@@ -293,7 +293,7 @@ impl SpecializedMaterial for OverlayMaterial {
     }
 }
 
-pub fn prepare_overlay_phase(mut commands: Commands, views: Query<Entity, With<Volume>>) {
+fn prepare_overlay_phase(mut commands: Commands, views: Query<Entity, With<Volume>>) {
     for view in views.iter() {
         commands
             .entity(view)
@@ -302,7 +302,7 @@ pub fn prepare_overlay_phase(mut commands: Commands, views: Query<Entity, With<V
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn queue_material_meshes(
+fn queue_material_meshes(
     draw_functions: Res<DrawFunctions<Overlay>>,
     material_pipeline: Res<MaterialPipeline<OverlayMaterial>>,
     mut pipelines: ResMut<SpecializedPipelines<MaterialPipeline<OverlayMaterial>>>,
