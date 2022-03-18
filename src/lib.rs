@@ -239,8 +239,6 @@ pub struct VolumeColorAttachment {
 
 #[derive(Component)]
 pub struct VolumeBindings {
-    pub irradiance_depth_texture: CachedTexture,
-    pub albedo_depth_texture: CachedTexture,
     pub voxel_texture: CachedTexture,
     pub anisotropic_textures: Vec<CachedTexture>,
     pub texture_sampler: Sampler,
@@ -274,8 +272,6 @@ fn prepare_volumes(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    msaa: Res<Msaa>,
-    overlay: Res<ScreenOverlay>,
     mut texture_cache: ResMut<TextureCache>,
     mut volumes: Query<(Entity, &Volume)>,
     mut volume_meta: ResMut<VolumeMeta>,
@@ -377,37 +373,9 @@ fn prepare_volumes(
             ));
         }
 
-        let irradiance_depth_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: Some("volume_overlay_depth_texture"),
-                size: overlay.irradiance_size,
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Depth32Float,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            },
-        );
-
-        let albedo_depth_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: Some("volume_overlay_depth_texture"),
-                size: overlay.albedo_size,
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Depth32Float,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            },
-        );
-
         commands.entity(entity).insert_bundle((
             volume_uniform_offset.clone(),
             VolumeBindings {
-                irradiance_depth_texture,
-                albedo_depth_texture,
                 voxel_texture,
                 anisotropic_textures,
                 texture_sampler: texture_sampler.clone(),

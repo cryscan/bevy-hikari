@@ -1,5 +1,5 @@
 use crate::{
-    overlay::ScreenOverlay, GpuVolume, NotGiReceiver, Volume, VolumeBindings, VolumeMeta,
+    overlay::GpuScreenOverlay, GpuVolume, NotGiReceiver, Volume, VolumeBindings, VolumeMeta,
     VolumeUniformOffset, TRACING_SHADER_HANDLE,
 };
 use bevy::{
@@ -547,7 +547,6 @@ pub struct TracingPassNode {
             &'static RenderPhase<Tracing<AlphaMask3d>>,
             &'static RenderPhase<Tracing<Transparent3d>>,
             &'static RenderPhase<AmbientOcclusion>,
-            &'static VolumeBindings,
         ),
         With<ExtractedView>,
     >,
@@ -579,30 +578,30 @@ impl render_graph::Node for TracingPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (opaque_phase, alpha_mask_phase, transparent_phase, ambient_occlusion_phase, bindings) =
+        let (opaque_phase, alpha_mask_phase, transparent_phase, ambient_occlusion_phase) =
             match self.query.get_manual(world, view_entity) {
                 Ok(query) => query,
                 Err(_) => return Ok(()),
             };
 
-        let overlay = world.get_resource::<ScreenOverlay>().unwrap();
-        let images = world.get_resource::<RenderAssets<Image>>().unwrap();
-        let view = &images[&overlay.irradiance].texture_view;
-        let resolve_target = &images[&overlay.irradiance_resolve].texture_view;
+        let overlay = match world.get_resource::<GpuScreenOverlay>() {
+            Some(overlay) => overlay,
+            None => return Ok(()),
+        };
 
         {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_opaque_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view,
-                    resolve_target: Some(resolve_target),
+                    view: &overlay.irradiance,
+                    resolve_target: Some(&overlay.irradiance_resolve),
                     ops: Operations {
                         load: LoadOp::Clear(Color::NONE.into()),
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.irradiance_depth_texture.default_view,
+                    view: &overlay.irradiance_depth.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Clear(0.0),
                         store: true,
@@ -631,15 +630,15 @@ impl render_graph::Node for TracingPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_alpha_mask_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view,
-                    resolve_target: Some(resolve_target),
+                    view: &overlay.irradiance,
+                    resolve_target: Some(&overlay.irradiance_resolve),
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.irradiance_depth_texture.default_view,
+                    view: &overlay.irradiance_depth.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Load,
                         store: true,
@@ -668,15 +667,15 @@ impl render_graph::Node for TracingPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_transparent_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view,
-                    resolve_target: Some(resolve_target),
+                    view: &overlay.irradiance,
+                    resolve_target: Some(&overlay.irradiance_resolve),
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.irradiance_depth_texture.default_view,
+                    view: &overlay.irradiance_depth.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Load,
                         store: false,
@@ -705,15 +704,15 @@ impl render_graph::Node for TracingPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("tracing_ambient_occlusion_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view,
-                    resolve_target: Some(resolve_target),
+                    view: &overlay.irradiance,
+                    resolve_target: Some(&overlay.irradiance_resolve),
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.irradiance_depth_texture.default_view,
+                    view: &overlay.irradiance_depth.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Clear(0.0),
                         store: true,

@@ -18,7 +18,7 @@ use bevy::{
         },
         render_resource::*,
         renderer::RenderDevice,
-        texture::BevyDefault,
+        texture::{BevyDefault, CachedTexture, TextureCache},
         view::{ExtractedView, ViewDepthTexture, ViewTarget},
         RenderApp, RenderStage,
     },
@@ -41,6 +41,7 @@ impl Plugin for OverlayPlugin {
                 .init_resource::<SpecializedPipelines<MaterialPipeline<OverlayMaterial>>>()
                 .add_render_command::<Overlay, DrawMaterial<OverlayMaterial>>()
                 .add_system_to_stage(RenderStage::Extract, extract_screen_overlay)
+                .add_system_to_stage(RenderStage::Prepare, prepare_screen_overlay)
                 .add_system_to_stage(RenderStage::Prepare, prepare_overlay_phase)
                 .add_system_to_stage(RenderStage::Queue, queue_material_meshes);
         }
@@ -70,6 +71,63 @@ fn extract_screen_overlay(mut commands: Commands, screen_overlay: Res<ScreenOver
     commands.insert_resource(screen_overlay.clone());
 }
 
+fn prepare_screen_overlay(
+    mut commands: Commands,
+    images: Res<RenderAssets<Image>>,
+    overlay: Res<ScreenOverlay>,
+    msaa: Res<Msaa>,
+    render_device: Res<RenderDevice>,
+    mut texture_cache: ResMut<TextureCache>,
+) {
+    let irradiance_depth = texture_cache.get(
+        &render_device,
+        TextureDescriptor {
+            label: Some("volume_overlay_depth_texture"),
+            size: overlay.irradiance_size,
+            mip_level_count: 1,
+            sample_count: msaa.samples,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Depth32Float,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+        },
+    );
+
+    let albedo_depth = texture_cache.get(
+        &render_device,
+        TextureDescriptor {
+            label: Some("volume_overlay_depth_texture"),
+            size: overlay.albedo_size,
+            mip_level_count: 1,
+            sample_count: msaa.samples,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Depth32Float,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+        },
+    );
+
+    let retrieve_textures = || {
+        let irradiance = images.get(&overlay.irradiance)?.texture_view.clone();
+        let irradiance_resolve = images
+            .get(&overlay.irradiance_resolve)?
+            .texture_view
+            .clone();
+        let albedo = images.get(&overlay.albedo)?.texture_view.clone();
+        let albedo_resolve = images.get(&overlay.albedo_resolve)?.texture_view.clone();
+        Some((irradiance, irradiance_resolve, albedo, albedo_resolve))
+    };
+
+    if let Some((irradiance, irradiance_resolve, albedo, albedo_resolve)) = retrieve_textures() {
+        commands.insert_resource(GpuScreenOverlay {
+            irradiance,
+            irradiance_resolve,
+            irradiance_depth,
+            albedo,
+            albedo_resolve,
+            albedo_depth,
+        });
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ScreenOverlay {
     pub irradiance_size: Extent3d,
@@ -79,6 +137,16 @@ pub struct ScreenOverlay {
     pub albedo_size: Extent3d,
     pub albedo: Handle<Image>,
     pub albedo_resolve: Handle<Image>,
+}
+
+pub struct GpuScreenOverlay {
+    pub irradiance: TextureView,
+    pub irradiance_resolve: TextureView,
+    pub irradiance_depth: CachedTexture,
+
+    pub albedo: TextureView,
+    pub albedo_resolve: TextureView,
+    pub albedo_depth: CachedTexture,
 }
 
 impl FromWorld for ScreenOverlay {
@@ -168,6 +236,7 @@ impl RenderAsset for OverlayMaterial {
         SRes<RenderDevice>,
         SRes<MaterialPipeline<Self>>,
         SRes<RenderAssets<Image>>,
+        Option<SRes<GpuScreenOverlay>>,
     );
     fn extract_asset(&self) -> Self::ExtractedAsset {
         self.clone()
@@ -175,7 +244,7 @@ impl RenderAsset for OverlayMaterial {
 
     fn prepare_asset(
         material: Self::ExtractedAsset,
-        (render_device, material_pipeline, images): &mut SystemParamItem<Self::Param>,
+        (render_device, material_pipeline, images, overlay): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
         let irradiance = if let Some(result) = images.get(&material.irradiance_image) {
             result
@@ -185,6 +254,12 @@ impl RenderAsset for OverlayMaterial {
 
         let albedo = if let Some(result) = images.get(&material.albedo_image) {
             result
+        } else {
+            return Err(PrepareAssetError::RetryNextUpdate(material));
+        };
+
+        let _overlay = if let Some(overlay) = overlay {
+            overlay
         } else {
             return Err(PrepareAssetError::RetryNextUpdate(material));
         };
