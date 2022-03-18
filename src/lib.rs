@@ -16,11 +16,11 @@ use bevy::{
         texture::{BevyDefault, CachedTexture, TextureCache},
         RenderApp, RenderStage,
     },
+    utils::HashMap,
 };
 
 mod deferred;
 mod overlay;
-mod storage_vec;
 mod tracing;
 mod voxel;
 
@@ -49,7 +49,6 @@ pub mod draw_3d_graph {
 }
 
 pub use deferred::DeferredMaterialPlugin;
-pub use storage_vec::StorageVec;
 pub use tracing::TracingMaterialPlugin;
 pub use voxel::VoxelMaterialPlugin;
 
@@ -233,11 +232,6 @@ pub struct VolumeUniformOffset {
     pub offset: u32,
 }
 
-#[derive(Component, Clone)]
-pub struct VoxelBufferOffset {
-    pub offset: u32,
-}
-
 #[derive(Component)]
 pub struct VolumeColorAttachment {
     pub texture: CachedTexture,
@@ -258,20 +252,15 @@ pub struct GpuVolume {
     max: Vec3,
 }
 
-#[derive(Clone, AsStd140)]
-pub struct GpuVoxel {
-    color: [u32; 2],
-}
-
 #[derive(AsStd140)]
 pub struct GpuVoxelBuffer {
-    data: [GpuVoxel; VOXEL_COUNT],
+    data: [[u32; 2]; VOXEL_COUNT],
 }
 
 #[derive(Default)]
 pub struct VolumeMeta {
     volume_uniforms: DynamicUniformVec<GpuVolume>,
-    voxel_buffers: StorageVec<GpuVoxelBuffer>,
+    voxel_buffers: HashMap<Entity, Buffer>,
 }
 
 fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
@@ -292,7 +281,6 @@ fn prepare_volumes(
     mut volume_meta: ResMut<VolumeMeta>,
 ) {
     volume_meta.volume_uniforms.clear();
-    volume_meta.voxel_buffers.clear();
 
     for (entity, volume) in volumes.iter_mut() {
         let volume_uniform_offset = VolumeUniformOffset {
@@ -302,9 +290,16 @@ fn prepare_volumes(
             }),
         };
 
-        let voxel_buffer_offset = VoxelBufferOffset {
-            offset: volume_meta.voxel_buffers.push(&render_device),
-        };
+        if volume_meta.voxel_buffers.get(&entity).is_none() {
+            let buffer = render_device.create_buffer(&BufferDescriptor {
+                label: None,
+                size: GpuVoxelBuffer::std140_size_static() as u64,
+                usage: BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            });
+            // TODO: clear unused buffers.
+            volume_meta.voxel_buffers.insert(entity, buffer);
+        }
 
         let voxel_texture = texture_cache.get(
             &render_device,
@@ -375,7 +370,6 @@ fn prepare_volumes(
 
             commands.entity(view).insert_bundle((
                 volume_uniform_offset.clone(),
-                voxel_buffer_offset.clone(),
                 VolumeColorAttachment {
                     texture: color_texture,
                 },
@@ -411,7 +405,6 @@ fn prepare_volumes(
 
         commands.entity(entity).insert_bundle((
             volume_uniform_offset.clone(),
-            voxel_buffer_offset.clone(),
             VolumeBindings {
                 irradiance_depth_texture,
                 albedo_depth_texture,

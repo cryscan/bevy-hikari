@@ -19,7 +19,10 @@ use bevy::{
             DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
             RenderPhase, SetItemPipeline, TrackedRenderPass,
         },
-        render_resource::{std140::AsStd140, *},
+        render_resource::{
+            std140::{AsStd140, Std140},
+            *,
+        },
         renderer::RenderDevice,
         view::{ExtractedView, VisibleEntities},
         RenderApp, RenderStage,
@@ -32,6 +35,7 @@ impl Plugin for TracingPlugin {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                .init_resource::<DirectionsUniform>()
                 .init_resource::<TracingPipeline>()
                 .init_resource::<SpecializedPipelines<TracingPipeline>>()
                 .init_resource::<DrawFunctions<Tracing<Opaque3d>>>()
@@ -106,13 +110,23 @@ impl FromWorld for TracingPipeline {
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: BufferSize::new(GpuDirections::std140_size_static() as u64),
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 7,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
                     has_dynamic_offset: true,
                     min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
                 },
                 count: None,
             },
             BindGroupLayoutEntry {
-                binding: 7,
+                binding: 8,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
                     sample_type: TextureSampleType::Float { filterable: true },
@@ -122,7 +136,7 @@ impl FromWorld for TracingPipeline {
                 count: None,
             },
             BindGroupLayoutEntry {
-                binding: 8,
+                binding: 9,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Sampler(SamplerBindingType::Filtering),
                 count: None,
@@ -188,6 +202,48 @@ impl SpecializedPipeline for TracingPipeline {
         ]);
 
         descriptor
+    }
+}
+
+pub struct DirectionsUniform(pub Buffer);
+
+impl FromWorld for DirectionsUniform {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.get_resource::<RenderDevice>().unwrap();
+        let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: None,
+            contents: GpuDirections::default().as_std140().as_bytes(),
+            usage: BufferUsages::UNIFORM,
+        });
+        Self(buffer)
+    }
+}
+
+#[derive(AsStd140)]
+struct GpuDirections {
+    data: [Vec3; 14],
+}
+
+impl Default for GpuDirections {
+    fn default() -> Self {
+        Self {
+            data: [
+                Vec3::new(1.0, 1.0, 1.0),
+                Vec3::new(-1.0, 1.0, 1.0),
+                Vec3::new(1.0, -1.0, 1.0),
+                Vec3::new(-1.0, -1.0, 1.0),
+                Vec3::new(1.0, 1.0, -1.0),
+                Vec3::new(-1.0, 1.0, -1.0),
+                Vec3::new(1.0, -1.0, -1.0),
+                Vec3::new(-1.0, -1.0, -1.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Vec3::new(-1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+            ],
+        }
     }
 }
 
@@ -341,6 +397,7 @@ pub fn queue_tracing_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     tracing_pipeline: Res<TracingPipeline>,
+    directions: Res<DirectionsUniform>,
     volume_meta: Res<VolumeMeta>,
     volume_query: Query<(Entity, &VolumeBindings), With<Volume>>,
 ) {
@@ -355,14 +412,22 @@ pub fn queue_tracing_bind_groups(
         let tracing_bindings = vec![
             BindGroupEntry {
                 binding: 6,
-                resource: volume_meta.volume_uniforms.binding().unwrap(),
+                resource: BindingResource::Buffer(BufferBinding {
+                    buffer: &directions.0,
+                    offset: 0,
+                    size: None,
+                }),
             },
             BindGroupEntry {
                 binding: 7,
-                resource: BindingResource::TextureView(&volume_bindings.voxel_texture.default_view),
+                resource: volume_meta.volume_uniforms.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 8,
+                resource: BindingResource::TextureView(&volume_bindings.voxel_texture.default_view),
+            },
+            BindGroupEntry {
+                binding: 9,
                 resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
             },
         ];
