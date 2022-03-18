@@ -48,6 +48,10 @@ var normal_map_sampler: sampler;
 [[group(2), binding(0)]]
 var<uniform> mesh: Mesh;
 
+struct Directions {
+    data: array<vec3<f32>, 14>;
+};
+
 struct Volume {
     min: vec3<f32>;
     max: vec3<f32>;
@@ -66,17 +70,18 @@ var anisotropic_texture_4: texture_3d<f32>;
 [[group(3), binding(5)]]
 var anisotropic_texture_5: texture_3d<f32>;
 [[group(3), binding(6)]]
-var<uniform> volume: Volume;
+var<uniform> directions: Directions;
 [[group(3), binding(7)]]
-var voxel_texture: texture_3d<f32>;
+var<uniform> volume: Volume;
 [[group(3), binding(8)]]
+var voxel_texture: texture_3d<f32>;
+[[group(3), binding(9)]]
 var texture_sampler: sampler;
 
 var<private> voxel_size: f32;
 var<private> max_level: f32;
 
 let PI: f32 = 3.141592653589793;
-let SQRT3: f32 = 1.732050808;
 
 fn max_component(v: vec3<f32>) -> f32 {
     return max(max(v.x, v.y), v.z);
@@ -89,13 +94,13 @@ fn normalize_position(v: vec3<f32>) -> vec3<f32> {
 fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
     var b: vec3<f32>;
     var t: vec3<f32>;
-    
+
     if (abs(n.y) > 0.999) {
         b = vec3<f32>(1., 0., 0.);
         t = vec3<f32>(0., 0., 1.);
     } else {
-    	b = normalize(cross(n, vec3<f32>(0., 1., 0.)));
-    	t = normalize(cross(b, n));
+        b = normalize(cross(n, vec3<f32>(0., 1., 0.)));
+        t = normalize(cross(b, n));
     }
     return mat3x3<f32>(t, b, n);
 }
@@ -107,7 +112,7 @@ fn compute_roughness(perceptual_roughness: f32) -> f32 {
 
 fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
     var color = vec4<f32>(0.0);
-    var distance = voxel_size * SQRT3;
+    var distance = voxel_size;
 
     loop {
         let position = origin + distance * direction;
@@ -154,7 +159,7 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) 
 
 fn cone_single(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
     var color = vec4<f32>(0.0);
-    var distance = voxel_size * SQRT3;
+    var distance = voxel_size;
 
     loop {
         let position = origin + distance * direction;
@@ -210,11 +215,11 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let dims = vec3<f32>(textureDimensions(voxel_texture));
     voxel_size = 1.0 / max_component(dims);
     max_level = log2(max_component(dims));
-    
+
     let position = normalize_position(in.world_position.xyz / in.world_position.w);
     let N = normalize(in.world_normal);
-    let origin = position + N * voxel_size * SQRT3;
-    
+    let origin = position + N * voxel_size;
+
     var base_color: vec4<f32> = material.base_color;
     if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
         base_color = base_color * textureSample(base_color_texture, base_color_sampler, in.uv);
@@ -232,28 +237,12 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     return vec4<f32>(0.0);
 #else
 
-    var directions: array<vec3<f32>, 14>;
-    directions[0] = vec3<f32>(1.0, 1.0, 1.0);
-    directions[1] = vec3<f32>(1.0, -1.0, 1.0);
-    directions[2] = vec3<f32>(1.0, 1.0, -1.0);
-    directions[3] = vec3<f32>(1.0, -1.0, -1.0);
-    directions[4] = vec3<f32>(-1.0, 1.0, 1.0);
-    directions[5] = vec3<f32>(-1.0, -1.0, 1.0);
-    directions[6] = vec3<f32>(-1.0, 1.0, -1.0);
-    directions[7] = vec3<f32>(-1.0, -1.0, -1.0);
-    directions[8] = vec3<f32>(1.0, 0.0, 0.0);
-    directions[9] = vec3<f32>(0.0, 1.0, 0.0);
-    directions[10] = vec3<f32>(0.0, 0.0, 1.0);
-    directions[11] = vec3<f32>(-1.0, 0.0, 0.0);
-    directions[12] = vec3<f32>(0.0, -1.0, 0.0);
-    directions[13] = vec3<f32>(0.0, 0.0, -1.0);
-
 #ifdef AMBIENT_OCCLUSION
 
     let ratio = 1.0;
     var color = vec4<f32>(0.);
     for (var i = 0u; i < 8u; i = i + 1u) {
-        let direction = normalize(directions[i]);
+        let direction = normalize(directions.data[i]);
         let factor = dot(N, direction);
         if (factor > 0.0) {
             color = color + cone(origin, direction, ratio, 0.02) * factor;
@@ -266,21 +255,21 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let ratio = 1.0;
     var color = vec4<f32>(0.);
     for (var i = 0u; i < 8u; i = i + 1u) {
-        let direction = normalize(directions[i]);
+        let direction = normalize(directions.data[i]);
         let factor = dot(N, direction);
         if (factor > 0.0) {
             color = color + cone(origin, direction, ratio, 0.3) * factor;
         }
     }
     for (var i = 8u; i < 14u; i = i + 1u) {
-        let direction = directions[i];
+        let direction = directions.data[i];
         let factor = dot(N, direction);
         if (factor > 0.0) {
             color = color + cone_single(origin, direction, ratio, 0.3) * factor;
         }
     }
     color = color * 0.2;
-    
+
     var V: vec3<f32>;
     let is_orthographic = view.projection[3].w == 1.0;
     if (is_orthographic) {
@@ -295,7 +284,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     if (roughness < 0.5) {
         color = color + cone(origin, R, roughness, 1.0);
     }
-    
+
     color = vec4<f32>(pow(color.rgb, vec3<f32>(1.0 / 2.2)), color.a);
 
     var output_color = color;

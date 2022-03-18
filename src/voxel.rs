@@ -1,7 +1,7 @@
 use crate::{
     GpuVolume, GpuVoxelBuffer, NotGiCaster, Volume, VolumeBindings, VolumeColorAttachment,
-    VolumeMeta, VolumeUniformOffset, VoxelBufferOffset, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT,
-    VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+    VolumeMeta, VolumeUniformOffset, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE,
+    VOXEL_SIZE,
 };
 use bevy::{
     core::FloatOrd,
@@ -126,7 +126,7 @@ impl FromWorld for VoxelPipeline {
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: true,
+                        has_dynamic_offset: false,
                         min_binding_size: BufferSize::new(
                             GpuVoxelBuffer::std140_size_static() as u64
                         ),
@@ -164,7 +164,7 @@ impl FromWorld for VoxelPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: true,
+                        has_dynamic_offset: false,
                         min_binding_size: BufferSize::new(
                             GpuVoxelBuffer::std140_size_static() as u64
                         ),
@@ -481,9 +481,9 @@ fn queue_voxel_bind_groups(
     render_device: Res<RenderDevice>,
     voxel_pipeline: Res<VoxelPipeline>,
     volume_meta: Res<VolumeMeta>,
-    volumes: Query<(&Volume, &VolumeBindings)>,
+    volumes: Query<(Entity, &Volume, &VolumeBindings)>,
 ) {
-    for (volume, bindings) in volumes.iter() {
+    for (entity, volume, bindings) in volumes.iter() {
         for view in volume.views.iter().cloned() {
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: Some("voxel_bind_group"),
@@ -501,7 +501,11 @@ fn queue_voxel_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 2,
-                        resource: volume_meta.voxel_buffers.binding().unwrap(),
+                        resource: BindingResource::Buffer(BufferBinding {
+                            buffer: volume_meta.voxel_buffers.get(&entity).unwrap(),
+                            offset: 0,
+                            size: None,
+                        }),
                     },
                 ],
             });
@@ -611,7 +615,11 @@ pub fn queue_mipmap_bind_groups(
                             },
                             BindGroupEntry {
                                 binding: 2,
-                                resource: volume_meta.voxel_buffers.binding().unwrap(),
+                                resource: BindingResource::Buffer(BufferBinding {
+                                    buffer: volume_meta.voxel_buffers.get(&entity).unwrap(),
+                                    offset: 0,
+                                    size: None,
+                                }),
                             },
                         ],
                     });
@@ -640,7 +648,11 @@ pub fn queue_mipmap_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: volume_meta.voxel_buffers.binding().unwrap(),
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: volume_meta.voxel_buffers.get(&entity).unwrap(),
+                        offset: 0,
+                        size: None,
+                    }),
                 },
             ],
         });
@@ -693,11 +705,7 @@ pub type DrawVoxelMesh<M> = (
 
 pub struct SetVoxelBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
-    type Param = SQuery<(
-        Read<VolumeUniformOffset>,
-        Read<VoxelBufferOffset>,
-        Read<VoxelBindGroup>,
-    )>;
+    type Param = SQuery<(Read<VolumeUniformOffset>, Read<VoxelBindGroup>)>;
 
     fn render<'w>(
         view: Entity,
@@ -705,12 +713,8 @@ impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
         query: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (volume_uniform_offset, voxel_buffer_offset, bind_group) = query.get(view).unwrap();
-        pass.set_bind_group(
-            I,
-            &bind_group.value,
-            &[volume_uniform_offset.offset, voxel_buffer_offset.offset],
-        );
+        let (volume_uniform_offset, bind_group) = query.get(view).unwrap();
+        pass.set_bind_group(I, &bind_group.value, &[volume_uniform_offset.offset]);
         RenderCommandResult::Success
     }
 }
@@ -785,7 +789,7 @@ impl render_graph::Node for VoxelPassNode {
 }
 
 pub struct MipmapPassNode {
-    query: QueryState<(&'static MipmapBindGroup, &'static VoxelBufferOffset), With<Volume>>,
+    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
 }
 
 impl MipmapPassNode {
@@ -813,10 +817,10 @@ impl render_graph::Node for MipmapPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for (mipmap_bind_group, voxel_buffer_offset) in self.query.iter_manual(world) {
+        for mipmap_bind_group in self.query.iter_manual(world) {
             let count = (VOXEL_SIZE / 4) as u32;
             pass.set_pipeline(&pipeline.fill_pipeline);
-            pass.set_bind_group(0, &mipmap_bind_group.clear, &[voxel_buffer_offset.offset]);
+            pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
             pass.dispatch(count, count, count);
 
             for (level, bind_groups) in mipmap_bind_group.mipmaps.iter().enumerate() {
@@ -824,7 +828,7 @@ impl render_graph::Node for MipmapPassNode {
                     let size = (VOXEL_SIZE / (2 << level)) as u32;
                     let count = (size / 4).max(1);
                     pass.set_pipeline(&pipeline.mipmap_pipelines[direction]);
-                    pass.set_bind_group(0, &bind_groups[direction], &[voxel_buffer_offset.offset]);
+                    pass.set_bind_group(0, &bind_groups[direction], &[]);
                     pass.dispatch(count, count, count);
                 }
             }
@@ -835,7 +839,7 @@ impl render_graph::Node for MipmapPassNode {
 }
 
 pub struct VoxelClearPassNode {
-    query: QueryState<(&'static MipmapBindGroup, &'static VoxelBufferOffset), With<Volume>>,
+    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
 }
 
 impl VoxelClearPassNode {
@@ -862,10 +866,10 @@ impl render_graph::Node for VoxelClearPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for (mipmap_bind_group, voxel_buffer_offset) in self.query.iter_manual(world) {
+        for mipmap_bind_group in self.query.iter_manual(world) {
             let count = (VOXEL_SIZE / 4) as u32;
             pass.set_pipeline(&pipeline.clear_pipeline);
-            pass.set_bind_group(0, &mipmap_bind_group.clear, &[voxel_buffer_offset.offset]);
+            pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
             pass.dispatch(count, count, count);
         }
 
