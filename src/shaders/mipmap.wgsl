@@ -1,10 +1,5 @@
-struct Voxel {
-    top: u32;
-    bot: u32;
-};
-
 struct VoxelBuffer {
-    data: array<Voxel>;
+    data: array<atomic<u32>, 16777216>;
 };
 
 [[group(0), binding(0)]]
@@ -20,7 +15,7 @@ fn mipmap(id: vec3<u32>, dir: i32) {
     if (any(vec3<i32>(id) >= textureDimensions(texture_out))) {
         return;
     }
-    
+
     let in_dims = textureDimensions(texture_in);
     let out_dims = textureDimensions(texture_out);
 
@@ -131,24 +126,14 @@ fn linear_index(index: vec3<i32>) -> i32 {
     return i32(morton);
 }
 
-fn unpack_color(voxel: Voxel) -> vec4<f32> {
+fn unpack_color(voxel: u32) -> vec4<f32> {
     var color: vec4<f32>;
-    let top = voxel.top;
-    let bot = voxel.bot;
-    let mask = 0xffffu;
-    color.r = f32(top >> 16u) / 255.;
-    color.g = f32(top & mask) / 255.;
-    color.b = f32(bot >> 16u) / 255.;
-    color.a = f32(bot & mask) / 255.;
+    let mask = 0x3ffu;
+    color.r = f32(voxel & mask) / 255.0;
+    color.g = f32((voxel >> 10u) & mask) / 255.0;
+    color.b = f32((voxel >> 20u) & mask) / 255.0;
+    color.a = f32(voxel >> 30u);
     return color;
-}
-
-fn pack_color(color: vec4<f32>) -> Voxel {
-    var voxel: Voxel;
-    let converted = vec4<u32>((color + 0.5) * 255.);
-    voxel.top = (converted.r << 16u) + converted.g;
-    voxel.bot = (converted.b << 16u) + converted.a;
-    return voxel;
 }
 
 [[stage(compute), workgroup_size(4, 4, 4)]]
@@ -157,8 +142,7 @@ fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
     if (all(coords < textureDimensions(texture_out))) {
         let index = linear_index(coords);
         let voxel = &voxel_buffer.data[index];
-        (*voxel).top = 0u;
-        (*voxel).bot = 0u;
+        atomicStore(voxel, 0u);
     }
 }
 
@@ -168,8 +152,8 @@ fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
     if (all(coords < textureDimensions(texture_out))) {
         let index = linear_index(coords);
         let voxel = &voxel_buffer.data[index];
-        
-        var color = unpack_color(*voxel);
+
+        var color = unpack_color(atomicLoad(voxel));
         if (color.a > 1.0) {
             color = color / color.a;
         }

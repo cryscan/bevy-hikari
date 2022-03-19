@@ -254,7 +254,7 @@ pub struct GpuVolume {
 
 #[derive(AsStd140)]
 pub struct GpuVoxelBuffer {
-    data: [[u32; 2]; VOXEL_COUNT],
+    data: [u32; VOXEL_COUNT],
 }
 
 #[derive(Default)]
