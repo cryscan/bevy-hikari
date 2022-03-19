@@ -183,17 +183,8 @@ impl SpecializedPipeline for TracingPipeline {
             fragment.targets[0].write_mask = ColorWrites::ALPHA;
         }
 
-        descriptor.depth_stencil = Some(DepthStencilState {
-            format: TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: CompareFunction::Greater,
-            stencil: StencilState::default(),
-            bias: DepthBiasState {
-                constant: 0,
-                slope_scale: 0.0,
-                clamp: 0.0,
-            },
-        });
+        descriptor.multisample = MultisampleState::default();
+
         descriptor.layout = Some(vec![
             self.mesh_pipeline.view_layout.clone(),
             self.material_layout.clone(),
@@ -594,7 +585,7 @@ impl render_graph::Node for TracingPassNode {
                 label: Some("tracing_opaque_pass"),
                 color_attachments: &[RenderPassColorAttachment {
                     view: &overlay.irradiance,
-                    resolve_target: Some(&overlay.irradiance_resolve),
+                    resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Clear(Color::NONE.into()),
                         store: true,
@@ -631,7 +622,7 @@ impl render_graph::Node for TracingPassNode {
                 label: Some("tracing_alpha_mask_pass"),
                 color_attachments: &[RenderPassColorAttachment {
                     view: &overlay.irradiance,
-                    resolve_target: Some(&overlay.irradiance_resolve),
+                    resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
@@ -668,7 +659,7 @@ impl render_graph::Node for TracingPassNode {
                 label: Some("tracing_transparent_pass"),
                 color_attachments: &[RenderPassColorAttachment {
                     view: &overlay.irradiance,
-                    resolve_target: Some(&overlay.irradiance_resolve),
+                    resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
@@ -705,7 +696,7 @@ impl render_graph::Node for TracingPassNode {
                 label: Some("tracing_ambient_occlusion_pass"),
                 color_attachments: &[RenderPassColorAttachment {
                     view: &overlay.irradiance,
-                    resolve_target: Some(&overlay.irradiance_resolve),
+                    resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,

@@ -54,13 +54,13 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<OverlayMaterial>>,
 ) {
-    let irradiance_resolve = overlay.irradiance_resolve.clone();
+    let irradiance = overlay.irradiance.clone();
     let albedo_resolve = overlay.albedo_resolve.clone();
 
     commands.spawn_bundle(MaterialMeshBundle {
         mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
         material: materials.add(OverlayMaterial {
-            irradiance_image: irradiance_resolve,
+            irradiance_image: irradiance,
             albedo_image: albedo_resolve,
         }),
         ..Default::default()
@@ -85,12 +85,19 @@ fn prepare_screen_overlay(
             label: Some("volume_overlay_depth_texture"),
             size: overlay.irradiance_size,
             mip_level_count: 1,
-            sample_count: msaa.samples,
+            sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Depth32Float,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
         },
     );
+    let irradiance_depth_sampler = render_device.create_sampler(&SamplerDescriptor {
+        label: None,
+        address_mode_u: AddressMode::ClampToEdge,
+        address_mode_v: AddressMode::ClampToEdge,
+        address_mode_w: AddressMode::ClampToEdge,
+        ..Default::default()
+    });
 
     let albedo_depth = texture_cache.get(
         &render_device,
@@ -107,20 +114,16 @@ fn prepare_screen_overlay(
 
     let retrieve_textures = || {
         let irradiance = images.get(&overlay.irradiance)?.texture_view.clone();
-        let irradiance_resolve = images
-            .get(&overlay.irradiance_resolve)?
-            .texture_view
-            .clone();
         let albedo = images.get(&overlay.albedo)?.texture_view.clone();
         let albedo_resolve = images.get(&overlay.albedo_resolve)?.texture_view.clone();
-        Some((irradiance, irradiance_resolve, albedo, albedo_resolve))
+        Some((irradiance, albedo, albedo_resolve))
     };
 
-    if let Some((irradiance, irradiance_resolve, albedo, albedo_resolve)) = retrieve_textures() {
+    if let Some((irradiance, albedo, albedo_resolve)) = retrieve_textures() {
         commands.insert_resource(GpuScreenOverlay {
             irradiance,
-            irradiance_resolve,
             irradiance_depth,
+            irradiance_depth_sampler,
             albedo,
             albedo_resolve,
             albedo_depth,
@@ -132,7 +135,6 @@ fn prepare_screen_overlay(
 pub struct ScreenOverlay {
     pub irradiance_size: Extent3d,
     pub irradiance: Handle<Image>,
-    pub irradiance_resolve: Handle<Image>,
 
     pub albedo_size: Extent3d,
     pub albedo: Handle<Image>,
@@ -141,8 +143,8 @@ pub struct ScreenOverlay {
 
 pub struct GpuScreenOverlay {
     pub irradiance: TextureView,
-    pub irradiance_resolve: TextureView,
     pub irradiance_depth: CachedTexture,
+    pub irradiance_depth_sampler: Sampler,
 
     pub albedo: TextureView,
     pub albedo_resolve: TextureView,
@@ -175,12 +177,12 @@ impl FromWorld for ScreenOverlay {
         image.texture_descriptor.usage = TextureUsages::COPY_DST
             | TextureUsages::RENDER_ATTACHMENT
             | TextureUsages::TEXTURE_BINDING;
-
-        image.texture_descriptor.sample_count = samples;
-        let irradiance = images.add(image.clone());
+        // image.sampler_descriptor.mag_filter = FilterMode::Linear;
+        // image.sampler_descriptor.min_filter = FilterMode::Linear;
+        // image.sampler_descriptor.mipmap_filter = FilterMode::Linear;
 
         image.texture_descriptor.sample_count = 1;
-        let irradiance_resolve = images.add(image);
+        let irradiance = images.add(image);
 
         let albedo_size = Extent3d {
             width,
@@ -196,8 +198,6 @@ impl FromWorld for ScreenOverlay {
         image.texture_descriptor.usage = TextureUsages::COPY_DST
             | TextureUsages::RENDER_ATTACHMENT
             | TextureUsages::TEXTURE_BINDING;
-        image.sampler_descriptor.mag_filter = FilterMode::Linear;
-        image.sampler_descriptor.min_filter = FilterMode::Linear;
 
         image.texture_descriptor.sample_count = samples;
         let albedo = images.add(image.clone());
@@ -208,7 +208,6 @@ impl FromWorld for ScreenOverlay {
         Self {
             irradiance_size,
             irradiance,
-            irradiance_resolve,
             albedo_size,
             albedo,
             albedo_resolve,
@@ -258,7 +257,7 @@ impl RenderAsset for OverlayMaterial {
             return Err(PrepareAssetError::RetryNextUpdate(material));
         };
 
-        let _overlay = if let Some(overlay) = overlay {
+        let overlay = if let Some(overlay) = overlay {
             overlay
         } else {
             return Err(PrepareAssetError::RetryNextUpdate(material));
@@ -276,11 +275,23 @@ impl RenderAsset for OverlayMaterial {
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(&albedo.texture_view),
+                    resource: BindingResource::TextureView(&overlay.irradiance_depth.default_view),
                 },
                 BindGroupEntry {
                     binding: 3,
+                    resource: BindingResource::Sampler(&overlay.irradiance_depth_sampler),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(&albedo.texture_view),
+                },
+                BindGroupEntry {
+                    binding: 5,
                     resource: BindingResource::Sampler(&albedo.sampler),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(&overlay.albedo_depth.default_view),
                 },
             ],
             label: Some("overlay_bind_group"),
@@ -331,7 +342,7 @@ impl SpecializedMaterial for OverlayMaterial {
                     binding: 2,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        sample_type: TextureSampleType::Depth,
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -341,6 +352,32 @@ impl SpecializedMaterial for OverlayMaterial {
                     binding: 3,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Depth,
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: true,
+                    },
                     count: None,
                 },
             ],

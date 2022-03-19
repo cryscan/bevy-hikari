@@ -4,6 +4,7 @@ use std::f32::consts::PI;
 
 fn main() {
     App::new()
+        .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         // Add the voxel cone tracing plugin
