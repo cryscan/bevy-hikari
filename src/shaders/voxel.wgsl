@@ -53,13 +53,9 @@ struct Volume {
     max: vec3<f32>;
 };
 
-struct Voxel {
-    top: atomic<u32>;
-    bot: atomic<u32>;
-};
-
 struct VoxelBuffer {
-    data: array<Voxel>;
+    // A2_BGR8
+    data: array<atomic<u32>, 16777216>;
 };
 
 [[group(3), binding(0)]]
@@ -169,6 +165,16 @@ fn linear_index(index: vec3<i32>) -> i32 {
     return i32(morton);
 }
 
+fn pack_color(color: vec4<f32>) -> u32 {
+    let converted = vec4<u32>((color + 0.5) * 255.);
+    var packed = 0u;
+    packed = packed | converted.r;
+    packed = packed | (converted.g << 10u);
+    packed = packed | (converted.b << 20u);
+    packed = packed | (1u << 30u);
+    return packed;
+}
+
 struct FragmentInput {
     [[builtin(position)]] clip_position: vec4<f32>;
     [[location(0)]] world_position: vec4<f32>;
@@ -244,12 +250,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     // tone_mapping
     output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
-    
+
     let index = spatial_index(in.world_position.xyz);
     let voxel = &voxel_buffer.data[linear_index(index)];
-    let converted = vec4<u32>((output_color + 0.5) * 255.);
-    atomicAdd(&(*voxel).top, (converted.r << 16u) + converted.g);
-    atomicAdd(&(*voxel).bot, (converted.b << 16u) + converted.a);
+    atomicAdd(voxel, pack_color(output_color));
 
     return output_color;
 }
