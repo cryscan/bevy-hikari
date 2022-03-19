@@ -1,4 +1,4 @@
-use crate::{overlay::ScreenOverlay, VolumeBindings, ALBEDO_SHADER_HANDLE};
+use crate::{overlay::GpuScreenOverlay, ALBEDO_SHADER_HANDLE};
 use bevy::{
     core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d},
     pbr::{
@@ -238,7 +238,6 @@ pub struct DeferredPassNode {
             &'static RenderPhase<Deferred<Opaque3d>>,
             &'static RenderPhase<Deferred<AlphaMask3d>>,
             &'static RenderPhase<Deferred<Transparent3d>>,
-            &'static VolumeBindings,
         ),
         With<ExtractedView>,
     >,
@@ -270,30 +269,30 @@ impl render_graph::Node for DeferredPassNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (opaque_phase, alpha_mask_phase, transparent_phase, bindings) =
+        let (opaque_phase, alpha_mask_phase, transparent_phase) =
             match self.query.get_manual(world, view_entity) {
                 Ok(query) => query,
                 Err(_) => return Ok(()),
             };
 
-        let overlay = world.get_resource::<ScreenOverlay>().unwrap();
-        let images = world.get_resource::<RenderAssets<Image>>().unwrap();
-        let view = &images[&overlay.albedo].texture_view;
-        let resolve_target = &images[&overlay.albedo_resolve].texture_view;
+        let overlay = match world.get_resource::<GpuScreenOverlay>() {
+            Some(overlay) => overlay,
+            None => return Ok(()),
+        };
 
         {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("deferred_opaque_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view,
-                    resolve_target: Some(resolve_target),
+                    view: &overlay.albedo,
+                    resolve_target: Some(&overlay.albedo_resolve),
                     ops: Operations {
                         load: LoadOp::Clear(Color::NONE.into()),
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.albedo_depth_texture.default_view,
+                    view: &overlay.albedo_depth.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Clear(0.0),
                         store: true,
@@ -322,15 +321,15 @@ impl render_graph::Node for DeferredPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("deferred_alpha_mask_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view,
-                    resolve_target: Some(resolve_target),
+                    view: &overlay.albedo,
+                    resolve_target: Some(&overlay.albedo_resolve),
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.albedo_depth_texture.default_view,
+                    view: &overlay.albedo_depth.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Load,
                         store: true,
@@ -359,15 +358,15 @@ impl render_graph::Node for DeferredPassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("deferred_transparent_pass"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view,
-                    resolve_target: Some(resolve_target),
+                    view: &overlay.albedo,
+                    resolve_target: Some(&overlay.albedo_resolve),
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &bindings.albedo_depth_texture.default_view,
+                    view: &overlay.albedo_depth.default_view,
                     depth_ops: Some(Operations {
                         load: LoadOp::Load,
                         store: false,
