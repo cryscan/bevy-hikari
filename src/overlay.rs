@@ -175,6 +175,8 @@ impl FromWorld for ScreenOverlay {
         image.texture_descriptor.usage = TextureUsages::COPY_DST
             | TextureUsages::RENDER_ATTACHMENT
             | TextureUsages::TEXTURE_BINDING;
+        image.sampler_descriptor.mag_filter = FilterMode::Linear;
+        image.sampler_descriptor.min_filter = FilterMode::Linear;
 
         image.texture_descriptor.sample_count = samples;
         let irradiance = images.add(image.clone());
@@ -196,8 +198,6 @@ impl FromWorld for ScreenOverlay {
         image.texture_descriptor.usage = TextureUsages::COPY_DST
             | TextureUsages::RENDER_ATTACHMENT
             | TextureUsages::TEXTURE_BINDING;
-        image.sampler_descriptor.mag_filter = FilterMode::Linear;
-        image.sampler_descriptor.min_filter = FilterMode::Linear;
 
         image.texture_descriptor.sample_count = samples;
         let albedo = images.add(image.clone());
