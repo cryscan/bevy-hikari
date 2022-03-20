@@ -818,7 +818,7 @@ impl render_graph::Node for MipmapPassNode {
             .begin_compute_pass(&ComputePassDescriptor::default());
 
         for mipmap_bind_group in self.query.iter_manual(world) {
-            let count = (VOXEL_SIZE / 4) as u32;
+            let count = (VOXEL_SIZE / 8) as u32;
             pass.set_pipeline(&pipeline.fill_pipeline);
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
             pass.dispatch(count, count, count);
@@ -826,7 +826,7 @@ impl render_graph::Node for MipmapPassNode {
             for (level, bind_groups) in mipmap_bind_group.mipmaps.iter().enumerate() {
                 for direction in 0..6 {
                     let size = (VOXEL_SIZE / (2 << level)) as u32;
-                    let count = (size / 4).max(1);
+                    let count = (size / 8).max(1);
                     pass.set_pipeline(&pipeline.mipmap_pipelines[direction]);
                     pass.set_bind_group(0, &bind_groups[direction], &[]);
                     pass.dispatch(count, count, count);
@@ -867,7 +867,7 @@ impl render_graph::Node for VoxelClearPassNode {
             .begin_compute_pass(&ComputePassDescriptor::default());
 
         for mipmap_bind_group in self.query.iter_manual(world) {
-            let count = (VOXEL_SIZE / 4) as u32;
+            let count = (VOXEL_SIZE / 8) as u32;
             pass.set_pipeline(&pipeline.clear_pipeline);
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
             pass.dispatch(count, count, count);

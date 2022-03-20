@@ -9,32 +9,36 @@ var texture_out: texture_storage_3d<rgba8unorm, write>;
 [[group(0), binding(2)]]
 var<storage, read_write> voxel_buffer: VoxelBuffer;
 
-var<workgroup> samples: array<vec3<f32>, 8>;
+let INDICES = array<vec3<i32>, 8>(
+    vec3<i32>(0, 0, 0),
+    vec3<i32>(1, 0, 0),
+    vec3<i32>(0, 1, 0),
+    vec3<i32>(1, 1, 0),
+    vec3<i32>(0, 0, 1),
+    vec3<i32>(1, 0, 1),
+    vec3<i32>(0, 1, 1),
+    vec3<i32>(1, 1, 1),
+);
+
+fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> vec4<f32> {
+    var location = vec3<i32>(id) * 2 + index;
+    return textureLoad(texture_in, location, 0);
+}
 
 fn mipmap(id: vec3<u32>, dir: i32) {
     if (any(vec3<i32>(id) >= textureDimensions(texture_out))) {
         return;
     }
 
-    let in_dims = textureDimensions(texture_in);
-    let out_dims = textureDimensions(texture_out);
-
-    var indices: array<vec3<i32>, 8>;
-    indices[0] = vec3<i32>(0, 0, 0);
-    indices[1] = vec3<i32>(1, 0, 0);
-    indices[2] = vec3<i32>(0, 1, 0);
-    indices[3] = vec3<i32>(1, 1, 0);
-    indices[4] = vec3<i32>(0, 0, 1);
-    indices[5] = vec3<i32>(1, 0, 1);
-    indices[6] = vec3<i32>(0, 1, 1);
-    indices[7] = vec3<i32>(1, 1, 1);
-
     var samples: array<vec4<f32>, 8>;
-    for (var i = 0u; i < 8u; i = i + 1u) {
-        var index = vec3<i32>(id) * 2 + indices[i];
-        index = vec3<i32>(index.xy, index.z % in_dims.z);
-        samples[i] = textureLoad(texture_in, index, 0);
-    }
+    samples[0] = sample_voxel(id, INDICES[0]);
+    samples[1] = sample_voxel(id, INDICES[1]);
+    samples[2] = sample_voxel(id, INDICES[2]);
+    samples[3] = sample_voxel(id, INDICES[3]);
+    samples[4] = sample_voxel(id, INDICES[4]);
+    samples[5] = sample_voxel(id, INDICES[5]);
+    samples[6] = sample_voxel(id, INDICES[6]);
+    samples[7] = sample_voxel(id, INDICES[7]);
 
     var color = vec4<f32>(0.);
     if (dir == 0) {
@@ -79,32 +83,32 @@ fn mipmap(id: vec3<u32>, dir: i32) {
     textureStore(texture_out, vec3<i32>(id), color);
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap_0([[builtin(global_invocation_id)]] id: vec3<u32>) {
     mipmap(id, 0);
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap_1([[builtin(global_invocation_id)]] id: vec3<u32>) {
     mipmap(id, 1);
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap_2([[builtin(global_invocation_id)]] id: vec3<u32>) {
     mipmap(id, 2);
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap_3([[builtin(global_invocation_id)]] id: vec3<u32>) {
     mipmap(id, 3);
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap_4([[builtin(global_invocation_id)]] id: vec3<u32>) {
     mipmap(id, 4);
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap_5([[builtin(global_invocation_id)]] id: vec3<u32>) {
     mipmap(id, 5);
 }
@@ -113,14 +117,12 @@ fn linear_index(index: vec3<i32>) -> i32 {
     var spatial = vec3<u32>(index);
     var morton = 0u;
     for (var i = 0u; i < 8u; i = i + 1u) {
-        let coord = spatial & vec3<u32>(1u);
+        let coord = (vec3<u32>(index) >> vec3<u32>(i)) & vec3<u32>(1u);
         let offset = 3u * i;
 
         morton = morton | (coord.x << offset);
         morton = morton | (coord.y << (offset + 1u));
         morton = morton | (coord.z << (offset + 2u));
-
-        spatial = spatial >> vec3<u32>(1u);
     }
 
     return i32(morton);
@@ -136,7 +138,7 @@ fn unpack_color(voxel: u32) -> vec4<f32> {
     return color;
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
     let coords = vec3<i32>(id);
     if (all(coords < textureDimensions(texture_out))) {
@@ -146,7 +148,7 @@ fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
     }
 }
 
-[[stage(compute), workgroup_size(4, 4, 4)]]
+[[stage(compute), workgroup_size(8, 8, 8)]]
 fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
     let coords = vec3<i32>(id);
     if (all(coords < textureDimensions(texture_out))) {
