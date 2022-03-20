@@ -248,7 +248,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             color = color + cone(origin, direction, ratio, 0.02) * factor;
         }
     }
-    return color * 0.2;
+    return color * 0.25;
 
 #else
 
@@ -268,7 +268,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             color = color + cone_single(origin, direction, ratio, 0.3) * factor;
         }
     }
-    color = color * 0.2;
+    color = color * 0.25;
 
     var V: vec3<f32>;
     let is_orthographic = view.projection[3].w == 1.0;
