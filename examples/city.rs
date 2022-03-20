@@ -3,7 +3,6 @@ use bevy::{
     prelude::*,
     scene::InstanceId,
 };
-use bevy_atmosphere::{AtmosphereMat, AtmospherePlugin};
 use bevy_full_throttle::FullThrottlePlugin;
 use bevy_hikari::{NotGiReceiver, Volume, VoxelConeTracingPlugin};
 use smooth_bevy_cameras::{
@@ -21,17 +20,12 @@ fn main() {
 
     app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa { samples: 4 })
-        .init_resource::<AtmosphereMat>()
         .init_resource::<SceneInstance>()
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(true))
         .add_plugin(VoxelConeTracingPlugin)
         .add_plugin(FullThrottlePlugin)
-        .add_plugin(AtmospherePlugin {
-            dynamic: true,
-            sky_radius: 100.0,
-        })
         .add_startup_system(setup)
         .add_system(scene_update)
         .add_system(light_rotate_system)
@@ -155,7 +149,6 @@ fn scene_update(
 fn light_rotate_system(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
-    mut sky: ResMut<AtmosphereMat>,
     mut queries: QuerySet<(
         QueryState<&LookTransform, With<Camera>>,
         QueryState<(&mut LookTransform, &Transform), With<DirectionalLight>>,
@@ -194,10 +187,9 @@ fn light_rotate_system(
     let target = target.translation;
 
     let mut query = queries.q1();
-    let (mut light, transform) = query.single_mut();
+    let (mut light, _transform) = query.single_mut();
 
     light.target = target;
-    sky.sun_position = -transform.forward();
 }
 
 pub fn camera_input_map(
