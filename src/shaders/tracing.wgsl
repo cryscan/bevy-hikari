@@ -285,10 +285,8 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         color = color + cone(origin, R, roughness, 1.0);
     }
 
-    color = vec4<f32>(pow(color.rgb, vec3<f32>(1.0 / 2.2)), color.a);
-
-    var output_color = color;
-    return vec4<f32>(output_color.rgb, base_color.a);
+    // color = vec4<f32>(pow(color.rgb, vec3<f32>(1.0 / 2.2)), color.a);
+    return vec4<f32>(color.rgb, base_color.a);
 
 #endif
 #endif

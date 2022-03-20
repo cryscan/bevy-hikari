@@ -236,7 +236,6 @@ impl RenderAsset for OverlayMaterial {
         SRes<RenderDevice>,
         SRes<MaterialPipeline<Self>>,
         SRes<RenderAssets<Image>>,
-        Option<SRes<GpuScreenOverlay>>,
     );
     fn extract_asset(&self) -> Self::ExtractedAsset {
         self.clone()
@@ -244,7 +243,7 @@ impl RenderAsset for OverlayMaterial {
 
     fn prepare_asset(
         material: Self::ExtractedAsset,
-        (render_device, material_pipeline, images, overlay): &mut SystemParamItem<Self::Param>,
+        (render_device, material_pipeline, images): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
         let irradiance = if let Some(result) = images.get(&material.irradiance_image) {
             result
@@ -254,12 +253,6 @@ impl RenderAsset for OverlayMaterial {
 
         let albedo = if let Some(result) = images.get(&material.albedo_image) {
             result
-        } else {
-            return Err(PrepareAssetError::RetryNextUpdate(material));
-        };
-
-        let _overlay = if let Some(overlay) = overlay {
-            overlay
         } else {
             return Err(PrepareAssetError::RetryNextUpdate(material));
         };
@@ -508,7 +501,7 @@ impl render_graph::Node for OverlayPassNode {
         };
 
         let pass_descriptor = RenderPassDescriptor {
-            label: Some("tracing_pass"),
+            label: Some("overlay_pass"),
             color_attachments: &[target.get_color_attachment(Operations {
                 load: LoadOp::Load,
                 store: true,
