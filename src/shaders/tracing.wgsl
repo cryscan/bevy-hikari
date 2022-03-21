@@ -245,7 +245,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         let direction = normalize(directions.data[i]);
         let factor = dot(N, direction);
         if (factor > 0.0) {
-            color = color + cone(origin, direction, ratio, 0.02) * factor;
+            color = color + cone(origin, direction, ratio, 0.015) * factor;
         }
     }
     return color * 0.25;
@@ -270,20 +270,20 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     }
     color = color * 0.25;
 
-    var V: vec3<f32>;
-    let is_orthographic = view.projection[3].w == 1.0;
-    if (is_orthographic) {
-        V = normalize(vec3<f32>(view.view_proj[0].z, view.view_proj[1].z, view.view_proj[2].z));
-    } else {
-        V = normalize(view.world_position.xyz - in.world_position.xyz);
-    }
+    // let roughness = clamp(material.perceptual_roughness, 0.01, 1.0);
+    // if (roughness < 0.5) {
+    //     var V: vec3<f32>;
+    //     let is_orthographic = view.projection[3].w == 1.0;
+    //     if (is_orthographic) {
+    //         V = normalize(vec3<f32>(view.view_proj[0].z, view.view_proj[1].z, view.view_proj[2].z));
+    //     } else {
+    //         V = normalize(view.world_position.xyz - in.world_position.xyz);
+    //     }
 
-    let R = -reflect(V, N);
+    //     let R = -reflect(V, N);
 
-    let roughness = clamp(material.perceptual_roughness, 0.1, 1.0);
-    if (roughness < 0.5) {
-        color = color + cone(origin, R, roughness, 1.0);
-    }
+    //     color = color + cone(origin, R, roughness, 1.0);
+    // }
 
     // color = vec4<f32>(pow(color.rgb, vec3<f32>(1.0 / 2.2)), color.a);
     return vec4<f32>(color.rgb, base_color.a);
