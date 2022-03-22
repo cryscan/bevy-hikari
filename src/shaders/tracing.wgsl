@@ -78,9 +78,6 @@ var voxel_texture: texture_3d<f32>;
 [[group(3), binding(9)]]
 var texture_sampler: sampler;
 
-var<private> voxel_size: f32;
-var<private> max_level: f32;
-
 let PI: f32 = 3.141592653589793;
 
 fn max_component(v: vec3<f32>) -> f32 {
@@ -111,6 +108,10 @@ fn compute_roughness(perceptual_roughness: f32) -> f32 {
 }
 
 fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
+    let dims = vec3<f32>(textureDimensions(voxel_texture));
+    let voxel_size = 1.0 / max_component(dims);
+    let max_level = log2(max_component(dims));
+
     var color = vec4<f32>(0.0);
     var distance = voxel_size;
 
@@ -158,6 +159,10 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) 
 }
 
 fn cone_single(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
+    let dims = vec3<f32>(textureDimensions(voxel_texture));
+    let voxel_size = 1.0 / max_component(dims);
+    let max_level = log2(max_component(dims));
+    
     var color = vec4<f32>(0.0);
     var distance = voxel_size;
 
@@ -213,8 +218,7 @@ struct FragmentInput {
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     let dims = vec3<f32>(textureDimensions(voxel_texture));
-    voxel_size = 1.0 / max_component(dims);
-    max_level = log2(max_component(dims));
+    let voxel_size = 1.0 / max_component(dims);
 
     let position = normalize_position(in.world_position.xyz / in.world_position.w);
     let N = normalize(in.world_normal);
@@ -240,12 +244,13 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 #ifdef AMBIENT_OCCLUSION
 
     let ratio = 1.0;
+    let max_distance = 0.015;
     var color = vec4<f32>(0.);
     for (var i = 0u; i < 8u; i = i + 1u) {
         let direction = normalize(directions.data[i]);
         let factor = dot(N, direction);
         if (factor > 0.0) {
-            color = color + cone(origin, direction, ratio, 0.015) * factor;
+            color = color + cone(origin, direction, ratio, max_distance) * factor;
         }
     }
     return color * 0.25;
@@ -253,19 +258,20 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 #else
 
     let ratio = 1.0;
+    let max_distance = 0.03;
     var color = vec4<f32>(0.);
     for (var i = 0u; i < 8u; i = i + 1u) {
         let direction = normalize(directions.data[i]);
         let factor = dot(N, direction);
         if (factor > 0.0) {
-            color = color + cone(origin, direction, ratio, 0.3) * factor;
+            color = color + cone(origin, direction, ratio, max_distance) * factor;
         }
     }
     for (var i = 8u; i < 14u; i = i + 1u) {
         let direction = directions.data[i];
         let factor = dot(N, direction);
         if (factor > 0.0) {
-            color = color + cone_single(origin, direction, ratio, 0.3) * factor;
+            color = color + cone_single(origin, direction, ratio, max_distance) * factor;
         }
     }
     color = color * 0.25;
