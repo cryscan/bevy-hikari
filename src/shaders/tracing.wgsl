@@ -123,7 +123,7 @@ fn compute_roughness(perceptual_roughness: f32) -> f32 {
 fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
     let dims = vec3<f32>(textureDimensions(voxel_texture));
     let voxel_size = 1.0 / max_component(dims);
-    let max_level = log2(max_component(dims));
+    let max_level = f32(textureNumLevels(anisotropic_texture_0));
 
     var color = vec4<f32>(0.0);
     var distance = voxel_size;
@@ -174,7 +174,7 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) 
 fn cone_single(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32) -> vec4<f32> {
     let dims = vec3<f32>(textureDimensions(voxel_texture));
     let voxel_size = 1.0 / max_component(dims);
-    let max_level = log2(max_component(dims));
+    let max_level = f32(textureNumLevels(anisotropic_texture_0));
     
     var color = vec4<f32>(0.0);
     var distance = voxel_size;
@@ -271,7 +271,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 #else
 
     let ratio = 1.0;
-    let max_distance = 0.03;
+    let max_distance = 1.0;
     var color = vec4<f32>(0.);
     for (var i = 0u; i < 8u; i = i + 1u) {
         let direction = normalize(directions.data[i]);

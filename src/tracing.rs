@@ -89,16 +89,14 @@ pub struct TracingPipeline {
 impl FromWorld for TracingPipeline {
     fn from_world(world: &mut World) -> Self {
         let mesh_pipeline = world.get_resource::<MeshPipeline>().unwrap().clone();
-
         let render_device = world.get_resource::<RenderDevice>().unwrap();
-
         let material_layout = StandardMaterial::bind_group_layout(render_device);
 
         let anisotropic_layout_entries = (0..6).map(|direction| BindGroupLayoutEntry {
             binding: direction,
             visibility: ShaderStages::FRAGMENT,
             ty: BindingType::Texture {
-                sample_type: TextureSampleType::Float { filterable: true },
+                sample_type: TextureSampleType::default(),
                 view_dimension: TextureViewDimension::D3,
                 multisampled: false,
             },
@@ -109,7 +107,7 @@ impl FromWorld for TracingPipeline {
                 binding: 6,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
-                    sample_type: TextureSampleType::Float { filterable: true },
+                    sample_type: TextureSampleType::default(),
                     view_dimension: TextureViewDimension::D3,
                     multisampled: false,
                 },

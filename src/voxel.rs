@@ -31,6 +31,7 @@ use bevy::{
         RenderApp, RenderStage,
     },
 };
+use itertools::Itertools;
 use std::{borrow::Cow, f32::consts::FRAC_PI_2, marker::PhantomData, num::NonZeroU32};
 
 pub struct VoxelPlugin;
@@ -75,6 +76,7 @@ pub struct VoxelBindGroup {
 
 #[derive(Component)]
 pub struct MipmapBindGroup {
+    pub mipmap_base: BindGroup,
     pub mipmaps: Vec<Vec<BindGroup>>,
     pub clear: BindGroup,
 }
@@ -84,8 +86,12 @@ pub struct VoxelPipeline {
     pub voxel_layout: BindGroupLayout,
     pub mesh_pipeline: MeshPipeline,
 
+    pub mipmap_base_layout: BindGroupLayout,
+    pub mipmap_base_pipeline: ComputePipeline,
+
     pub mipmap_layout: BindGroupLayout,
     pub mipmap_pipelines: Vec<ComputePipeline>,
+
     pub clear_pipeline: ComputePipeline,
     pub fill_pipeline: ComputePipeline,
 }
@@ -93,9 +99,7 @@ pub struct VoxelPipeline {
 impl FromWorld for VoxelPipeline {
     fn from_world(world: &mut World) -> Self {
         let mesh_pipeline = world.get_resource::<MeshPipeline>().unwrap().clone();
-
         let render_device = world.get_resource::<RenderDevice>().unwrap();
-
         let material_layout = StandardMaterial::bind_group_layout(render_device);
 
         let voxel_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -115,7 +119,7 @@ impl FromWorld for VoxelPipeline {
                     binding: 1,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        sample_type: TextureSampleType::default(),
                         view_dimension: TextureViewDimension::D3,
                         multisampled: false,
                     },
@@ -136,6 +140,55 @@ impl FromWorld for VoxelPipeline {
             ],
         });
 
+        let mut mipmap_base_layout_entries = (0..6)
+            .map(|direction| BindGroupLayoutEntry {
+                binding: direction,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: StorageTextureAccess::WriteOnly,
+                    format: TextureFormat::Rgba16Float,
+                    view_dimension: TextureViewDimension::D3,
+                },
+                count: None,
+            })
+            .collect::<Vec<_>>();
+        mipmap_base_layout_entries.push(BindGroupLayoutEntry {
+            binding: 6,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Texture {
+                sample_type: TextureSampleType::default(),
+                view_dimension: TextureViewDimension::D3,
+                multisampled: false,
+            },
+            count: None,
+        });
+        let mipmap_base_layout =
+            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("mipmap_base_layout"),
+                entries: &mipmap_base_layout_entries,
+            });
+
+        let mipmap_base_pipeline_layout =
+            render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("mipmap_base_pipeline_layout"),
+                bind_group_layouts: &[&mipmap_base_layout],
+                push_constant_ranges: &[],
+            });
+
+        let shader = render_device.create_shader_module(&ShaderModuleDescriptor {
+            label: None,
+            source: ShaderSource::Wgsl(Cow::Borrowed(
+                &include_str!("shaders/mipmap_base.wgsl").replace("\r\n", "\n"),
+            )),
+        });
+        let mipmap_base_pipeline =
+            render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+                label: Some("mipmap_base_pipeline"),
+                layout: Some(&mipmap_base_pipeline_layout),
+                module: &shader,
+                entry_point: "mipmap",
+            });
+
         let mipmap_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("mipmap_layout"),
             entries: &[
@@ -143,7 +196,7 @@ impl FromWorld for VoxelPipeline {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        sample_type: TextureSampleType::default(),
                         view_dimension: TextureViewDimension::D3,
                         multisampled: false,
                     },
@@ -217,6 +270,8 @@ impl FromWorld for VoxelPipeline {
             material_layout,
             voxel_layout,
             mesh_pipeline,
+            mipmap_base_layout,
+            mipmap_base_pipeline,
             mipmap_layout,
             mipmap_pipelines,
             clear_pipeline,
@@ -574,59 +629,76 @@ pub fn queue_mipmap_bind_groups(
     volumes: Query<(Entity, &VolumeBindings), With<Volume>>,
 ) {
     for (entity, volume_bindings) in volumes.iter() {
-        let anisotropic_mipmaps = (0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT)
-            .map(|level| {
-                volume_bindings
-                    .anisotropic_textures
-                    .iter()
-                    .map(|cached_texture| {
-                        cached_texture.texture.create_view(&TextureViewDescriptor {
-                            base_mip_level: level as u32,
-                            mip_level_count: NonZeroU32::new(1),
-                            ..Default::default()
-                        })
-                    })
-                    .collect::<Vec<_>>()
+        let mipmap_base_textures = volume_bindings
+            .anisotropic_textures
+            .iter()
+            .map(|cached_texture| {
+                cached_texture.texture.create_view(&TextureViewDescriptor {
+                    base_mip_level: 0,
+                    mip_level_count: NonZeroU32::new(1),
+                    ..Default::default()
+                })
             })
             .collect::<Vec<_>>();
+        let mut mipmap_base_entries = mipmap_base_textures
+            .iter()
+            .enumerate()
+            .map(|(direction, texture)| BindGroupEntry {
+                binding: direction as u32,
+                resource: BindingResource::TextureView(texture),
+            })
+            .collect::<Vec<_>>();
+        mipmap_base_entries.push(BindGroupEntry {
+            binding: 6,
+            resource: BindingResource::TextureView(&volume_bindings.voxel_texture.default_view),
+        });
+        let mipmap_base = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &voxel_pipeline.mipmap_base_layout,
+            entries: &mipmap_base_entries,
+        });
 
-        let mipmaps = (0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT)
-            .map(|level| {
-                let mut bind_groups = vec![];
-
-                for direction in 0..6 {
-                    let texture_in = match level {
-                        0 => &volume_bindings.voxel_texture.default_view,
-                        level => &anisotropic_mipmaps[level - 1][direction],
-                    };
-                    let texture_out = &anisotropic_mipmaps[level][direction];
-
-                    let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-                        label: None,
-                        layout: &voxel_pipeline.mipmap_layout,
-                        entries: &[
-                            BindGroupEntry {
-                                binding: 0,
-                                resource: BindingResource::TextureView(texture_in),
-                            },
-                            BindGroupEntry {
-                                binding: 1,
-                                resource: BindingResource::TextureView(texture_out),
-                            },
-                            BindGroupEntry {
-                                binding: 2,
-                                resource: BindingResource::Buffer(BufferBinding {
-                                    buffer: volume_meta.voxel_buffers.get(&entity).unwrap(),
-                                    offset: 0,
-                                    size: None,
-                                }),
-                            },
-                        ],
-                    });
-                    bind_groups.push(bind_group);
-                }
-
-                bind_groups
+        let mipmaps = (0..VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT).map(|level| {
+            volume_bindings
+                .anisotropic_textures
+                .iter()
+                .map(move |cached_texture| {
+                    cached_texture.texture.create_view(&TextureViewDescriptor {
+                        base_mip_level: level as u32,
+                        mip_level_count: NonZeroU32::new(1),
+                        ..Default::default()
+                    })
+                })
+        });
+        let mipmaps = mipmaps
+            .tuple_windows::<(_, _)>()
+            .map(|(textures_in, textures_out)| {
+                Itertools::zip_eq(textures_in, textures_out)
+                    .map(|(texture_in, texture_out)| {
+                        render_device.create_bind_group(&BindGroupDescriptor {
+                            label: None,
+                            layout: &voxel_pipeline.mipmap_layout,
+                            entries: &[
+                                BindGroupEntry {
+                                    binding: 0,
+                                    resource: BindingResource::TextureView(&texture_in),
+                                },
+                                BindGroupEntry {
+                                    binding: 1,
+                                    resource: BindingResource::TextureView(&texture_out),
+                                },
+                                BindGroupEntry {
+                                    binding: 2,
+                                    resource: BindingResource::Buffer(BufferBinding {
+                                        buffer: volume_meta.voxel_buffers.get(&entity).unwrap(),
+                                        offset: 0,
+                                        size: None,
+                                    }),
+                                },
+                            ],
+                        })
+                    })
+                    .collect()
             })
             .collect();
 
@@ -657,9 +729,11 @@ pub fn queue_mipmap_bind_groups(
             ],
         });
 
-        commands
-            .entity(entity)
-            .insert(MipmapBindGroup { mipmaps, clear });
+        commands.entity(entity).insert(MipmapBindGroup {
+            mipmap_base,
+            mipmaps,
+            clear,
+        });
     }
 }
 
@@ -823,7 +897,14 @@ impl render_graph::Node for MipmapPassNode {
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
             pass.dispatch(count, count, count);
 
+            let size = (VOXEL_SIZE / 2) as u32;
+            let count = (size / 8).max(1);
+            pass.set_pipeline(&pipeline.mipmap_base_pipeline);
+            pass.set_bind_group(0, &mipmap_bind_group.mipmap_base, &[]);
+            pass.dispatch(count, count, count * 6);
+
             for (level, bind_groups) in mipmap_bind_group.mipmaps.iter().enumerate() {
+                let level = level + 1;
                 for direction in 0..6 {
                     let size = (VOXEL_SIZE / (2 << level)) as u32;
                     let count = (size / 8).max(1);
