@@ -308,7 +308,7 @@ impl SpecializedMaterial for OverlayMaterial {
                     binding: 0,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        sample_type: TextureSampleType::default(),
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -324,7 +324,7 @@ impl SpecializedMaterial for OverlayMaterial {
                     binding: 2,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        sample_type: TextureSampleType::default(),
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
