@@ -5,7 +5,7 @@ struct VoxelBuffer {
 [[group(0), binding(0)]]
 var texture_in: texture_3d<f32>;
 [[group(0), binding(1)]]
-var texture_out: texture_storage_3d<rgba8unorm, write>;
+var texture_out: texture_storage_3d<rgba16float, write>;
 [[group(0), binding(2)]]
 var<storage, read_write> voxel_buffer: VoxelBuffer;
 
@@ -129,13 +129,10 @@ fn linear_index(index: vec3<i32>) -> i32 {
 }
 
 fn unpack_color(voxel: u32) -> vec4<f32> {
-    var color: vec4<f32>;
-    let mask = 0x3ffu;
-    color.r = f32(voxel & mask) / 255.0;
-    color.g = f32((voxel >> 10u) & mask) / 255.0;
-    color.b = f32((voxel >> 20u) & mask) / 255.0;
-    color.a = f32(voxel >> 30u);
-    return color;
+    let unpacked =  unpack4x8unorm(voxel);
+    let multiplier = unpacked.a * 255.0;
+    let alpha = min(1.0, multiplier);
+    return vec4<f32>(multiplier * unpacked.rgb, alpha);
 }
 
 [[stage(compute), workgroup_size(8, 8, 8)]]
@@ -154,12 +151,7 @@ fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
     if (all(coords < textureDimensions(texture_out))) {
         let index = linear_index(coords);
         let voxel = &voxel_buffer.data[index];
-
-        var color = unpack_color(atomicLoad(voxel));
-        if (color.a > 1.0) {
-            color = color / color.a;
-        }
-
+        let color = unpack_color(atomicLoad(voxel));
         textureStore(texture_out, coords, color);
     }
 }

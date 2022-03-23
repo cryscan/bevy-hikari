@@ -70,15 +70,28 @@ var anisotropic_texture_4: texture_3d<f32>;
 [[group(3), binding(5)]]
 var anisotropic_texture_5: texture_3d<f32>;
 [[group(3), binding(6)]]
-var<uniform> directions: Directions;
-[[group(3), binding(7)]]
-var<uniform> volume: Volume;
-[[group(3), binding(8)]]
 var voxel_texture: texture_3d<f32>;
-[[group(3), binding(9)]]
+[[group(3), binding(7)]]
 var texture_sampler: sampler;
+[[group(3), binding(8)]]
+var<uniform> directions: Directions;
+[[group(3), binding(9)]]
+var<uniform> volume: Volume;
 
 let PI: f32 = 3.141592653589793;
+
+// luminance coefficients from Rec. 709.
+// https://en.wikipedia.org/wiki/Rec._709
+fn luminance(v: vec3<f32>) -> f32 {
+    return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
+    let lum = luminance(color);
+    let factor = 1.0 / (1.0 + lum);
+    // return change_luminance(color, l_new);
+    return color * factor;
+}
 
 fn max_component(v: vec3<f32>) -> f32 {
     return max(max(v.x, v.y), v.z);
@@ -292,7 +305,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     // }
 
     // color = vec4<f32>(pow(color.rgb, vec3<f32>(1.0 / 2.2)), color.a);
-    return vec4<f32>(color.rgb, base_color.a);
+    return vec4<f32>(reinhard_luminance(color.rgb), base_color.a);
 
 #endif
 #endif
