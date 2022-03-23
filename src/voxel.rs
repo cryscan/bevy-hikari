@@ -901,7 +901,7 @@ impl render_graph::Node for MipmapPassNode {
             let count = (size / 8).max(1);
             pass.set_pipeline(&pipeline.mipmap_base_pipeline);
             pass.set_bind_group(0, &mipmap_bind_group.mipmap_base, &[]);
-            pass.dispatch(count, count, count * 6);
+            pass.dispatch(count, count, size);
 
             for (level, bind_groups) in mipmap_bind_group.mipmaps.iter().enumerate() {
                 let level = level + 1;
