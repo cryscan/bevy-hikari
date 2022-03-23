@@ -108,26 +108,6 @@ impl FromWorld for TracingPipeline {
             BindGroupLayoutEntry {
                 binding: 6,
                 visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: BufferSize::new(GpuDirections::std140_size_static() as u64),
-                },
-                count: None,
-            },
-            BindGroupLayoutEntry {
-                binding: 7,
-                visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
-                },
-                count: None,
-            },
-            BindGroupLayoutEntry {
-                binding: 8,
-                visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
                     sample_type: TextureSampleType::Float { filterable: true },
                     view_dimension: TextureViewDimension::D3,
@@ -136,9 +116,29 @@ impl FromWorld for TracingPipeline {
                 count: None,
             },
             BindGroupLayoutEntry {
-                binding: 9,
+                binding: 7,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 8,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: BufferSize::new(GpuDirections::std140_size_static() as u64),
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 9,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
+                },
                 count: None,
             },
         ];
@@ -412,6 +412,14 @@ pub fn queue_tracing_bind_groups(
         let tracing_bindings = vec![
             BindGroupEntry {
                 binding: 6,
+                resource: BindingResource::TextureView(&volume_bindings.voxel_texture.default_view),
+            },
+            BindGroupEntry {
+                binding: 7,
+                resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
+            },
+            BindGroupEntry {
+                binding: 8,
                 resource: BindingResource::Buffer(BufferBinding {
                     buffer: &directions.0,
                     offset: 0,
@@ -419,16 +427,8 @@ pub fn queue_tracing_bind_groups(
                 }),
             },
             BindGroupEntry {
-                binding: 7,
-                resource: volume_meta.volume_uniforms.binding().unwrap(),
-            },
-            BindGroupEntry {
-                binding: 8,
-                resource: BindingResource::TextureView(&volume_bindings.voxel_texture.default_view),
-            },
-            BindGroupEntry {
                 binding: 9,
-                resource: BindingResource::Sampler(&volume_bindings.texture_sampler),
+                resource: volume_meta.volume_uniforms.binding().unwrap(),
             },
         ];
 

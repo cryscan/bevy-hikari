@@ -309,7 +309,7 @@ fn prepare_volumes(
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D3,
-                format: TextureFormat::Rgba8Unorm,
+                format: TextureFormat::Rgba16Float,
                 usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
             },
         );
@@ -328,7 +328,7 @@ fn prepare_volumes(
                         mip_level_count: VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT as u32,
                         sample_count: 1,
                         dimension: TextureDimension::D3,
-                        format: TextureFormat::Rgba8Unorm,
+                        format: TextureFormat::Rgba16Float,
                         usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
                     },
                 )

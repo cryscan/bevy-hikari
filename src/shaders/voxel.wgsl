@@ -54,7 +54,6 @@ struct Volume {
 };
 
 struct VoxelBuffer {
-    // A2_BGR8
     data: array<atomic<u32>, 16777216>;
 };
 
@@ -87,15 +86,16 @@ fn luminance(v: vec3<f32>) -> f32 {
     return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
-fn change_luminance(c_in: vec3<f32>, l_out: f32) -> vec3<f32> {
-    let l_in = luminance(c_in);
-    return c_in * (l_out / l_in);
-}
+// fn change_luminance(c_in: vec3<f32>, l_out: f32) -> vec3<f32> {
+//     let l_in = luminance(c_in);
+//     return c_in * (l_out / l_in);
+// }
 
-fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
-    let l_old = luminance(color);
-    let l_new = l_old / (1.0 + l_old);
-    return change_luminance(color, l_new);
+fn reinhard_luminance(color: vec3<f32>) -> vec4<f32> {
+    let lum= luminance(color);
+    let factor = 1.0 / (1.0 + lum);
+    // return change_luminance(color, l_new);
+    return vec4<f32>(color * factor, 1.0 / factor);
 }
 
 fn directional_light(
@@ -163,16 +163,6 @@ fn linear_index(index: vec3<i32>) -> i32 {
     }
 
     return i32(morton);
-}
-
-fn pack_color(color: vec4<f32>) -> u32 {
-    let converted = vec4<u32>((color + 0.5) * 255.);
-    var packed = 0u;
-    packed = packed | converted.r;
-    packed = packed | (converted.g << 10u);
-    packed = packed | (converted.b << 20u);
-    packed = packed | (1u << 30u);
-    return packed;
 }
 
 struct FragmentInput {
@@ -248,12 +238,13 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         discard;
     }
 
-    // tone_mapping
-    output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
+    // tone mapping, but keep HDR info
+    let color = reinhard_luminance(output_color.rgb);
+    var packed = pack4x8unorm(vec4<f32>(color.rgb, color.a / 255.0));
 
     let index = spatial_index(in.world_position.xyz);
     let voxel = &voxel_buffer.data[linear_index(index)];
-    atomicAdd(voxel, pack_color(output_color));
+    atomicMax(voxel, packed);
 
     return output_color;
 }

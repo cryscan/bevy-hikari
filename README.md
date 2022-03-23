@@ -18,7 +18,7 @@ The implementation is very basic and have, but not limited to, the following lim
 - [ ] Only support 256x256x256 voxel grid
 
 Todo:
-- [ ] HDR support
+- [x] HDR support
 - [ ] Use Memory-efficient voxel structures
 - [x] Fix flickering
 

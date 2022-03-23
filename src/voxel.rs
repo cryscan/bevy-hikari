@@ -154,7 +154,7 @@ impl FromWorld for VoxelPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm,
+                        format: TextureFormat::Rgba16Float,
                         view_dimension: TextureViewDimension::D3,
                     },
                     count: None,
