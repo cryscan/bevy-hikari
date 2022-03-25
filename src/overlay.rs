@@ -50,6 +50,8 @@ impl Plugin for OverlayPlugin {
 
 #[derive(Debug, Clone)]
 pub struct ScreenOverlay {
+    pub samples: u32,
+
     pub irradiance_size: Extent3d,
     pub irradiance_sampled: Option<Handle<Image>>,
     pub irradiance: Handle<Image>,
@@ -124,6 +126,7 @@ impl FromWorld for ScreenOverlay {
         let albedo = images.add(image);
 
         Self {
+            samples,
             irradiance_size,
             irradiance_sampled,
             irradiance,
@@ -350,7 +353,6 @@ fn prepare_screen_overlay(
     mut commands: Commands,
     images: Res<RenderAssets<Image>>,
     overlay: Res<ScreenOverlay>,
-    msaa: Res<Msaa>,
     render_device: Res<RenderDevice>,
     mut texture_cache: ResMut<TextureCache>,
 ) {
@@ -360,7 +362,7 @@ fn prepare_screen_overlay(
             label: Some("volume_overlay_depth_texture"),
             size: overlay.irradiance_size,
             mip_level_count: 1,
-            sample_count: msaa.samples,
+            sample_count: overlay.samples,
             dimension: TextureDimension::D2,
             format: TextureFormat::Depth32Float,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
@@ -373,7 +375,7 @@ fn prepare_screen_overlay(
             label: Some("volume_overlay_depth_texture"),
             size: overlay.albedo_size,
             mip_level_count: 1,
-            sample_count: msaa.samples,
+            sample_count: overlay.samples,
             dimension: TextureDimension::D2,
             format: TextureFormat::Depth32Float,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
