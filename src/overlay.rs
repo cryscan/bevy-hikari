@@ -54,15 +54,12 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<OverlayMaterial>>,
 ) {
-    let irradiance_resolve = overlay.irradiance_resolve.clone();
-    let albedo_resolve = overlay.albedo_resolve.clone();
+    let irradiance = overlay.irradiance.clone();
+    let albedo = overlay.albedo.clone();
 
     commands.spawn_bundle(MaterialMeshBundle {
         mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
-        material: materials.add(OverlayMaterial {
-            irradiance_image: irradiance_resolve,
-            albedo_image: albedo_resolve,
-        }),
+        material: materials.add(OverlayMaterial { irradiance, albedo }),
         ..Default::default()
     });
 }
@@ -106,23 +103,28 @@ fn prepare_screen_overlay(
     );
 
     let retrieve_textures = || {
+        let irradiance_sampled = match &overlay.irradiance_sampled {
+            Some(handle) => Some(images.get(handle)?.texture_view.clone()),
+            None => None,
+        };
         let irradiance = images.get(&overlay.irradiance)?.texture_view.clone();
-        let irradiance_resolve = images
-            .get(&overlay.irradiance_resolve)?
-            .texture_view
-            .clone();
+
+        let albedo_sampled = match &overlay.albedo_sampled {
+            Some(handle) => Some(images.get(handle)?.texture_view.clone()),
+            None => None,
+        };
         let albedo = images.get(&overlay.albedo)?.texture_view.clone();
-        let albedo_resolve = images.get(&overlay.albedo_resolve)?.texture_view.clone();
-        Some((irradiance, irradiance_resolve, albedo, albedo_resolve))
+
+        Some((irradiance_sampled, irradiance, albedo_sampled, albedo))
     };
 
-    if let Some((irradiance, irradiance_resolve, albedo, albedo_resolve)) = retrieve_textures() {
+    if let Some((irradiance_sampled, irradiance, albedo_sampled, albedo)) = retrieve_textures() {
         commands.insert_resource(GpuScreenOverlay {
+            irradiance_sampled,
             irradiance,
-            irradiance_resolve,
             irradiance_depth,
+            albedo_sampled,
             albedo,
-            albedo_resolve,
             albedo_depth,
         });
     }
@@ -131,22 +133,62 @@ fn prepare_screen_overlay(
 #[derive(Debug, Clone)]
 pub struct ScreenOverlay {
     pub irradiance_size: Extent3d,
+    pub irradiance_sampled: Option<Handle<Image>>,
     pub irradiance: Handle<Image>,
-    pub irradiance_resolve: Handle<Image>,
 
     pub albedo_size: Extent3d,
+    pub albedo_sampled: Option<Handle<Image>>,
     pub albedo: Handle<Image>,
-    pub albedo_resolve: Handle<Image>,
 }
 
 pub struct GpuScreenOverlay {
     pub irradiance: TextureView,
-    pub irradiance_resolve: TextureView,
+    pub irradiance_sampled: Option<TextureView>,
     pub irradiance_depth: CachedTexture,
 
     pub albedo: TextureView,
-    pub albedo_resolve: TextureView,
+    pub albedo_sampled: Option<TextureView>,
     pub albedo_depth: CachedTexture,
+}
+
+impl GpuScreenOverlay {
+    pub fn irradiance_color_attachment(
+        &self,
+        ops: Operations<wgpu::Color>,
+    ) -> RenderPassColorAttachment {
+        RenderPassColorAttachment {
+            view: if let Some(sampled) = &self.irradiance_sampled {
+                sampled
+            } else {
+                &self.irradiance
+            },
+            resolve_target: if self.irradiance_sampled.is_some() {
+                Some(&self.irradiance)
+            } else {
+                None
+            },
+            ops,
+        }
+    }
+
+    pub fn albedo_color_attachment(
+        &self,
+        ops: Operations<wgpu::Color>,
+    ) -> RenderPassColorAttachment {
+        RenderPassColorAttachment {
+            view: if let Some(sampled) = &self.albedo_sampled {
+                sampled
+            } else {
+                &self.albedo
+            },
+            resolve_target: if self.albedo_sampled.is_some() {
+                Some(&self.albedo)
+            } else {
+                None
+            },
+            ops,
+        }
+    }
 }
 
 impl FromWorld for ScreenOverlay {
@@ -179,10 +221,14 @@ impl FromWorld for ScreenOverlay {
         image.sampler_descriptor.min_filter = FilterMode::Linear;
 
         image.texture_descriptor.sample_count = samples;
-        let irradiance = images.add(image.clone());
+        let irradiance_sampled = if samples > 1 {
+            Some(images.add(image.clone()))
+        } else {
+            None
+        };
 
         image.texture_descriptor.sample_count = 1;
-        let irradiance_resolve = images.add(image);
+        let irradiance = images.add(image);
 
         let albedo_size = Extent3d {
             width,
@@ -200,18 +246,22 @@ impl FromWorld for ScreenOverlay {
             | TextureUsages::TEXTURE_BINDING;
 
         image.texture_descriptor.sample_count = samples;
-        let albedo = images.add(image.clone());
+        let albedo_sampled = if samples > 1 {
+            Some(images.add(image.clone()))
+        } else {
+            None
+        };
 
         image.texture_descriptor.sample_count = 1;
-        let albedo_resolve = images.add(image);
+        let albedo = images.add(image);
 
         Self {
             irradiance_size,
+            irradiance_sampled,
             irradiance,
-            irradiance_resolve,
             albedo_size,
+            albedo_sampled,
             albedo,
-            albedo_resolve,
         }
     }
 }
@@ -219,8 +269,8 @@ impl FromWorld for ScreenOverlay {
 #[derive(Debug, Clone, TypeUuid)]
 #[uuid = "3eb25222-95fd-11ec-b909-0242ac120002"]
 pub struct OverlayMaterial {
-    pub irradiance_image: Handle<Image>,
-    pub albedo_image: Handle<Image>,
+    pub irradiance: Handle<Image>,
+    pub albedo: Handle<Image>,
 }
 
 #[derive(Clone)]
@@ -245,13 +295,13 @@ impl RenderAsset for OverlayMaterial {
         material: Self::ExtractedAsset,
         (render_device, material_pipeline, images): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        let irradiance = if let Some(result) = images.get(&material.irradiance_image) {
+        let irradiance = if let Some(result) = images.get(&material.irradiance) {
             result
         } else {
             return Err(PrepareAssetError::RetryNextUpdate(material));
         };
 
-        let albedo = if let Some(result) = images.get(&material.albedo_image) {
+        let albedo = if let Some(result) = images.get(&material.albedo) {
             result
         } else {
             return Err(PrepareAssetError::RetryNextUpdate(material));
