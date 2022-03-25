@@ -48,88 +48,6 @@ impl Plugin for OverlayPlugin {
     }
 }
 
-fn setup(
-    mut commands: Commands,
-    overlay: Res<ScreenOverlay>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<OverlayMaterial>>,
-) {
-    let irradiance = overlay.irradiance.clone();
-    let albedo = overlay.albedo.clone();
-
-    commands.spawn_bundle(MaterialMeshBundle {
-        mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
-        material: materials.add(OverlayMaterial { irradiance, albedo }),
-        ..Default::default()
-    });
-}
-
-fn extract_screen_overlay(mut commands: Commands, screen_overlay: Res<ScreenOverlay>) {
-    commands.insert_resource(screen_overlay.clone());
-}
-
-fn prepare_screen_overlay(
-    mut commands: Commands,
-    images: Res<RenderAssets<Image>>,
-    overlay: Res<ScreenOverlay>,
-    msaa: Res<Msaa>,
-    render_device: Res<RenderDevice>,
-    mut texture_cache: ResMut<TextureCache>,
-) {
-    let irradiance_depth = texture_cache.get(
-        &render_device,
-        TextureDescriptor {
-            label: Some("volume_overlay_depth_texture"),
-            size: overlay.irradiance_size,
-            mip_level_count: 1,
-            sample_count: msaa.samples,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Depth32Float,
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-        },
-    );
-
-    let albedo_depth = texture_cache.get(
-        &render_device,
-        TextureDescriptor {
-            label: Some("volume_overlay_depth_texture"),
-            size: overlay.albedo_size,
-            mip_level_count: 1,
-            sample_count: msaa.samples,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Depth32Float,
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-        },
-    );
-
-    let retrieve_textures = || {
-        let irradiance_sampled = match &overlay.irradiance_sampled {
-            Some(handle) => Some(images.get(handle)?.texture_view.clone()),
-            None => None,
-        };
-        let irradiance = images.get(&overlay.irradiance)?.texture_view.clone();
-
-        let albedo_sampled = match &overlay.albedo_sampled {
-            Some(handle) => Some(images.get(handle)?.texture_view.clone()),
-            None => None,
-        };
-        let albedo = images.get(&overlay.albedo)?.texture_view.clone();
-
-        Some((irradiance_sampled, irradiance, albedo_sampled, albedo))
-    };
-
-    if let Some((irradiance_sampled, irradiance, albedo_sampled, albedo)) = retrieve_textures() {
-        commands.insert_resource(GpuScreenOverlay {
-            irradiance_sampled,
-            irradiance,
-            irradiance_depth,
-            albedo_sampled,
-            albedo,
-            albedo_depth,
-        });
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ScreenOverlay {
     pub irradiance_size: Extent3d,
@@ -139,56 +57,6 @@ pub struct ScreenOverlay {
     pub albedo_size: Extent3d,
     pub albedo_sampled: Option<Handle<Image>>,
     pub albedo: Handle<Image>,
-}
-
-pub struct GpuScreenOverlay {
-    pub irradiance: TextureView,
-    pub irradiance_sampled: Option<TextureView>,
-    pub irradiance_depth: CachedTexture,
-
-    pub albedo: TextureView,
-    pub albedo_sampled: Option<TextureView>,
-    pub albedo_depth: CachedTexture,
-}
-
-impl GpuScreenOverlay {
-    pub fn irradiance_color_attachment(
-        &self,
-        ops: Operations<wgpu::Color>,
-    ) -> RenderPassColorAttachment {
-        RenderPassColorAttachment {
-            view: if let Some(sampled) = &self.irradiance_sampled {
-                sampled
-            } else {
-                &self.irradiance
-            },
-            resolve_target: if self.irradiance_sampled.is_some() {
-                Some(&self.irradiance)
-            } else {
-                None
-            },
-            ops,
-        }
-    }
-
-    pub fn albedo_color_attachment(
-        &self,
-        ops: Operations<wgpu::Color>,
-    ) -> RenderPassColorAttachment {
-        RenderPassColorAttachment {
-            view: if let Some(sampled) = &self.albedo_sampled {
-                sampled
-            } else {
-                &self.albedo
-            },
-            resolve_target: if self.albedo_sampled.is_some() {
-                Some(&self.albedo)
-            } else {
-                None
-            },
-            ops,
-        }
-    }
 }
 
 impl FromWorld for ScreenOverlay {
@@ -266,6 +134,56 @@ impl FromWorld for ScreenOverlay {
     }
 }
 
+pub struct GpuScreenOverlay {
+    pub irradiance: TextureView,
+    pub irradiance_sampled: Option<TextureView>,
+    pub irradiance_depth: CachedTexture,
+
+    pub albedo: TextureView,
+    pub albedo_sampled: Option<TextureView>,
+    pub albedo_depth: CachedTexture,
+}
+
+impl GpuScreenOverlay {
+    pub fn irradiance_color_attachment(
+        &self,
+        ops: Operations<wgpu::Color>,
+    ) -> RenderPassColorAttachment {
+        RenderPassColorAttachment {
+            view: if let Some(sampled) = &self.irradiance_sampled {
+                sampled
+            } else {
+                &self.irradiance
+            },
+            resolve_target: if self.irradiance_sampled.is_some() {
+                Some(&self.irradiance)
+            } else {
+                None
+            },
+            ops,
+        }
+    }
+
+    pub fn albedo_color_attachment(
+        &self,
+        ops: Operations<wgpu::Color>,
+    ) -> RenderPassColorAttachment {
+        RenderPassColorAttachment {
+            view: if let Some(sampled) = &self.albedo_sampled {
+                sampled
+            } else {
+                &self.albedo
+            },
+            resolve_target: if self.albedo_sampled.is_some() {
+                Some(&self.albedo)
+            } else {
+                None
+            },
+            ops,
+        }
+    }
+}
+
 #[derive(Debug, Clone, TypeUuid)]
 #[uuid = "3eb25222-95fd-11ec-b909-0242ac120002"]
 pub struct OverlayMaterial {
@@ -295,16 +213,13 @@ impl RenderAsset for OverlayMaterial {
         material: Self::ExtractedAsset,
         (render_device, material_pipeline, images): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        let irradiance = if let Some(result) = images.get(&material.irradiance) {
-            result
-        } else {
-            return Err(PrepareAssetError::RetryNextUpdate(material));
+        let irradiance = match images.get(&material.irradiance) {
+            Some(image) => image,
+            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
         };
-
-        let albedo = if let Some(result) = images.get(&material.albedo) {
-            result
-        } else {
-            return Err(PrepareAssetError::RetryNextUpdate(material));
+        let albedo = match images.get(&material.albedo) {
+            Some(image) => image,
+            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
         };
 
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
@@ -408,6 +323,88 @@ impl SpecializedMaterial for OverlayMaterial {
 
     fn alpha_mode(_material: &<Self as RenderAsset>::PreparedAsset) -> AlphaMode {
         AlphaMode::Blend
+    }
+}
+
+fn setup(
+    mut commands: Commands,
+    overlay: Res<ScreenOverlay>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<OverlayMaterial>>,
+) {
+    let irradiance = overlay.irradiance.clone();
+    let albedo = overlay.albedo.clone();
+
+    commands.spawn_bundle(MaterialMeshBundle {
+        mesh: meshes.add(shape::Quad::new(Vec2::ZERO).into()),
+        material: materials.add(OverlayMaterial { irradiance, albedo }),
+        ..Default::default()
+    });
+}
+
+fn extract_screen_overlay(mut commands: Commands, screen_overlay: Res<ScreenOverlay>) {
+    commands.insert_resource(screen_overlay.clone());
+}
+
+fn prepare_screen_overlay(
+    mut commands: Commands,
+    images: Res<RenderAssets<Image>>,
+    overlay: Res<ScreenOverlay>,
+    msaa: Res<Msaa>,
+    render_device: Res<RenderDevice>,
+    mut texture_cache: ResMut<TextureCache>,
+) {
+    let irradiance_depth = texture_cache.get(
+        &render_device,
+        TextureDescriptor {
+            label: Some("volume_overlay_depth_texture"),
+            size: overlay.irradiance_size,
+            mip_level_count: 1,
+            sample_count: msaa.samples,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Depth32Float,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+        },
+    );
+
+    let albedo_depth = texture_cache.get(
+        &render_device,
+        TextureDescriptor {
+            label: Some("volume_overlay_depth_texture"),
+            size: overlay.albedo_size,
+            mip_level_count: 1,
+            sample_count: msaa.samples,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Depth32Float,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+        },
+    );
+
+    let retrieve_textures = || {
+        let irradiance_sampled = match &overlay.irradiance_sampled {
+            Some(handle) => Some(images.get(handle)?.texture_view.clone()),
+            None => None,
+        };
+        let irradiance = images.get(&overlay.irradiance)?.texture_view.clone();
+
+        let albedo_sampled = match &overlay.albedo_sampled {
+            Some(handle) => Some(images.get(handle)?.texture_view.clone()),
+            None => None,
+        };
+        let albedo = images.get(&overlay.albedo)?.texture_view.clone();
+
+        Some((irradiance_sampled, irradiance, albedo_sampled, albedo))
+    };
+
+    if let Some((irradiance_sampled, irradiance, albedo_sampled, albedo)) = retrieve_textures() {
+        commands.insert_resource(GpuScreenOverlay {
+            irradiance_sampled,
+            irradiance,
+            irradiance_depth,
+            albedo_sampled,
+            albedo,
+            albedo_depth,
+        });
     }
 }
 
