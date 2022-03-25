@@ -32,7 +32,8 @@ impl Plugin for OverlayPlugin {
             .add_plugin(ExtractComponentPlugin::<Handle<OverlayMaterial>>::default())
             .add_plugin(RenderAssetPlugin::<OverlayMaterial>::default())
             .init_resource::<ScreenOverlay>()
-            .add_startup_system(setup);
+            .add_startup_system(setup)
+            .add_system(update);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -50,8 +51,6 @@ impl Plugin for OverlayPlugin {
 
 #[derive(Debug, Clone)]
 pub struct ScreenOverlay {
-    pub samples: u32,
-
     pub irradiance_size: Extent3d,
     pub irradiance_sampled: Option<Handle<Image>>,
     pub irradiance: Handle<Image>,
@@ -126,7 +125,6 @@ impl FromWorld for ScreenOverlay {
         let albedo = images.add(image);
 
         Self {
-            samples,
             irradiance_size,
             irradiance_sampled,
             irradiance,
@@ -345,12 +343,33 @@ fn setup(
     });
 }
 
+fn update(mut images: ResMut<Assets<Image>>, mut overlay: ResMut<ScreenOverlay>, msaa: Res<Msaa>) {
+    if msaa.is_changed() {
+        overlay.irradiance_sampled = if msaa.samples > 1 {
+            let mut image = images.get(overlay.irradiance.clone()).unwrap().clone();
+            image.texture_descriptor.sample_count = msaa.samples;
+            Some(images.add(image))
+        } else {
+            None
+        };
+
+        overlay.albedo_sampled = if msaa.samples > 1 {
+            let mut image = images.get(overlay.albedo.clone()).unwrap().clone();
+            image.texture_descriptor.sample_count = msaa.samples;
+            Some(images.add(image))
+        } else {
+            None
+        };
+    }
+}
+
 fn extract_screen_overlay(mut commands: Commands, screen_overlay: Res<ScreenOverlay>) {
     commands.insert_resource(screen_overlay.clone());
 }
 
 fn prepare_screen_overlay(
     mut commands: Commands,
+    msaa: Res<Msaa>,
     images: Res<RenderAssets<Image>>,
     overlay: Res<ScreenOverlay>,
     render_device: Res<RenderDevice>,
@@ -362,7 +381,7 @@ fn prepare_screen_overlay(
             label: Some("volume_overlay_depth_texture"),
             size: overlay.irradiance_size,
             mip_level_count: 1,
-            sample_count: overlay.samples,
+            sample_count: msaa.samples,
             dimension: TextureDimension::D2,
             format: TextureFormat::Depth32Float,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
@@ -375,7 +394,7 @@ fn prepare_screen_overlay(
             label: Some("volume_overlay_depth_texture"),
             size: overlay.albedo_size,
             mip_level_count: 1,
-            sample_count: overlay.samples,
+            sample_count: msaa.samples,
             dimension: TextureDimension::D2,
             format: TextureFormat::Depth32Float,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
