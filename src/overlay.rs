@@ -33,7 +33,7 @@ impl Plugin for OverlayPlugin {
             .add_plugin(RenderAssetPlugin::<OverlayMaterial>::default())
             .init_resource::<ScreenOverlay>()
             .add_startup_system(setup)
-            .add_system(update);
+            .add_system_to_stage(CoreStage::PostUpdate, update);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
