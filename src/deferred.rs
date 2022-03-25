@@ -283,14 +283,10 @@ impl render_graph::Node for DeferredPassNode {
         {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("deferred_opaque_pass"),
-                color_attachments: &[RenderPassColorAttachment {
-                    view: &overlay.albedo,
-                    resolve_target: Some(&overlay.albedo_resolve),
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::NONE.into()),
-                        store: true,
-                    },
-                }],
+                color_attachments: &[overlay.albedo_color_attachment(Operations {
+                    load: LoadOp::Clear(Color::NONE.into()),
+                    store: true,
+                })],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                     view: &overlay.albedo_depth.default_view,
                     depth_ops: Some(Operations {
@@ -320,14 +316,10 @@ impl render_graph::Node for DeferredPassNode {
         {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("deferred_alpha_mask_pass"),
-                color_attachments: &[RenderPassColorAttachment {
-                    view: &overlay.albedo,
-                    resolve_target: Some(&overlay.albedo_resolve),
-                    ops: Operations {
-                        load: LoadOp::Load,
-                        store: true,
-                    },
-                }],
+                color_attachments: &[overlay.albedo_color_attachment(Operations {
+                    load: LoadOp::Load,
+                    store: true,
+                })],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                     view: &overlay.albedo_depth.default_view,
                     depth_ops: Some(Operations {
@@ -357,14 +349,10 @@ impl render_graph::Node for DeferredPassNode {
         {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("deferred_transparent_pass"),
-                color_attachments: &[RenderPassColorAttachment {
-                    view: &overlay.albedo,
-                    resolve_target: Some(&overlay.albedo_resolve),
-                    ops: Operations {
-                        load: LoadOp::Load,
-                        store: true,
-                    },
-                }],
+                color_attachments: &[overlay.albedo_color_attachment(Operations {
+                    load: LoadOp::Load,
+                    store: true,
+                })],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                     view: &overlay.albedo_depth.default_view,
                     depth_ops: Some(Operations {
