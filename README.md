@@ -18,9 +18,10 @@ The implementation is very basic and have, but not limited to, the following lim
 - [ ] Only support 256x256x256 voxel grid
 
 Todo:
-- [x] HDR support
-- [ ] Use Memory-efficient voxel structures
 - [x] Fix flickering
+- [x] Voxel HDR support
+- [ ] Use memory-efficient voxel structures
+- [ ] Correct glossy reflection
 
 ## Examples
 Two examples are included: one minimal example, one in which can move around and adjust light directions.
