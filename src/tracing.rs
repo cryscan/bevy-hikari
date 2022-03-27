@@ -279,6 +279,7 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     msaa: Res<Msaa>,
     mut view_query: Query<(
+        &Volume,
         &ExtractedView,
         &VisibleEntities,
         &mut RenderPhase<Tracing<Opaque3d>>,
@@ -305,6 +306,7 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
         .unwrap();
 
     for (
+        volume,
         view,
         visible_entities,
         mut opaque_phase,
@@ -313,6 +315,10 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
         mut ambient_occlusion_phase,
     ) in view_query.iter_mut()
     {
+        if !volume.enabled {
+            continue;
+        }
+
         let inverse_view_matrix = view.transform.compute_matrix().inverse();
         let inverse_view_row_2 = inverse_view_matrix.row(2);
 

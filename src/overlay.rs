@@ -429,11 +429,13 @@ fn prepare_screen_overlay(
     }
 }
 
-fn prepare_overlay_phase(mut commands: Commands, views: Query<Entity, With<Volume>>) {
-    for view in views.iter() {
-        commands
-            .entity(view)
-            .insert(RenderPhase::<Overlay>::default());
+fn prepare_overlay_phase(mut commands: Commands, views: Query<(Entity, &Volume)>) {
+    for (view, volume) in views.iter() {
+        if volume.enabled {
+            commands
+                .entity(view)
+                .insert(RenderPhase::<Overlay>::default());
+        }
     }
 }
 

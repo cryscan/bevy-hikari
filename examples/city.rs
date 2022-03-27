@@ -29,7 +29,8 @@ fn main() {
         .add_startup_system(setup)
         .add_system(scene_update)
         .add_system(light_rotate_system)
-        .add_system(camera_input_map);
+        .add_system(camera_input_map)
+        .add_system(toggle_enable_volume);
 
     app.run();
 }
@@ -243,4 +244,12 @@ pub fn camera_input_map(
         scalar *= 1.0 - scroll_amount * mouse_wheel_zoom_sensitivity;
     }
     events.send(ControlEvent::Zoom(scalar));
+}
+
+pub fn toggle_enable_volume(keyboard_input: Res<Input<KeyCode>>, mut volumes: Query<&mut Volume>) {
+    if keyboard_input.just_pressed(KeyCode::X) {
+        for mut volume in volumes.iter_mut() {
+            volume.enabled = !volume.enabled;
+        }
+    }
 }
