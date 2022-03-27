@@ -208,6 +208,7 @@ pub struct NotGiReceiver;
 pub struct Volume {
     pub min: Vec3,
     pub max: Vec3,
+    pub enabled: bool,
     views: Vec<Entity>,
 }
 
@@ -216,6 +217,7 @@ impl Volume {
         Self {
             min,
             max,
+            enabled: true,
             views: vec![],
         }
     }
@@ -279,6 +281,10 @@ fn prepare_volumes(
     volume_meta.volume_uniforms.clear();
 
     for (entity, volume) in volumes.iter_mut() {
+        if !volume.enabled {
+            continue;
+        }
+
         let volume_uniform_offset = VolumeUniformOffset {
             offset: volume_meta.volume_uniforms.push(GpuVolume {
                 min: volume.min,
@@ -347,7 +353,7 @@ fn prepare_volumes(
         });
 
         for view in volume.views.iter().cloned() {
-            let color_texture = texture_cache.get(
+            let texture = texture_cache.get(
                 &render_device,
                 TextureDescriptor {
                     label: Some("voxel_volume_texture"),
@@ -366,9 +372,7 @@ fn prepare_volumes(
 
             commands.entity(view).insert_bundle((
                 volume_uniform_offset.clone(),
-                VolumeColorAttachment {
-                    texture: color_texture,
-                },
+                VolumeColorAttachment { texture },
                 RenderPhase::<Voxel>::default(),
             ));
         }

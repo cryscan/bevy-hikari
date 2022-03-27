@@ -590,6 +590,10 @@ pub fn queue_voxel_meshes<M: SpecializedMaterial>(
         .unwrap();
 
     for volume in volumes.iter() {
+        if !volume.enabled {
+            continue;
+        }
+
         for view in volume.views.iter().cloned() {
             let (visible_entities, mut phase) = view_query.get_mut(view).unwrap();
             for entity in visible_entities.entities.iter().cloned() {
@@ -829,6 +833,10 @@ impl render_graph::Node for VoxelPassNode {
     ) -> Result<(), bevy::render::render_graph::NodeRunError> {
         let entity = graph.get_input_entity(Self::IN_VIEW)?;
         if let Ok(volume) = self.volume_query.get_manual(world, entity) {
+            if !volume.enabled {
+                return Ok(());
+            }
+
             for view in volume.views.iter().cloned() {
                 let (volume_color_attachment, phase) =
                     self.volume_view_query.get_manual(world, view).unwrap();
@@ -863,7 +871,7 @@ impl render_graph::Node for VoxelPassNode {
 }
 
 pub struct MipmapPassNode {
-    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+    query: QueryState<(&'static MipmapBindGroup, &'static Volume)>,
 }
 
 impl MipmapPassNode {
@@ -891,7 +899,11 @@ impl render_graph::Node for MipmapPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for mipmap_bind_group in self.query.iter_manual(world) {
+        for (mipmap_bind_group, volume) in self.query.iter_manual(world) {
+            if !volume.enabled {
+                continue;
+            }
+
             let count = (VOXEL_SIZE / 8) as u32;
             pass.set_pipeline(&pipeline.fill_pipeline);
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
@@ -920,7 +932,7 @@ impl render_graph::Node for MipmapPassNode {
 }
 
 pub struct VoxelClearPassNode {
-    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
+    query: QueryState<(&'static MipmapBindGroup, &'static Volume)>,
 }
 
 impl VoxelClearPassNode {
@@ -947,7 +959,11 @@ impl render_graph::Node for VoxelClearPassNode {
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for mipmap_bind_group in self.query.iter_manual(world) {
+        for (mipmap_bind_group, volume) in self.query.iter_manual(world) {
+            if !volume.enabled {
+                continue;
+            }
+
             let count = (VOXEL_SIZE / 8) as u32;
             pass.set_pipeline(&pipeline.clear_pipeline);
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
