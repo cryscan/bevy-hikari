@@ -55,19 +55,28 @@ pub use voxel::VoxelMaterialPlugin;
 /// The main plugin, registers required systems and resources.
 /// The only material registered is [`StandardMaterial`].
 /// To register custom [`Material`], add [`VoxelMaterialPlugin`] to the app.
-#[derive(Default)]
-pub struct VoxelConeTracingPlugin;
+pub struct VoxelConeTracingPlugin {
+    enabled: bool,
+}
+
+impl Default for VoxelConeTracingPlugin {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
 
 impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GiConfig>()
-            .add_plugin(VoxelPlugin)
-            .add_plugin(DeferredPlugin)
-            .add_plugin(TracingPlugin)
-            .add_plugin(OverlayPlugin)
-            .add_plugin(DeferredMaterialPlugin::<StandardMaterial>::default())
-            .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
-            .add_plugin(TracingMaterialPlugin::<StandardMaterial>::default());
+        app.insert_resource(GiConfig {
+            enabled: self.enabled,
+        })
+        .add_plugin(VoxelPlugin)
+        .add_plugin(DeferredPlugin)
+        .add_plugin(TracingPlugin)
+        .add_plugin(OverlayPlugin)
+        .add_plugin(DeferredMaterialPlugin::<StandardMaterial>::default())
+        .add_plugin(VoxelMaterialPlugin::<StandardMaterial>::default())
+        .add_plugin(TracingMaterialPlugin::<StandardMaterial>::default());
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
@@ -200,12 +209,6 @@ impl Plugin for VoxelConeTracingPlugin {
 #[derive(Clone)]
 pub struct GiConfig {
     pub enabled: bool,
-}
-
-impl Default for GiConfig {
-    fn default() -> Self {
-        Self { enabled: true }
-    }
 }
 
 /// Marker component for meshes not casting GI.

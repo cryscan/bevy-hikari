@@ -8,7 +8,7 @@ fn main() {
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         // Add the voxel cone tracing plugin
-        .add_plugin(VoxelConeTracingPlugin)
+        .add_plugin(VoxelConeTracingPlugin::default())
         .add_startup_system(setup)
         .run();
 }
