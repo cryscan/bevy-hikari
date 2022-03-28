@@ -1,4 +1,4 @@
-use crate::{Volume, OVERLAY_SHADER_HANDLE};
+use crate::{GiConfig, Volume, OVERLAY_SHADER_HANDLE};
 use bevy::{
     core::FloatOrd,
     ecs::system::{lifetimeless::SRes, SystemParamItem},
@@ -429,9 +429,13 @@ fn prepare_screen_overlay(
     }
 }
 
-fn prepare_overlay_phase(mut commands: Commands, views: Query<(Entity, &Volume)>) {
-    for (view, volume) in views.iter() {
-        if volume.enabled {
+fn prepare_overlay_phase(
+    mut commands: Commands,
+    views: Query<Entity, With<Volume>>,
+    config: Res<GiConfig>,
+) {
+    if config.enabled {
+        for view in views.iter() {
             commands
                 .entity(view)
                 .insert(RenderPhase::<Overlay>::default());

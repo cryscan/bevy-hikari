@@ -60,7 +60,8 @@ pub struct VoxelConeTracingPlugin;
 
 impl Plugin for VoxelConeTracingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(VoxelPlugin)
+        app.init_resource::<GiConfig>()
+            .add_plugin(VoxelPlugin)
             .add_plugin(DeferredPlugin)
             .add_plugin(TracingPlugin)
             .add_plugin(OverlayPlugin)
@@ -100,6 +101,7 @@ impl Plugin for VoxelConeTracingPlugin {
 
         render_app
             .init_resource::<VolumeMeta>()
+            .add_system_to_stage(RenderStage::Extract, extract_config)
             .add_system_to_stage(RenderStage::Extract, extract_volumes)
             .add_system_to_stage(RenderStage::Prepare, prepare_volumes);
 
@@ -195,6 +197,17 @@ impl Plugin for VoxelConeTracingPlugin {
     }
 }
 
+#[derive(Clone)]
+pub struct GiConfig {
+    pub enabled: bool,
+}
+
+impl Default for GiConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Marker component for meshes not casting GI.
 #[derive(Component)]
 pub struct NotGiCaster;
@@ -208,7 +221,6 @@ pub struct NotGiReceiver;
 pub struct Volume {
     pub min: Vec3,
     pub max: Vec3,
-    pub enabled: bool,
     views: Vec<Entity>,
 }
 
@@ -217,7 +229,6 @@ impl Volume {
         Self {
             min,
             max,
-            enabled: true,
             views: vec![],
         }
     }
@@ -263,6 +274,10 @@ pub struct VolumeMeta {
     voxel_buffers: HashMap<Entity, Buffer>,
 }
 
+fn extract_config(mut commands: Commands, config: Res<GiConfig>) {
+    commands.insert_resource(config.clone());
+}
+
 fn extract_volumes(mut commands: Commands, volumes: Query<(Entity, &Volume)>) {
     for (entity, volume) in volumes.iter() {
         commands.get_or_spawn(entity).insert(volume.clone());
@@ -277,14 +292,15 @@ fn prepare_volumes(
     mut texture_cache: ResMut<TextureCache>,
     mut volumes: Query<(Entity, &Volume)>,
     mut volume_meta: ResMut<VolumeMeta>,
+    config: Res<GiConfig>,
 ) {
+    if !config.enabled {
+        return;
+    }
+
     volume_meta.volume_uniforms.clear();
 
     for (entity, volume) in volumes.iter_mut() {
-        if !volume.enabled {
-            continue;
-        }
-
         let volume_uniform_offset = VolumeUniformOffset {
             offset: volume_meta.volume_uniforms.push(GpuVolume {
                 min: volume.min,

@@ -1,4 +1,4 @@
-use crate::{overlay::GpuScreenOverlay, Volume, ALBEDO_SHADER_HANDLE};
+use crate::{overlay::GpuScreenOverlay, GiConfig, ALBEDO_SHADER_HANDLE};
 use bevy::{
     core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d},
     pbr::{
@@ -157,14 +157,18 @@ fn queue_deferred_meshes<M: SpecializedMaterial>(
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     msaa: Res<Msaa>,
     mut view_query: Query<(
-        &Volume,
         &ExtractedView,
         &VisibleEntities,
         &mut RenderPhase<Deferred<Opaque3d>>,
         &mut RenderPhase<Deferred<AlphaMask3d>>,
         &mut RenderPhase<Deferred<Transparent3d>>,
     )>,
+    config: Res<GiConfig>,
 ) {
+    if !config.enabled {
+        return;
+    }
+
     let draw_opaque = opaque_draw_functions
         .read()
         .get_id::<DrawDeferredMesh<M>>()
@@ -178,19 +182,9 @@ fn queue_deferred_meshes<M: SpecializedMaterial>(
         .get_id::<DrawDeferredMesh<M>>()
         .unwrap();
 
-    for (
-        volume,
-        view,
-        visible_entities,
-        mut opaque_phase,
-        mut alpha_mask_phase,
-        mut transparent_phase,
-    ) in view_query.iter_mut()
+    for (view, visible_entities, mut opaque_phase, mut alpha_mask_phase, mut transparent_phase) in
+        view_query.iter_mut()
     {
-        if !volume.enabled {
-            continue;
-        }
-
         let inverse_view_matrix = view.transform.compute_matrix().inverse();
         let inverse_view_row_2 = inverse_view_matrix.row(2);
 

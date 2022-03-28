@@ -1,7 +1,7 @@
 use crate::{
-    GpuVolume, GpuVoxelBuffer, NotGiCaster, Volume, VolumeBindings, VolumeColorAttachment,
-    VolumeMeta, VolumeUniformOffset, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE,
-    VOXEL_SIZE,
+    GiConfig, GpuVolume, GpuVoxelBuffer, NotGiCaster, Volume, VolumeBindings,
+    VolumeColorAttachment, VolumeMeta, VolumeUniformOffset, VOXEL_ANISOTROPIC_MIPMAP_LEVEL_COUNT,
+    VOXEL_SHADER_HANDLE, VOXEL_SIZE,
 };
 use bevy::{
     core::FloatOrd,
@@ -582,18 +582,19 @@ pub fn queue_voxel_meshes<M: SpecializedMaterial>(
     mut pipelines: ResMut<SpecializedPipelines<VoxelPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     volumes: Query<&Volume, Without<VolumeView>>,
+    config: Res<GiConfig>,
     mut view_query: Query<(&VisibleEntities, &mut RenderPhase<Voxel>), With<VolumeView>>,
 ) {
+    if !config.enabled {
+        return;
+    }
+
     let draw_mesh = voxel_draw_functions
         .read()
         .get_id::<DrawVoxelMesh<M>>()
         .unwrap();
 
     for volume in volumes.iter() {
-        if !volume.enabled {
-            continue;
-        }
-
         for view in volume.views.iter().cloned() {
             let (visible_entities, mut phase) = view_query.get_mut(view).unwrap();
             for entity in visible_entities.entities.iter().cloned() {
@@ -831,12 +832,14 @@ impl render_graph::Node for VoxelPassNode {
         render_context: &mut bevy::render::renderer::RenderContext,
         world: &World,
     ) -> Result<(), bevy::render::render_graph::NodeRunError> {
-        let entity = graph.get_input_entity(Self::IN_VIEW)?;
-        if let Ok(volume) = self.volume_query.get_manual(world, entity) {
-            if !volume.enabled {
+        if let Some(config) = world.get_resource::<GiConfig>() {
+            if !config.enabled {
                 return Ok(());
             }
+        }
 
+        let entity = graph.get_input_entity(Self::IN_VIEW)?;
+        if let Ok(volume) = self.volume_query.get_manual(world, entity) {
             for view in volume.views.iter().cloned() {
                 let (volume_color_attachment, phase) =
                     self.volume_view_query.get_manual(world, view).unwrap();
@@ -871,7 +874,7 @@ impl render_graph::Node for VoxelPassNode {
 }
 
 pub struct MipmapPassNode {
-    query: QueryState<(&'static MipmapBindGroup, &'static Volume)>,
+    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
 }
 
 impl MipmapPassNode {
@@ -894,16 +897,18 @@ impl render_graph::Node for MipmapPassNode {
         render_context: &mut bevy::render::renderer::RenderContext,
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
+        if let Some(config) = world.get_resource::<GiConfig>() {
+            if !config.enabled {
+                return Ok(());
+            }
+        }
+
         let pipeline = world.get_resource::<VoxelPipeline>().unwrap();
         let mut pass = render_context
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for (mipmap_bind_group, volume) in self.query.iter_manual(world) {
-            if !volume.enabled {
-                continue;
-            }
-
+        for mipmap_bind_group in self.query.iter_manual(world) {
             let count = (VOXEL_SIZE / 8) as u32;
             pass.set_pipeline(&pipeline.fill_pipeline);
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);
@@ -932,7 +937,7 @@ impl render_graph::Node for MipmapPassNode {
 }
 
 pub struct VoxelClearPassNode {
-    query: QueryState<(&'static MipmapBindGroup, &'static Volume)>,
+    query: QueryState<&'static MipmapBindGroup, With<Volume>>,
 }
 
 impl VoxelClearPassNode {
@@ -954,16 +959,18 @@ impl render_graph::Node for VoxelClearPassNode {
         render_context: &mut bevy::render::renderer::RenderContext,
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
+        if let Some(config) = world.get_resource::<GiConfig>() {
+            if !config.enabled {
+                return Ok(());
+            }
+        }
+
         let pipeline = world.get_resource::<VoxelPipeline>().unwrap();
         let mut pass = render_context
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
 
-        for (mipmap_bind_group, volume) in self.query.iter_manual(world) {
-            if !volume.enabled {
-                continue;
-            }
-
+        for mipmap_bind_group in self.query.iter_manual(world) {
             let count = (VOXEL_SIZE / 8) as u32;
             pass.set_pipeline(&pipeline.clear_pipeline);
             pass.set_bind_group(0, &mipmap_bind_group.clear, &[]);

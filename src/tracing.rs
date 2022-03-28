@@ -1,6 +1,6 @@
 use crate::{
-    overlay::GpuScreenOverlay, GpuVolume, NotGiReceiver, Volume, VolumeBindings, VolumeMeta,
-    VolumeUniformOffset, TRACING_SHADER_HANDLE,
+    overlay::GpuScreenOverlay, GiConfig, GpuVolume, NotGiReceiver, Volume, VolumeBindings,
+    VolumeMeta, VolumeUniformOffset, TRACING_SHADER_HANDLE,
 };
 use bevy::{
     core::FloatOrd,
@@ -279,7 +279,6 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     msaa: Res<Msaa>,
     mut view_query: Query<(
-        &Volume,
         &ExtractedView,
         &VisibleEntities,
         &mut RenderPhase<Tracing<Opaque3d>>,
@@ -287,7 +286,12 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
         &mut RenderPhase<Tracing<Transparent3d>>,
         &mut RenderPhase<AmbientOcclusion>,
     )>,
+    config: Res<GiConfig>,
 ) {
+    if !config.enabled {
+        return;
+    }
+
     let draw_opaque = opaque_draw_functions
         .read()
         .get_id::<DrawTracingMesh<M>>()
@@ -306,7 +310,6 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
         .unwrap();
 
     for (
-        volume,
         view,
         visible_entities,
         mut opaque_phase,
@@ -315,10 +318,6 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
         mut ambient_occlusion_phase,
     ) in view_query.iter_mut()
     {
-        if !volume.enabled {
-            continue;
-        }
-
         let inverse_view_matrix = view.transform.compute_matrix().inverse();
         let inverse_view_row_2 = inverse_view_matrix.row(2);
 
