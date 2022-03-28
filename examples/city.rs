@@ -4,7 +4,7 @@ use bevy::{
     scene::InstanceId,
 };
 use bevy_full_throttle::FullThrottlePlugin;
-use bevy_hikari::{NotGiReceiver, Volume, VoxelConeTracingPlugin};
+use bevy_hikari::{GiConfig, NotGiReceiver, Volume, VoxelConeTracingPlugin};
 use smooth_bevy_cameras::{
     controllers::orbit::{
         ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
@@ -246,10 +246,8 @@ pub fn camera_input_map(
     events.send(ControlEvent::Zoom(scalar));
 }
 
-pub fn toggle_enable_volume(keyboard_input: Res<Input<KeyCode>>, mut volumes: Query<&mut Volume>) {
+pub fn toggle_enable_volume(keyboard_input: Res<Input<KeyCode>>, mut config: ResMut<GiConfig>) {
     if keyboard_input.just_pressed(KeyCode::X) {
-        for mut volume in volumes.iter_mut() {
-            volume.enabled = !volume.enabled;
-        }
+        config.enabled = !config.enabled;
     }
 }
