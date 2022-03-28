@@ -24,7 +24,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(true))
-        .add_plugin(VoxelConeTracingPlugin)
+        .add_plugin(VoxelConeTracingPlugin::default())
         .add_plugin(FullThrottlePlugin)
         .add_startup_system(setup)
         .add_system(scene_update)
