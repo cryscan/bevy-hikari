@@ -206,8 +206,10 @@ impl Plugin for VoxelConeTracingPlugin {
     }
 }
 
+/// The resource configures global GI options.
 #[derive(Clone)]
 pub struct GiConfig {
+    /// Is the GI effect enabled globally
     pub enabled: bool,
 }
 
