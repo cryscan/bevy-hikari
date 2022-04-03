@@ -27,13 +27,13 @@ jobs:
         include:
           - build: linux
             os: ubuntu-latest
-            rust: 1.58.0
+            rust: stable
           - build: macos
             os: macos-latest
-            rust: 1.58.0
+            rust: stable
           - build: windows
             os: windows-latest
-            rust: 1.58.0
+            rust: stable
 
     steps:
       - uses: actions/checkout@v2
