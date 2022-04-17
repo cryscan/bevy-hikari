@@ -17,11 +17,12 @@ use bevy::{
     prelude::*,
     render::{
         camera::CameraProjection,
+        mesh::MeshVertexBufferLayout,
         primitives::{Aabb, Frustum},
         render_asset::RenderAssets,
         render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
+            AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
             EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase,
             SetItemPipeline, TrackedRenderPass,
         },
@@ -43,7 +44,7 @@ impl Plugin for VoxelPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<VoxelPipeline>()
-                .init_resource::<SpecializedPipelines<VoxelPipeline>>()
+                .init_resource::<SpecializedMeshPipelines<VoxelPipeline>>()
                 .init_resource::<DrawFunctions<Voxel>>()
                 .add_system_to_stage(RenderStage::Extract, extract_views)
                 .add_system_to_stage(RenderStage::Queue, queue_volume_view_bind_groups)
@@ -182,7 +183,7 @@ impl FromWorld for VoxelPipeline {
             )),
         });
         let mipmap_base_pipeline =
-            render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+            render_device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("mipmap_base_pipeline"),
                 layout: Some(&mipmap_base_pipeline_layout),
                 module: &shader,
@@ -243,7 +244,7 @@ impl FromWorld for VoxelPipeline {
 
         let mipmap_pipelines = (0..6)
             .map(|direction| {
-                render_device.create_compute_pipeline(&ComputePipelineDescriptor {
+                render_device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some(&format!("mipmap_pipeline_{direction}")),
                     layout: Some(&mipmap_pipeline_layout),
                     module: &shader,
@@ -252,19 +253,21 @@ impl FromWorld for VoxelPipeline {
             })
             .collect();
 
-        let clear_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("clear_pipeline"),
-            layout: Some(&mipmap_pipeline_layout),
-            module: &shader,
-            entry_point: "clear",
-        });
+        let clear_pipeline =
+            render_device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("clear_pipeline"),
+                layout: Some(&mipmap_pipeline_layout),
+                module: &shader,
+                entry_point: "clear",
+            });
 
-        let fill_pipeline = render_device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("fill_pipeline"),
-            layout: Some(&mipmap_pipeline_layout),
-            module: &shader,
-            entry_point: "fill",
-        });
+        let fill_pipeline =
+            render_device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("fill_pipeline"),
+                layout: Some(&mipmap_pipeline_layout),
+                module: &shader,
+                entry_point: "fill",
+            });
 
         Self {
             material_layout,
@@ -280,13 +283,17 @@ impl FromWorld for VoxelPipeline {
     }
 }
 
-impl SpecializedPipeline for VoxelPipeline {
+impl SpecializedMeshPipeline for VoxelPipeline {
     type Key = MeshPipelineKey;
 
-    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+    fn specialize(
+        &self,
+        key: Self::Key,
+        layout: &MeshVertexBufferLayout,
+    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let shader = VOXEL_SHADER_HANDLE.typed::<Shader>();
 
-        let mut descriptor = self.mesh_pipeline.specialize(key);
+        let mut descriptor = self.mesh_pipeline.specialize(key, layout)?;
         descriptor.fragment.as_mut().unwrap().shader = shader;
         descriptor.layout = Some(vec![
             self.mesh_pipeline.view_layout.clone(),
@@ -301,7 +308,7 @@ impl SpecializedPipeline for VoxelPipeline {
             ..Default::default()
         };
 
-        descriptor
+        Ok(descriptor)
     }
 }
 
@@ -352,9 +359,9 @@ fn check_visibility(
         (&mut VisibleEntities, &Frustum, Option<&RenderLayers>),
         With<VolumeView>,
     >,
-    mut visible_entity_query: QuerySet<(
-        QueryState<&mut ComputedVisibility>,
-        QueryState<
+    mut visible_entity_query: ParamSet<(
+        Query<&mut ComputedVisibility>,
+        Query<
             (
                 Entity,
                 &Visibility,
@@ -368,7 +375,7 @@ fn check_visibility(
     )>,
 ) {
     // Reset the computed visibility to false
-    for mut computed_visibility in visible_entity_query.q0().iter_mut() {
+    for mut computed_visibility in visible_entity_query.p0().iter_mut() {
         computed_visibility.is_visible = false;
     }
 
@@ -383,7 +390,7 @@ fn check_visibility(
             maybe_entity_mask,
             maybe_aabb,
             maybe_transform,
-        ) in visible_entity_query.q1().iter_mut()
+        ) in visible_entity_query.p1().iter_mut()
         {
             if !visibility.is_visible {
                 continue;
@@ -396,7 +403,7 @@ fn check_visibility(
 
             // If we have an aabb and transform, do frustum culling
             if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
-                if !frustum.intersects_obb(aabb, &transform.compute_matrix()) {
+                if !frustum.intersects_obb(aabb, &transform.compute_matrix(), true) {
                     continue;
                 }
             }
@@ -500,17 +507,11 @@ fn queue_volume_view_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 7,
-                        resource: view_cluster_bindings
-                            .cluster_light_index_lists
-                            .binding()
-                            .unwrap(),
+                        resource: view_cluster_bindings.light_index_lists_binding().unwrap(),
                     },
                     BindGroupEntry {
                         binding: 8,
-                        resource: view_cluster_bindings
-                            .cluster_offsets_and_counts
-                            .binding()
-                            .unwrap(),
+                        resource: view_cluster_bindings.offsets_and_counts_binding().unwrap(),
                     },
                 ],
                 label: Some("mesh_view_bind_group"),
@@ -579,8 +580,8 @@ pub fn queue_voxel_meshes<M: SpecializedMaterial>(
     material_meshes: Query<(&Handle<M>, &Handle<Mesh>)>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<M>>,
-    mut pipelines: ResMut<SpecializedPipelines<VoxelPipeline>>,
-    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<VoxelPipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
     volumes: Query<&Volume, Without<VolumeView>>,
     config: Res<GiConfig>,
     mut view_query: Query<(&VisibleEntities, &mut RenderPhase<Voxel>), With<VolumeView>>,
@@ -603,23 +604,20 @@ pub fn queue_voxel_meshes<M: SpecializedMaterial>(
                         continue;
                     }
 
-                    let mut key = MeshPipelineKey::empty();
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
-                        if mesh.has_tangents {
-                            key |= MeshPipelineKey::VERTEX_TANGENTS;
-                        }
-                        key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
-                        key |= MeshPipelineKey::from_msaa_samples(1);
-                    }
+                        let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology)
+                            | MeshPipelineKey::from_msaa_samples(1);
 
-                    let pipeline_id =
-                        pipelines.specialize(&mut pipeline_cache, &voxel_pipeline, key);
-                    phase.add(Voxel {
-                        draw_function: draw_mesh,
-                        pipeline: pipeline_id,
-                        entity,
-                        distance: 0.0,
-                    });
+                        let pipeline_id = pipelines
+                            .specialize(&mut pipeline_cache, &voxel_pipeline, key, &mesh.layout)
+                            .unwrap();
+                        phase.add(Voxel {
+                            draw_function: draw_mesh,
+                            pipeline: pipeline_id,
+                            entity,
+                            distance: 0.0,
+                        });
+                    }
                 }
             }
         }
@@ -745,7 +743,7 @@ pub fn queue_mipmap_bind_groups(
 pub struct Voxel {
     distance: f32,
     entity: Entity,
-    pipeline: CachedPipelineId,
+    pipeline: CachedRenderPipelineId,
     draw_function: DrawFunctionId,
 }
 
@@ -767,8 +765,8 @@ impl EntityPhaseItem for Voxel {
     }
 }
 
-impl CachedPipelinePhaseItem for Voxel {
-    fn cached_pipeline(&self) -> CachedPipelineId {
+impl CachedRenderPipelinePhaseItem for Voxel {
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
     }
 }
@@ -792,7 +790,7 @@ impl<const I: usize> EntityRenderCommand for SetVoxelBindGroup<I> {
         query: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (volume_uniform_offset, bind_group) = query.get(view).unwrap();
+        let (volume_uniform_offset, bind_group) = query.get_inner(view).unwrap();
         pass.set_bind_group(I, &bind_group.value, &[volume_uniform_offset.offset]);
         RenderCommandResult::Success
     }
