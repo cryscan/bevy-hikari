@@ -8,10 +8,11 @@ use bevy::{
     prelude::FromWorld,
     prelude::*,
     render::{
+        mesh::MeshVertexBufferLayout,
         render_asset::RenderAssets,
         render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
+            sort_phase_system, AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId,
             DrawFunctions, EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline,
             TrackedRenderPass,
         },
@@ -29,7 +30,7 @@ impl Plugin for DeferredPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<DeferredPipeline>()
-                .init_resource::<SpecializedPipelines<DeferredPipeline>>()
+                .init_resource::<SpecializedMeshPipelines<DeferredPipeline>>()
                 .init_resource::<DrawFunctions<Deferred<Opaque3d>>>()
                 .init_resource::<DrawFunctions<Deferred<AlphaMask3d>>>()
                 .init_resource::<DrawFunctions<Deferred<Transparent3d>>>()
@@ -82,13 +83,17 @@ impl FromWorld for DeferredPipeline {
     }
 }
 
-impl SpecializedPipeline for DeferredPipeline {
+impl SpecializedMeshPipeline for DeferredPipeline {
     type Key = MeshPipelineKey;
 
-    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+    fn specialize(
+        &self,
+        key: Self::Key,
+        layout: &MeshVertexBufferLayout,
+    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let shader = ALBEDO_SHADER_HANDLE.typed::<Shader>();
 
-        let mut descriptor = self.mesh_pipeline.specialize(key);
+        let mut descriptor = self.mesh_pipeline.specialize(key, layout)?;
         descriptor.fragment.as_mut().unwrap().shader = shader;
         descriptor.layout = Some(vec![
             self.mesh_pipeline.view_layout.clone(),
@@ -96,7 +101,7 @@ impl SpecializedPipeline for DeferredPipeline {
             self.mesh_pipeline.mesh_layout.clone(),
         ]);
 
-        descriptor
+        Ok(descriptor)
     }
 }
 
@@ -108,11 +113,11 @@ pub type DrawDeferredMesh<M> = (
     DrawMesh,
 );
 
-pub struct Deferred<T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem>(T);
+pub struct Deferred<T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem>(T);
 
 impl<T> PhaseItem for Deferred<T>
 where
-    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+    T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem,
 {
     type SortKey = T::SortKey;
 
@@ -127,18 +132,18 @@ where
 
 impl<T> EntityPhaseItem for Deferred<T>
 where
-    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+    T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem,
 {
     fn entity(&self) -> Entity {
         self.0.entity()
     }
 }
 
-impl<T> CachedPipelinePhaseItem for Deferred<T>
+impl<T> CachedRenderPipelinePhaseItem for Deferred<T>
 where
-    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+    T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem,
 {
-    fn cached_pipeline(&self) -> CachedPipelineId {
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.0.cached_pipeline()
     }
 }
@@ -153,8 +158,8 @@ fn queue_deferred_meshes<M: SpecializedMaterial>(
     material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform)>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<M>>,
-    mut pipelines: ResMut<SpecializedPipelines<DeferredPipeline>>,
-    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<DeferredPipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
     msaa: Res<Msaa>,
     mut view_query: Query<(
         &ExtractedView,
@@ -195,9 +200,6 @@ fn queue_deferred_meshes<M: SpecializedMaterial>(
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
                         let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
 
-                        if mesh.has_tangents {
-                            mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
-                        }
                         mesh_key |=
                             MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
 
@@ -206,8 +208,14 @@ fn queue_deferred_meshes<M: SpecializedMaterial>(
                             mesh_key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
                         }
 
-                        let pipeline_id =
-                            pipelines.specialize(&mut pipeline_cache, &deferred_pipeline, mesh_key);
+                        let pipeline_id = pipelines
+                            .specialize(
+                                &mut pipeline_cache,
+                                &deferred_pipeline,
+                                mesh_key,
+                                &mesh.layout,
+                            )
+                            .unwrap();
 
                         match alpha_mode {
                             AlphaMode::Opaque => opaque_phase.add(Deferred(Opaque3d {

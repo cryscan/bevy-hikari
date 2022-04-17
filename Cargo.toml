@@ -12,7 +12,7 @@ categories = ["game-engines", "rendering"]
 exclude = ["assets"]
 
 [dependencies]
-bevy = { version = "0.6", default-features = false, features = [
+bevy = { version = "0.7", default-features = false, features = [
     "bevy_core_pipeline",
     "bevy_render",
     "bevy_pbr"
@@ -21,12 +21,12 @@ wgpu = { version = "0.12.0", features = ["spirv"] }
 itertools = "0.10"
 
 [dev-dependencies]
-bevy = { version = "0.6", default-features = false, features = [
+bevy = { version = "0.7", default-features = false, features = [
     "bevy_gltf",
     "jpeg",
     "png",
     "x11"
 ] }
 bevy_full_throttle = { git = "https://github.com/lightsoutgames/bevy_full_throttle" }
-bevy_flycam = "0.6.0"
-smooth-bevy-cameras = "0.2.0"
+bevy_flycam = "0.7"
+smooth-bevy-cameras = "0.3"

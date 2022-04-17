@@ -12,10 +12,11 @@ use bevy::{
     },
     prelude::*,
     render::{
+        mesh::MeshVertexBufferLayout,
         render_asset::RenderAssets,
         render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            sort_phase_system, AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId,
+            sort_phase_system, AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId,
             DrawFunctions, EntityPhaseItem, EntityRenderCommand, PhaseItem, RenderCommandResult,
             RenderPhase, SetItemPipeline, TrackedRenderPass,
         },
@@ -37,7 +38,7 @@ impl Plugin for TracingPlugin {
             render_app
                 .init_resource::<DirectionsUniform>()
                 .init_resource::<TracingPipeline>()
-                .init_resource::<SpecializedPipelines<TracingPipeline>>()
+                .init_resource::<SpecializedMeshPipelines<TracingPipeline>>()
                 .init_resource::<DrawFunctions<Tracing<Opaque3d>>>()
                 .init_resource::<DrawFunctions<Tracing<AlphaMask3d>>>()
                 .init_resource::<DrawFunctions<Tracing<Transparent3d>>>()
@@ -164,13 +165,17 @@ pub struct TracingPipelineKey {
     pub ambient_occlusion: bool,
 }
 
-impl SpecializedPipeline for TracingPipeline {
+impl SpecializedMeshPipeline for TracingPipeline {
     type Key = (MeshPipelineKey, TracingPipelineKey);
 
-    fn specialize(&self, (mesh_key, tracing_key): Self::Key) -> RenderPipelineDescriptor {
+    fn specialize(
+        &self,
+        (mesh_key, tracing_key): Self::Key,
+        layout: &MeshVertexBufferLayout,
+    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let shader = TRACING_SHADER_HANDLE.typed::<Shader>();
 
-        let mut descriptor = self.mesh_pipeline.specialize(mesh_key);
+        let mut descriptor = self.mesh_pipeline.specialize(mesh_key, layout)?;
         let mut fragment = descriptor.fragment.as_mut().unwrap();
         fragment.shader = shader;
         if tracing_key.not_receiver {
@@ -199,7 +204,7 @@ impl SpecializedPipeline for TracingPipeline {
             self.tracing_layout.clone(),
         ]);
 
-        descriptor
+        Ok(descriptor)
     }
 }
 
@@ -275,8 +280,8 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
     )>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<M>>,
-    mut pipelines: ResMut<SpecializedPipelines<TracingPipeline>>,
-    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<TracingPipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
     msaa: Res<Msaa>,
     mut view_query: Query<(
         &ExtractedView,
@@ -331,9 +336,6 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
                         let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
                         let not_receiver = not_receiver.is_some();
 
-                        if mesh.has_tangents {
-                            mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
-                        }
                         mesh_key |=
                             MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
 
@@ -341,11 +343,14 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
                             not_receiver,
                             ambient_occlusion: true,
                         };
-                        let pipeline_id = pipelines.specialize(
-                            &mut pipeline_cache,
-                            &tracing_pipeline,
-                            (mesh_key, tracing_key),
-                        );
+                        let pipeline_id = pipelines
+                            .specialize(
+                                &mut pipeline_cache,
+                                &tracing_pipeline,
+                                (mesh_key, tracing_key),
+                                &mesh.layout,
+                            )
+                            .unwrap();
 
                         ambient_occlusion_phase.add(AmbientOcclusion {
                             distance: -mesh_z,
@@ -363,11 +368,14 @@ fn queue_tracing_meshes<M: SpecializedMaterial>(
                             not_receiver,
                             ambient_occlusion: false,
                         };
-                        let pipeline_id = pipelines.specialize(
-                            &mut pipeline_cache,
-                            &tracing_pipeline,
-                            (mesh_key, tracing_key),
-                        );
+                        let pipeline_id = pipelines
+                            .specialize(
+                                &mut pipeline_cache,
+                                &tracing_pipeline,
+                                (mesh_key, tracing_key),
+                                &mesh.layout,
+                            )
+                            .unwrap();
 
                         match alpha_mode {
                             AlphaMode::Opaque => opaque_phase.add(Tracing(Opaque3d {
@@ -451,11 +459,11 @@ pub fn queue_tracing_bind_groups(
     }
 }
 
-pub struct Tracing<T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem>(T);
+pub struct Tracing<T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem>(T);
 
 impl<T> PhaseItem for Tracing<T>
 where
-    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+    T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem,
 {
     type SortKey = T::SortKey;
 
@@ -470,18 +478,18 @@ where
 
 impl<T> EntityPhaseItem for Tracing<T>
 where
-    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+    T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem,
 {
     fn entity(&self) -> Entity {
         self.0.entity()
     }
 }
 
-impl<T> CachedPipelinePhaseItem for Tracing<T>
+impl<T> CachedRenderPipelinePhaseItem for Tracing<T>
 where
-    T: PhaseItem + EntityPhaseItem + CachedPipelinePhaseItem,
+    T: PhaseItem + EntityPhaseItem + CachedRenderPipelinePhaseItem,
 {
-    fn cached_pipeline(&self) -> CachedPipelineId {
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.0.cached_pipeline()
     }
 }
@@ -489,7 +497,7 @@ where
 pub struct AmbientOcclusion {
     distance: f32,
     entity: Entity,
-    pipeline: CachedPipelineId,
+    pipeline: CachedRenderPipelineId,
     draw_function: DrawFunctionId,
 }
 
@@ -511,8 +519,8 @@ impl EntityPhaseItem for AmbientOcclusion {
     }
 }
 
-impl CachedPipelinePhaseItem for AmbientOcclusion {
-    fn cached_pipeline(&self) -> CachedPipelineId {
+impl CachedRenderPipelinePhaseItem for AmbientOcclusion {
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
     }
 }
@@ -536,7 +544,7 @@ impl<const I: usize> EntityRenderCommand for SetTracingBindGroup<I> {
         query: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> bevy::render::render_phase::RenderCommandResult {
-        let (volume_uniform_offset, bind_group) = query.get(view).unwrap();
+        let (volume_uniform_offset, bind_group) = query.get_inner(view).unwrap();
         pass.set_bind_group(I, &bind_group.value, &[volume_uniform_offset.offset]);
         RenderCommandResult::Success
     }

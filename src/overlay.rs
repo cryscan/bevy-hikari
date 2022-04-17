@@ -3,17 +3,18 @@ use bevy::{
     core::FloatOrd,
     ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::{
-        DrawMesh, MaterialPipeline, MeshPipelineKey, SetMaterialBindGroup, SetMeshBindGroup,
-        SetMeshViewBindGroup, SpecializedMaterial,
+        DrawMesh, MaterialPipeline, MaterialPipelineKey, MeshPipelineKey, SetMaterialBindGroup,
+        SetMeshBindGroup, SetMeshViewBindGroup, SpecializedMaterial,
     },
     prelude::*,
     reflect::TypeUuid,
     render::{
+        mesh::MeshVertexBufferLayout,
         render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
         render_component::ExtractComponentPlugin,
         render_graph::{self, SlotInfo, SlotType},
         render_phase::{
-            AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
+            AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
             EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline, TrackedRenderPass,
         },
         render_resource::*,
@@ -39,7 +40,7 @@ impl Plugin for OverlayPlugin {
             render_app
                 .init_resource::<DrawFunctions<Overlay>>()
                 .init_resource::<MaterialPipeline<OverlayMaterial>>()
-                .init_resource::<SpecializedPipelines<MaterialPipeline<OverlayMaterial>>>()
+                .init_resource::<SpecializedMeshPipelines<MaterialPipeline<OverlayMaterial>>>()
                 .add_render_command::<Overlay, DrawMaterial<OverlayMaterial>>()
                 .add_system_to_stage(RenderStage::Extract, extract_screen_overlay)
                 .add_system_to_stage(RenderStage::Prepare, prepare_screen_overlay)
@@ -307,7 +308,12 @@ impl SpecializedMaterial for OverlayMaterial {
         })
     }
 
-    fn specialize(_key: Self::Key, descriptor: &mut RenderPipelineDescriptor) {
+    fn specialize(
+        _pipeline: &MaterialPipeline<Self>,
+        descriptor: &mut RenderPipelineDescriptor,
+        key: Self::Key,
+        _layout: &MeshVertexBufferLayout,
+    ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.fragment.as_mut().unwrap().targets[0].blend = Some(BlendState {
             color: BlendComponent {
                 src_factor: BlendFactor::One,
@@ -319,7 +325,8 @@ impl SpecializedMaterial for OverlayMaterial {
                 dst_factor: BlendFactor::One,
                 operation: BlendOperation::Add,
             },
-        })
+        });
+        Ok(())
     }
 
     fn alpha_mode(_material: &<Self as RenderAsset>::PreparedAsset) -> AlphaMode {
@@ -447,8 +454,8 @@ fn prepare_overlay_phase(
 fn queue_material_meshes(
     draw_functions: Res<DrawFunctions<Overlay>>,
     material_pipeline: Res<MaterialPipeline<OverlayMaterial>>,
-    mut pipelines: ResMut<SpecializedPipelines<MaterialPipeline<OverlayMaterial>>>,
-    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<MaterialPipeline<OverlayMaterial>>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
     msaa: Res<Msaa>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<OverlayMaterial>>,
@@ -467,27 +474,29 @@ fn queue_material_meshes(
             if let Some(material) = render_materials.get(material) {
                 let mut mesh_key = mesh_key;
                 if let Some(mesh) = render_meshes.get(mesh) {
-                    if mesh.has_tangents {
-                        mesh_key |= MeshPipelineKey::VERTEX_TANGENTS;
-                    }
-                    mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                    mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology)
+                        | MeshPipelineKey::TRANSPARENT_MAIN_PASS;
+
+                    let material_key = OverlayMaterial::key(material);
+                    let pipeline_id = pipelines
+                        .specialize(
+                            &mut pipeline_cache,
+                            &material_pipeline,
+                            MaterialPipelineKey {
+                                mesh_key,
+                                material_key,
+                            },
+                            &mesh.layout,
+                        )
+                        .unwrap();
+
+                    phase.add(Overlay {
+                        distance: 0.0,
+                        entity,
+                        pipeline: pipeline_id,
+                        draw_function,
+                    });
                 }
-
-                mesh_key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
-
-                let specialized_key = OverlayMaterial::key(material);
-                let pipeline_id = pipelines.specialize(
-                    &mut pipeline_cache,
-                    &material_pipeline,
-                    (mesh_key, specialized_key),
-                );
-
-                phase.add(Overlay {
-                    distance: 0.0,
-                    entity,
-                    pipeline: pipeline_id,
-                    draw_function,
-                });
             }
         }
     }
@@ -496,7 +505,7 @@ fn queue_material_meshes(
 pub struct Overlay {
     distance: f32,
     entity: Entity,
-    pipeline: CachedPipelineId,
+    pipeline: CachedRenderPipelineId,
     draw_function: DrawFunctionId,
 }
 
@@ -518,8 +527,8 @@ impl EntityPhaseItem for Overlay {
     }
 }
 
-impl CachedPipelinePhaseItem for Overlay {
-    fn cached_pipeline(&self) -> CachedPipelineId {
+impl CachedRenderPipelinePhaseItem for Overlay {
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
     }
 }
