@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_hikari::{Volume, VoxelConeTracingPlugin};
+use bevy_hikari::GiPlugin;
 use std::f32::consts::PI;
 
 fn main() {
@@ -8,7 +8,7 @@ fn main() {
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         // Add the voxel cone tracing plugin
-        .add_plugin(VoxelConeTracingPlugin::default())
+        .add_plugin(GiPlugin)
         .add_startup_system(setup)
         .run();
 }
@@ -58,15 +58,8 @@ fn setup(
     });
 
     // Camera
-    commands
-        .spawn_bundle(PerspectiveCameraBundle {
-            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..Default::default()
-        })
-        // Insert the voxel volume as a component to the main 3D camera
-        // The volume would better be a cube encapsules the whole scene
-        .insert(Volume::new(
-            Vec3::new(-2.5, -2.5, -2.5),
-            Vec3::new(2.5, 2.5, 2.5),
-        ));
+    commands.spawn_bundle(PerspectiveCameraBundle {
+        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..Default::default()
+    });
 }
