@@ -1,14 +1,24 @@
-use crate::{VOXEL_COUNT, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SIZE};
+use crate::{SimplePassDriver, VOXEL_COUNT, VOXEL_LAYER, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SIZE};
 use bevy::{
-    core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d},
+    core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
+    ecs::system::{lifetimeless::SRes, SystemParamItem, SystemState},
+    pbr::{MaterialPipeline, StandardMaterialFlags, StandardMaterialUniformData},
     prelude::*,
+    reflect::TypeUuid,
     render::{
         camera::{ActiveCamera, CameraProjection, CameraTypePlugin, RenderTarget},
         primitives::Frustum,
+        render_asset::{PrepareAssetError, RenderAsset, RenderAssets},
+        render_graph::RenderGraph,
         render_phase::RenderPhase,
-        render_resource::{std140::AsStd140, std430::AsStd430, *},
+        render_resource::{
+            std140::{AsStd140, Std140},
+            std430::AsStd430,
+            *,
+        },
         renderer::{RenderDevice, RenderQueue},
         texture::{BevyDefault, CachedTexture, TextureCache},
+        view::RenderLayers,
         RenderApp, RenderStage,
     },
 };
@@ -21,6 +31,7 @@ impl Plugin for VolumePlugin {
             .add_plugin(CameraTypePlugin::<VolumeCamera<0>>::default())
             .add_plugin(CameraTypePlugin::<VolumeCamera<1>>::default())
             .add_plugin(CameraTypePlugin::<VolumeCamera<2>>::default())
+            .add_plugin(MaterialPlugin::<VoxelMaterial>::default())
             .add_startup_system(setup_volume);
 
         let render_app = app.sub_app_mut(RenderApp);
@@ -31,6 +42,31 @@ impl Plugin for VolumePlugin {
             .add_system_to_stage(RenderStage::Extract, extract_volume_camera_phase::<2>)
             .add_system_to_stage(RenderStage::Extract, extract_volume)
             .add_system_to_stage(RenderStage::Prepare, prepare_volume);
+
+        render_app
+            .world
+            .resource_scope(|world, mut graph: Mut<RenderGraph>| {
+                let driver = SimplePassDriver::<VolumeCamera<0>>::new(world);
+                graph.add_node(crate::node::VOXEL_PASS_DRIVER[0], driver);
+
+                let driver = SimplePassDriver::<VolumeCamera<1>>::new(world);
+                graph.add_node(crate::node::VOXEL_PASS_DRIVER[1], driver);
+
+                let driver = SimplePassDriver::<VolumeCamera<2>>::new(world);
+                graph.add_node(crate::node::VOXEL_PASS_DRIVER[2], driver);
+
+                for driver in crate::node::VOXEL_PASS_DRIVER {
+                    graph
+                        .add_node_edge(node::MAIN_PASS_DEPENDENCIES, *driver)
+                        .unwrap();
+                    graph
+                        .add_node_edge(node::CLEAR_PASS_DRIVER, *driver)
+                        .unwrap();
+                    graph
+                        .add_node_edge(node::MAIN_PASS_DRIVER, *driver)
+                        .unwrap();
+                }
+            });
     }
 }
 
@@ -63,8 +99,8 @@ pub struct VolumeMeta {
 
 impl FromWorld for VolumeMeta {
     fn from_world(world: &mut World) -> Self {
-        let render_device = world.remove_resource::<RenderDevice>().unwrap();
-        let mut texture_cache = world.resource_mut::<TextureCache>();
+        let (render_device, mut texture_cache) =
+            SystemState::<(Res<RenderDevice>, ResMut<TextureCache>)>::new(world).get_mut(world);
 
         let voxel_buffer = render_device.create_buffer(&BufferDescriptor {
             label: None,
@@ -121,8 +157,6 @@ impl FromWorld for VolumeMeta {
             ..Default::default()
         });
 
-        world.insert_resource(render_device);
-
         Self {
             volume_uniform: Default::default(),
             voxel_buffer,
@@ -146,6 +180,299 @@ pub struct GpuVoxelBuffer {
 
 #[derive(Component, Default)]
 pub struct VolumeCamera<const I: usize>;
+
+#[derive(Default, Clone, TypeUuid)]
+#[uuid = "e0c8e218-4a3e-4113-a231-fe39e993f6f5"]
+pub struct VoxelMaterial {
+    pub base_color: Color,
+    pub base_color_texture: Option<Handle<Image>>,
+    pub emissive: Color,
+    pub emissive_texture: Option<Handle<Image>>,
+    pub perceptual_roughness: f32,
+    pub metallic: f32,
+    pub metallic_roughness_texture: Option<Handle<Image>>,
+    pub reflectance: f32,
+    pub unlit: bool,
+    pub alpha_mode: AlphaMode,
+}
+
+impl From<StandardMaterial> for VoxelMaterial {
+    fn from(material: StandardMaterial) -> Self {
+        let StandardMaterial {
+            base_color,
+            base_color_texture,
+            emissive,
+            emissive_texture,
+            perceptual_roughness,
+            metallic,
+            metallic_roughness_texture,
+            reflectance,
+            normal_map_texture: _,
+            flip_normal_map_y: _,
+            occlusion_texture: _,
+            double_sided: _,
+            cull_mode: _,
+            unlit,
+            alpha_mode,
+        } = material;
+
+        Self {
+            base_color,
+            base_color_texture,
+            emissive,
+            emissive_texture,
+            perceptual_roughness,
+            metallic,
+            metallic_roughness_texture,
+            reflectance,
+            unlit,
+            alpha_mode,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GpuVoxelMaterial {
+    pub buffer: Buffer,
+    pub bind_group: BindGroup,
+}
+
+impl RenderAsset for VoxelMaterial {
+    type ExtractedAsset = VoxelMaterial;
+    type PreparedAsset = GpuVoxelMaterial;
+    type Param = (
+        SRes<RenderDevice>,
+        SRes<MaterialPipeline<VoxelMaterial>>,
+        SRes<RenderAssets<Image>>,
+        SRes<VolumeMeta>,
+    );
+
+    fn extract_asset(&self) -> Self::ExtractedAsset {
+        self.clone()
+    }
+
+    fn prepare_asset(
+        material: Self::ExtractedAsset,
+        (render_device, pipeline, images, volume_meta): &mut SystemParamItem<Self::Param>,
+    ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
+        let (base_color_texture_view, base_color_sampler) = match pipeline
+            .mesh_pipeline
+            .get_image_texture(images, &material.base_color_texture)
+        {
+            Some(result) => result,
+            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
+        };
+
+        let (emissive_texture_view, emissive_sampler) = match pipeline
+            .mesh_pipeline
+            .get_image_texture(images, &material.emissive_texture)
+        {
+            Some(result) => result,
+            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
+        };
+
+        let (metallic_roughness_texture_view, metallic_roughness_sampler) = match pipeline
+            .mesh_pipeline
+            .get_image_texture(images, &material.metallic_roughness_texture)
+        {
+            Some(result) => result,
+            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
+        };
+
+        let mut flags = StandardMaterialFlags::NONE;
+        if material.base_color_texture.is_some() {
+            flags |= StandardMaterialFlags::BASE_COLOR_TEXTURE;
+        }
+        if material.emissive_texture.is_some() {
+            flags |= StandardMaterialFlags::EMISSIVE_TEXTURE;
+        }
+        if material.metallic_roughness_texture.is_some() {
+            flags |= StandardMaterialFlags::METALLIC_ROUGHNESS_TEXTURE;
+        }
+        if material.unlit {
+            flags |= StandardMaterialFlags::UNLIT;
+        }
+
+        let mut alpha_cutoff = 0.5;
+        match material.alpha_mode {
+            AlphaMode::Opaque => flags |= StandardMaterialFlags::ALPHA_MODE_OPAQUE,
+            AlphaMode::Mask(cutoff) => {
+                alpha_cutoff = cutoff;
+                flags |= StandardMaterialFlags::ALPHA_MODE_MASK;
+            }
+            AlphaMode::Blend => flags |= StandardMaterialFlags::ALPHA_MODE_BLEND,
+        };
+
+        let volume_binding = match volume_meta.volume_uniform.binding() {
+            Some(result) => result,
+            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
+        };
+
+        let value = StandardMaterialUniformData {
+            base_color: material.base_color.as_linear_rgba_f32().into(),
+            emissive: material.emissive.into(),
+            roughness: material.perceptual_roughness,
+            metallic: material.metallic,
+            reflectance: material.reflectance,
+            flags: flags.bits(),
+            alpha_cutoff,
+        };
+
+        let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: None,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            contents: value.as_std140().as_bytes(),
+        });
+        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.material_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(base_color_texture_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::Sampler(base_color_sampler),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(emissive_texture_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::Sampler(emissive_sampler),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::TextureView(metallic_roughness_texture_view),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::Sampler(metallic_roughness_sampler),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: volume_binding,
+                },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: volume_meta.voxel_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        Ok(GpuVoxelMaterial { buffer, bind_group })
+    }
+}
+
+impl Material for VoxelMaterial {
+    fn bind_group(material: &<Self as RenderAsset>::PreparedAsset) -> &BindGroup {
+        &material.bind_group
+    }
+
+    fn bind_group_layout(render_device: &RenderDevice) -> BindGroupLayout {
+        render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(
+                            StandardMaterialUniformData::std140_size_static() as u64,
+                        ),
+                    },
+                    count: None,
+                },
+                // Base Color Texture
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Base Color Texture Sampler
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // Emissive Texture
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Emissive Texture Sampler
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // Metallic Roughness Texture
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Metallic Roughness Texture Sampler
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // Volume Uniform
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
+                    },
+                    count: None,
+                },
+                // Voxel Storage Buffer
+                BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(
+                            GpuVoxelBuffer::std430_size_static() as u64
+                        ),
+                    },
+                    count: None,
+                },
+            ],
+        })
+    }
+}
 
 /// Setup cameras for the volume.
 pub fn setup_volume(
@@ -172,7 +499,6 @@ pub fn setup_volume(
         ..default()
     };
     image.resize(size);
-
     let image_handle = images.add(image);
 
     let center = (volume.max + volume.min) / 2.0;
@@ -215,6 +541,7 @@ pub fn setup_volume(
                 global_transform: default(),
                 marker: VolumeCamera::<0>,
             })
+            .insert(RenderLayers::layer(VOXEL_LAYER))
             .id(),
         commands
             .spawn_bundle(OrthographicCameraBundle {
@@ -230,6 +557,7 @@ pub fn setup_volume(
                 global_transform: default(),
                 marker: VolumeCamera::<1>,
             })
+            .insert(RenderLayers::layer(VOXEL_LAYER))
             .id(),
         commands
             .spawn_bundle(OrthographicCameraBundle {
@@ -245,6 +573,7 @@ pub fn setup_volume(
                 global_transform: default(),
                 marker: VolumeCamera::<2>,
             })
+            .insert(RenderLayers::layer(VOXEL_LAYER))
             .id(),
     ]);
 }

@@ -1,6 +1,6 @@
 [package]
 name = "bevy-hikari"
-version = "0.1.11"
+version = "0.2.0"
 edition = "2021"
 authors = ["Zhenyuan Zhang <cryscan@umich.edu>"]
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ exclude = ["assets"]
 bevy = { version = "0.7", default-features = false, features = [
     "bevy_core_pipeline",
     "bevy_render",
-    "bevy_pbr"
+    "bevy_pbr",
 ] }
 wgpu = { version = "0.12.0", features = ["spirv"] }
 itertools = "0.10"
@@ -25,7 +25,7 @@ bevy = { version = "0.7", default-features = false, features = [
     "bevy_gltf",
     "jpeg",
     "png",
-    "x11"
+    "x11",
 ] }
 bevy_full_throttle = { git = "https://github.com/lightsoutgames/bevy_full_throttle" }
 bevy_flycam = "0.7"

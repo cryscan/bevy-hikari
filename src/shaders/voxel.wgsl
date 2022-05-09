@@ -15,6 +15,18 @@ struct StandardMaterial {
     alpha_cutoff: f32;
 };
 
+let VOXEL_SIZE: u32 = 256u;
+let VOXEL_COUNT: u32 = 16777216u;
+
+struct Volume {
+    min: vec3<f32>;
+    max: vec3<f32>;
+};
+
+struct VoxelBuffer {
+    data: array<atomic<u32>, VOXEL_COUNT>;
+};
+
 let STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT: u32 = 1u;
 let STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT: u32 = 2u;
 let STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT: u32 = 4u;
@@ -40,28 +52,8 @@ var metallic_roughness_texture: texture_2d<f32>;
 [[group(1), binding(6)]]
 var metallic_roughness_sampler: sampler;
 [[group(1), binding(7)]]
-var occlusion_texture: texture_2d<f32>;
-[[group(1), binding(8)]]
-var occlusion_sampler: sampler;
-[[group(1), binding(9)]]
-var normal_map_texture: texture_2d<f32>;
-[[group(1), binding(10)]]
-var normal_map_sampler: sampler;
-
-struct Volume {
-    min: vec3<f32>;
-    max: vec3<f32>;
-};
-
-struct VoxelBuffer {
-    data: array<atomic<u32>, 16777216>;
-};
-
-[[group(3), binding(0)]]
 var<uniform> volume: Volume;
-[[group(3), binding(1)]]
-var voxel_texture: texture_3d<f32>;
-[[group(3), binding(2)]]
+[[group(1), binding(8)]]
 var<storage, read_write> voxel_buffer: VoxelBuffer;
 
 let PI: f32 = 3.141592653589793;
@@ -92,7 +84,7 @@ fn luminance(v: vec3<f32>) -> f32 {
 // }
 
 fn reinhard_luminance(color: vec3<f32>) -> vec4<f32> {
-    let lum= luminance(color);
+    let lum = luminance(color);
     let factor = 1.0 / (1.0 + lum);
     // return change_luminance(color, l_new);
     return vec4<f32>(color * factor, 1.0 / factor);
@@ -143,9 +135,9 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
 }
 
 fn spatial_index(position: vec3<f32>) -> vec3<i32> {
-    let dims = vec3<f32>(textureDimensions(voxel_texture));
+    let dims = vec3<u32>(VOXEL_SIZE - 1u);
     let coords = (position - volume.min) / (volume.max - volume.min);
-    return vec3<i32>(0.5 + (dims - vec3<f32>(1.0)) * coords);
+    return vec3<i32>(0.5 + vec3<f32>(dims) * coords);
 }
 
 fn linear_index(index: vec3<i32>) -> i32 {
@@ -194,11 +186,6 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             perceptual_roughness = perceptual_roughness * metallic_roughness.g;
         }
         let roughness = compute_roughness(perceptual_roughness);
-
-        var occlusion: f32 = 1.0;
-        if ((material.flags & STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT) != 0u) {
-            occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
-        }
 
         if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
             output_color.a = 1.0;
