@@ -4,20 +4,32 @@
 //!
 
 use bevy::{
-    core_pipeline::MainPass3dNode,
+    core_pipeline::{AlphaMask3d, MainPass3dNode, Opaque3d, Transparent3d},
     prelude::*,
+    reflect::TypeUuid,
     render::{
+        camera::ExtractedCamera,
         render_graph::{
             Node, NodeRunError, RenderGraph, RenderGraphContext, SlotInfo, SlotType, SlotValue,
         },
+        render_phase::RenderPhase,
         renderer::RenderContext,
-        view::Layer,
+        view::{ExtractedView, Layer, VisibleEntities},
         RenderApp,
     },
 };
 use volume::VolumePlugin;
 
 mod volume;
+
+pub const VOXEL_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984740);
+pub const TRACING_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984840);
+pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984940);
+pub const ALBEDO_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984640);
 
 pub const VOXEL_SIZE: usize = 256;
 pub const VOXEL_MIPMAP_LEVEL_COUNT: usize = 8;
@@ -28,11 +40,7 @@ pub const IRRADIANCE_LAYER: Layer = 17;
 pub const DEFERRED_LAYER: Layer = 18;
 
 pub mod node {
-    pub const VOXEL_PASS_DRIVER: &[&str] = &[
-        "voxel_0_pass_driver",
-        "voxel_1_pass_driver",
-        "voxel_2_pass_driver",
-    ];
+    pub const VOXEL_PASS_DRIVER: &str = "voxel_pass_driver";
 }
 
 pub mod simple_3d_graph {
@@ -49,6 +57,12 @@ pub struct GiPlugin;
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GiConfig>().add_plugin(VolumePlugin);
+
+        let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
+        shaders.set_untracked(
+            VOXEL_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/voxel.wgsl").replace("\r\n", "\n")),
+        );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
             Ok(render_app) => render_app,
@@ -94,18 +108,18 @@ pub struct NotGiCaster;
 #[derive(Component)]
 pub struct NotGiReceiver;
 
-/// A render node that executes `simple_3d_graph` for given camera of type `T`.
-pub struct SimplePassDriver<T: Component + Default> {
-    query: QueryState<Entity, With<T>>,
+/// A render node that executes simple graph for given camera of type `M`.
+pub struct SimplePassDriver<M: Component + Default> {
+    query: QueryState<Entity, With<M>>,
 }
-impl<T: Component + Default> SimplePassDriver<T> {
+impl<M: Component + Default> SimplePassDriver<M> {
     pub fn new(world: &mut World) -> Self {
         Self {
             query: QueryState::new(world),
         }
     }
 }
-impl<T: Component + Default> Node for SimplePassDriver<T> {
+impl<M: Component + Default> Node for SimplePassDriver<M> {
     fn update(&mut self, world: &mut World) {
         self.query.update_archetypes(world);
     }
@@ -121,5 +135,37 @@ impl<T: Component + Default> Node for SimplePassDriver<T> {
         }
 
         Ok(())
+    }
+}
+
+/// Manually extract all cameras of type `M`, as [`CameraTypePlugin`](bevy::render::camera::CameraTypePlugin) only extracts the active camera.
+pub fn extract_cameras_manual<M: Component + Default>(
+    mut commands: Commands,
+    windows: Res<Windows>,
+    images: Res<Assets<Image>>,
+    cameras: Query<(Entity, &Camera, &GlobalTransform, &VisibleEntities), With<M>>,
+) {
+    for (entity, camera, transform, visible_entities) in cameras.iter() {
+        if let Some(size) = camera.target.get_physical_size(&windows, &images) {
+            commands.get_or_spawn(entity).insert_bundle((
+                ExtractedCamera {
+                    target: camera.target.clone(),
+                    physical_size: camera.target.get_physical_size(&windows, &images),
+                },
+                ExtractedView {
+                    projection: camera.projection_matrix,
+                    transform: *transform,
+                    width: size.x,
+                    height: size.y,
+                    near: camera.near,
+                    far: camera.far,
+                },
+                visible_entities.clone(),
+                M::default(),
+                RenderPhase::<Opaque3d>::default(),
+                RenderPhase::<AlphaMask3d>::default(),
+                RenderPhase::<Transparent3d>::default(),
+            ));
+        }
     }
 }

@@ -166,66 +166,68 @@ struct FragmentInput {
 
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u) {
+        discard;
+    }
+
     var output_color = material.base_color;
     if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
         output_color = output_color * textureSample(base_color_texture, base_color_sampler, in.uv);
     }
 
-    if ((material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
-        var emissive = material.emissive;
-        if ((material.flags & STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT) != 0u) {
-            emissive = emissive * textureSample(emissive_texture, emissive_sampler, in.uv);
-            emissive.a = 1.0;
-        }
-
-        var metallic = material.metallic;
-        var perceptual_roughness = material.perceptual_roughness;
-        if ((material.flags & STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT) != 0u) {
-            let metallic_roughness = textureSample(metallic_roughness_texture, metallic_roughness_sampler, in.uv);
-            metallic = metallic * metallic_roughness.b;
-            perceptual_roughness = perceptual_roughness * metallic_roughness.g;
-        }
-        let roughness = compute_roughness(perceptual_roughness);
-
-        if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
-            output_color.a = 1.0;
-        } else if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK) != 0u) {
-            if (output_color.a >= material.alpha_cutoff) {
-                output_color.a = 1.0;
-            } else {
-                discard;
-            }
-        }
-
-        let N = normalize(in.world_normal);
-
-        let diffuse_color = output_color.rgb * (1.0 - metallic);
-
-        // accumulate color
-        var light_accum: vec3<f32> = vec3<f32>(0.0);
-
-        for (var i: u32 = 0u; i < lights.n_directional_lights; i = i + 1u) {
-            let light = lights.directional_lights[i];
-            var shadow: f32 = 1.0;
-            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-                shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
-            }
-            let light_contrib = directional_light(light, N, diffuse_color);
-            light_accum = light_accum + light_contrib * shadow;
-        }
-
-        output_color = vec4<f32>(
-            (light_accum + emissive.rgb) * output_color.a,
-            output_color.a
-        );
+    var emissive = material.emissive;
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT) != 0u) {
+        emissive = emissive * textureSample(emissive_texture, emissive_sampler, in.uv);
+        emissive.a = 1.0;
     }
+
+    var metallic = material.metallic;
+    var perceptual_roughness = material.perceptual_roughness;
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT) != 0u) {
+        let metallic_roughness = textureSample(metallic_roughness_texture, metallic_roughness_sampler, in.uv);
+        metallic = metallic * metallic_roughness.b;
+        perceptual_roughness = perceptual_roughness * metallic_roughness.g;
+    }
+    let roughness = compute_roughness(perceptual_roughness);
 
     let clip_normal = abs(face_normal(in.clip_position));
     if (clip_normal.z < max(clip_normal.x, clip_normal.y)) {
         discard;
     }
 
-    // tone mapping, but keep HDR info
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
+        output_color.a = 1.0;
+    } else if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK) != 0u) {
+        if (output_color.a >= material.alpha_cutoff) {
+            output_color.a = 1.0;
+        } else {
+            discard;
+        }
+    } else if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND) != 0u) {
+        // Blend mode not supported.
+        discard;
+    }
+
+    let normal = normalize(in.world_normal);
+    let diffuse_color = output_color.rgb * (1.0 - metallic);
+    var light_accum: vec3<f32> = vec3<f32>(0.0);
+
+    for (var i: u32 = 0u; i < lights.n_directional_lights; i = i + 1u) {
+        let light = lights.directional_lights[i];
+        var shadow: f32 = 1.0;
+        if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+            shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
+        }
+        let light_contrib = directional_light(light, normal, diffuse_color);
+        light_accum = light_accum + light_contrib * shadow;
+    }
+
+    output_color = vec4<f32>(
+        (light_accum + emissive.rgb) * output_color.a,
+        output_color.a
+    );
+
+    // Tone mapping, but keep HDR info.
     let color = reinhard_luminance(output_color.rgb);
     var packed = pack4x8unorm(vec4<f32>(color.rgb, color.a / 255.0));
 
