@@ -1,16 +1,21 @@
-use crate::{SimplePassDriver, VOXEL_COUNT, VOXEL_LAYER, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SIZE};
+use crate::{
+    extract_cameras_manual, SimplePassDriver, VOXEL_COUNT, VOXEL_LAYER, VOXEL_MIPMAP_LEVEL_COUNT,
+    VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+};
 use bevy::{
-    core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
+    core_pipeline::node,
     ecs::system::{lifetimeless::SRes, SystemParamItem, SystemState},
-    pbr::{MaterialPipeline, StandardMaterialFlags, StandardMaterialUniformData},
+    pbr::{
+        MaterialPipeline, RenderLightSystems, StandardMaterialFlags, StandardMaterialUniformData,
+        ViewShadowBindings,
+    },
     prelude::*,
     reflect::TypeUuid,
     render::{
-        camera::{ActiveCamera, CameraProjection, CameraTypePlugin, RenderTarget},
-        primitives::Frustum,
+        camera::{ActiveCamera, Camera3d, RenderTarget},
+        mesh::{skinning::SkinnedMesh, MeshVertexBufferLayout},
         render_asset::{PrepareAssetError, RenderAsset, RenderAssets},
         render_graph::RenderGraph,
-        render_phase::RenderPhase,
         render_resource::{
             std140::{AsStd140, Std140},
             std430::AsStd430,
@@ -28,44 +33,41 @@ pub struct VolumePlugin;
 impl Plugin for VolumePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Volume>()
-            .add_plugin(CameraTypePlugin::<VolumeCamera<0>>::default())
-            .add_plugin(CameraTypePlugin::<VolumeCamera<1>>::default())
-            .add_plugin(CameraTypePlugin::<VolumeCamera<2>>::default())
             .add_plugin(MaterialPlugin::<VoxelMaterial>::default())
-            .add_startup_system(setup_volume);
+            .add_startup_system(setup_volume)
+            .add_system(attach_voxel_mesh.exclusive_system().before_commands());
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<VolumeMeta>()
-            .add_system_to_stage(RenderStage::Extract, extract_volume_camera_phase::<0>)
-            .add_system_to_stage(RenderStage::Extract, extract_volume_camera_phase::<1>)
-            .add_system_to_stage(RenderStage::Extract, extract_volume_camera_phase::<2>)
+            .add_system_to_stage(RenderStage::Extract, extract_cameras_manual::<VolumeCamera>)
             .add_system_to_stage(RenderStage::Extract, extract_volume)
-            .add_system_to_stage(RenderStage::Prepare, prepare_volume);
+            .add_system_to_stage(RenderStage::Prepare, prepare_volume)
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                prepare_volume_lights
+                    .exclusive_system()
+                    .after(RenderLightSystems::PrepareLights),
+            );
 
         render_app
             .world
             .resource_scope(|world, mut graph: Mut<RenderGraph>| {
-                let driver = SimplePassDriver::<VolumeCamera<0>>::new(world);
-                graph.add_node(crate::node::VOXEL_PASS_DRIVER[0], driver);
+                use crate::node::VOXEL_PASS_DRIVER;
+                use node::{CLEAR_PASS_DRIVER, MAIN_PASS_DEPENDENCIES, MAIN_PASS_DRIVER};
 
-                let driver = SimplePassDriver::<VolumeCamera<1>>::new(world);
-                graph.add_node(crate::node::VOXEL_PASS_DRIVER[1], driver);
+                let driver = SimplePassDriver::<VolumeCamera>::new(world);
+                graph.add_node(VOXEL_PASS_DRIVER, driver);
 
-                let driver = SimplePassDriver::<VolumeCamera<2>>::new(world);
-                graph.add_node(crate::node::VOXEL_PASS_DRIVER[2], driver);
-
-                for driver in crate::node::VOXEL_PASS_DRIVER {
-                    graph
-                        .add_node_edge(node::MAIN_PASS_DEPENDENCIES, *driver)
-                        .unwrap();
-                    graph
-                        .add_node_edge(node::CLEAR_PASS_DRIVER, *driver)
-                        .unwrap();
-                    graph
-                        .add_node_edge(node::MAIN_PASS_DRIVER, *driver)
-                        .unwrap();
-                }
+                graph
+                    .add_node_edge(MAIN_PASS_DEPENDENCIES, VOXEL_PASS_DRIVER)
+                    .unwrap();
+                graph
+                    .add_node_edge(CLEAR_PASS_DRIVER, VOXEL_PASS_DRIVER)
+                    .unwrap();
+                graph
+                    .add_node_edge(MAIN_PASS_DRIVER, VOXEL_PASS_DRIVER)
+                    .unwrap();
             });
     }
 }
@@ -179,7 +181,7 @@ pub struct GpuVoxelBuffer {
 }
 
 #[derive(Component, Default)]
-pub struct VolumeCamera<const I: usize>;
+pub struct VolumeCamera;
 
 #[derive(Default, Clone, TypeUuid)]
 #[uuid = "e0c8e218-4a3e-4113-a231-fe39e993f6f5"]
@@ -371,6 +373,23 @@ impl RenderAsset for VoxelMaterial {
 }
 
 impl Material for VoxelMaterial {
+    fn fragment_shader(_asset_server: &AssetServer) -> Option<Handle<Shader>> {
+        Some(VOXEL_SHADER_HANDLE.typed::<Shader>())
+    }
+
+    fn specialize(
+        _pipeline: &MaterialPipeline<Self>,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayout,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        Ok(())
+    }
+
+    fn alpha_mode(_material: &<Self as RenderAsset>::PreparedAsset) -> AlphaMode {
+        AlphaMode::Blend
+    }
+
     fn bind_group(material: &<Self as RenderAsset>::PreparedAsset) -> &BindGroup {
         &material.bind_group
     }
@@ -502,93 +521,42 @@ pub fn setup_volume(
     let image_handle = images.add(image);
 
     let center = (volume.max + volume.min) / 2.0;
-    let extent = (volume.max - volume.min) / 2.0;
+    let extent = volume.max - volume.min;
 
     let camera = Camera {
         target: RenderTarget::Image(image_handle),
+        near: -extent.z / 2.0,
+        far: extent.z / 2.0,
         ..default()
     };
 
-    let projection = OrthographicProjection {
-        left: -extent.x,
-        right: extent.x,
-        bottom: -extent.y,
-        top: extent.y,
-        near: -extent.z,
-        far: extent.z,
-        ..default()
-    };
-
-    let frustum = Frustum::from_view_projection(
-        &projection.get_projection_matrix(),
-        &Vec3::ZERO,
-        &Vec3::Z,
-        projection.far,
+    volume.views = Some(
+        [
+            Quat::IDENTITY,
+            Quat::from_rotation_y(FRAC_PI_2),
+            Quat::from_rotation_x(FRAC_PI_2),
+        ]
+        .map(|rotation| {
+            let camera = camera.clone();
+            let transform = Transform {
+                translation: center,
+                rotation,
+                scale: extent / (VOXEL_SIZE as f32),
+            };
+            commands
+                .spawn_bundle(OrthographicCameraBundle {
+                    camera,
+                    orthographic_projection: default(),
+                    visible_entities: default(),
+                    frustum: default(),
+                    transform,
+                    global_transform: default(),
+                    marker: VolumeCamera,
+                })
+                .insert(RenderLayers::layer(VOXEL_LAYER))
+                .id()
+        }),
     );
-
-    volume.views = Some([
-        commands
-            .spawn_bundle(OrthographicCameraBundle {
-                camera: camera.clone(),
-                orthographic_projection: projection.clone(),
-                visible_entities: default(),
-                frustum: frustum.clone(),
-                transform: Transform {
-                    translation: center,
-                    rotation: Quat::IDENTITY,
-                    ..default()
-                },
-                global_transform: default(),
-                marker: VolumeCamera::<0>,
-            })
-            .insert(RenderLayers::layer(VOXEL_LAYER))
-            .id(),
-        commands
-            .spawn_bundle(OrthographicCameraBundle {
-                camera: camera.clone(),
-                orthographic_projection: projection.clone(),
-                visible_entities: default(),
-                frustum: frustum.clone(),
-                transform: Transform {
-                    translation: center,
-                    rotation: Quat::from_rotation_y(FRAC_PI_2),
-                    ..default()
-                },
-                global_transform: default(),
-                marker: VolumeCamera::<1>,
-            })
-            .insert(RenderLayers::layer(VOXEL_LAYER))
-            .id(),
-        commands
-            .spawn_bundle(OrthographicCameraBundle {
-                camera,
-                orthographic_projection: projection.clone(),
-                visible_entities: default(),
-                frustum,
-                transform: Transform {
-                    translation: center,
-                    rotation: Quat::from_rotation_x(FRAC_PI_2),
-                    ..default()
-                },
-                global_transform: default(),
-                marker: VolumeCamera::<2>,
-            })
-            .insert(RenderLayers::layer(VOXEL_LAYER))
-            .id(),
-    ]);
-}
-
-pub fn extract_volume_camera_phase<const I: usize>(
-    mut commands: Commands,
-    active: Res<ActiveCamera<VolumeCamera<I>>>,
-) {
-    if let Some(entity) = active.get() {
-        commands.get_or_spawn(entity).insert_bundle((
-            RenderPhase::<Opaque3d>::default(),
-            RenderPhase::<AlphaMask3d>::default(),
-            RenderPhase::<Transparent3d>::default(),
-        ));
-    }
 }
 
 pub fn extract_volume(mut commands: Commands, volume: Res<Volume>) {
@@ -609,4 +577,66 @@ pub fn prepare_volume(
     volume_meta
         .volume_uniform
         .write_buffer(&render_device, &render_queue);
+}
+
+/// Hijack main camera's [`ViewShadowBindings`](bevy::pbr::ViewShadowBindings).
+pub fn prepare_volume_lights(
+    active: Res<ActiveCamera<Camera3d>>,
+    main_camera_query: Query<&ViewShadowBindings, Without<VolumeCamera>>,
+    mut volume_cameras: Query<&mut ViewShadowBindings, With<VolumeCamera>>,
+) {
+    if let Some(main_camera) = active.get() {
+        if let Ok(bindings) = main_camera_query.get(main_camera) {
+            for mut volume_bindings in volume_cameras.iter_mut() {
+                *volume_bindings = ViewShadowBindings {
+                    point_light_depth_texture: bindings.point_light_depth_texture.clone(),
+                    point_light_depth_texture_view: bindings.point_light_depth_texture_view.clone(),
+                    directional_light_depth_texture: bindings
+                        .directional_light_depth_texture
+                        .clone(),
+                    directional_light_depth_texture_view: bindings
+                        .directional_light_depth_texture_view
+                        .clone(),
+                };
+            }
+        }
+    }
+}
+
+/// Attach any standard material mesh with a voxel material copy.
+pub fn attach_voxel_mesh(
+    mut commands: Commands,
+    mesh_query: Query<
+        (
+            Entity,
+            &Handle<StandardMaterial>,
+            &Handle<Mesh>,
+            Option<&SkinnedMesh>,
+        ),
+        Added<Handle<StandardMaterial>>,
+    >,
+    standard_materials: Res<Assets<StandardMaterial>>,
+    mut voxel_materials: ResMut<Assets<VoxelMaterial>>,
+) {
+    for (entity, standard_material, mesh, maybe_skinned_mesh) in mesh_query.iter() {
+        let standard_material = match standard_materials.get(standard_material) {
+            Some(material) => material.clone(),
+            None => continue,
+        };
+        let material = voxel_materials.add(standard_material.into());
+
+        let child = commands
+            .spawn_bundle(MaterialMeshBundle {
+                mesh: mesh.clone(),
+                material,
+                ..Default::default()
+            })
+            .insert(RenderLayers::layer(VOXEL_LAYER))
+            .id();
+        if let Some(skinned_mesh) = maybe_skinned_mesh {
+            commands.entity(child).insert(skinned_mesh.clone());
+        }
+
+        commands.entity(entity).add_child(child);
+    }
 }
