@@ -11,3 +11,18 @@ struct Volume {
 struct VoxelBuffer {
     data: array<atomic<u32>, VOXEL_COUNT>;
 };
+
+let SAMPLE_INDICES = array<vec3<i32>, 8>(
+    vec3<i32>(0, 0, 0),
+    vec3<i32>(1, 0, 0),
+    vec3<i32>(0, 1, 0),
+    vec3<i32>(1, 1, 0),
+    vec3<i32>(0, 0, 1),
+    vec3<i32>(1, 0, 1),
+    vec3<i32>(0, 1, 1),
+    vec3<i32>(1, 1, 1),
+);
+
+struct MipmapData {
+    direction: u32
+}
