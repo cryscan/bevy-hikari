@@ -586,16 +586,19 @@ pub fn prepare_volume_lights(
     mut volume_cameras: Query<&mut ViewShadowBindings, With<VolumeCamera>>,
 ) {
     if let Some(main_camera) = active.get() {
-        if let Ok(bindings) = main_camera_query.get(main_camera) {
+        if let Ok(ViewShadowBindings {
+            point_light_depth_texture,
+            point_light_depth_texture_view,
+            directional_light_depth_texture,
+            directional_light_depth_texture_view,
+        }) = main_camera_query.get(main_camera)
+        {
             for mut volume_bindings in volume_cameras.iter_mut() {
                 *volume_bindings = ViewShadowBindings {
-                    point_light_depth_texture: bindings.point_light_depth_texture.clone(),
-                    point_light_depth_texture_view: bindings.point_light_depth_texture_view.clone(),
-                    directional_light_depth_texture: bindings
-                        .directional_light_depth_texture
-                        .clone(),
-                    directional_light_depth_texture_view: bindings
-                        .directional_light_depth_texture_view
+                    point_light_depth_texture: point_light_depth_texture.clone(),
+                    point_light_depth_texture_view: point_light_depth_texture_view.clone(),
+                    directional_light_depth_texture: directional_light_depth_texture.clone(),
+                    directional_light_depth_texture_view: directional_light_depth_texture_view
                         .clone(),
                 };
             }

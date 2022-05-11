@@ -1,5 +1,6 @@
 #import bevy_pbr::mesh_view_bind_group
 #import bevy_pbr::mesh_struct
+#import bevy_hikari::volume_struct
 
 [[group(2), binding(0)]]
 var<uniform> mesh: Mesh;
@@ -13,18 +14,6 @@ struct StandardMaterial {
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
     flags: u32;
     alpha_cutoff: f32;
-};
-
-let VOXEL_SIZE: u32 = 256u;
-let VOXEL_COUNT: u32 = 16777216u;
-
-struct Volume {
-    min: vec3<f32>;
-    max: vec3<f32>;
-};
-
-struct VoxelBuffer {
-    data: array<atomic<u32>, VOXEL_COUNT>;
 };
 
 let STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT: u32 = 1u;

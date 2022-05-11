@@ -20,16 +20,21 @@ use bevy::{
 };
 use volume::VolumePlugin;
 
+mod mipmap;
 mod volume;
 
+pub const VOLUME_STRUCT_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 16383356904282015386);
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984740);
-pub const TRACING_SHADER_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984840);
-pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984940);
+pub const MIPMAP_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5437952701024607848);
 pub const ALBEDO_SHADER_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984640);
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1569823627703093993);
+pub const IRRADIANCE_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14497829665752154997);
+pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15849919474767323744);
 
 pub const VOXEL_SIZE: usize = 256;
 pub const VOXEL_MIPMAP_LEVEL_COUNT: usize = 8;
@@ -60,8 +65,16 @@ impl Plugin for GiPlugin {
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
+            VOLUME_STRUCT_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/volume_struct.wgsl")),
+        );
+        shaders.set_untracked(
             VOXEL_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("shaders/voxel.wgsl").replace("\r\n", "\n")),
+            Shader::from_wgsl(include_str!("shaders/voxel.wgsl")),
+        );
+        shaders.set_untracked(
+            MIPMAP_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/mipmap.wgsl")),
         );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
