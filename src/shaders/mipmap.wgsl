@@ -52,31 +52,32 @@ fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
 
 #else   // VOXEL_BUFFER
 
+#ifndef MIPMAP_ANISOTROPIC
 [[group(0), binding(0)]]
+var texture_out_0: texture_storage_3d<rgba16float, write>;
+[[group(0), binding(1)]]
+var texture_out_1: texture_storage_3d<rgba16float, write>;
+[[group(0), binding(2)]]
+var texture_out_2: texture_storage_3d<rgba16float, write>;
+[[group(0), binding(3)]]
+var texture_out_3: texture_storage_3d<rgba16float, write>;
+[[group(0), binding(4)]]
+var texture_out_4: texture_storage_3d<rgba16float, write>;
+[[group(0), binding(5)]]
+var texture_out_5: texture_storage_3d<rgba16float, write>;
+[[group(0), binding(6)]]
 var texture_in: texture_3d<f32>;
 
-#ifdef MIPMAP_BASE_LEVEL
-[[group(1), binding(0)]]
-var texture_out_0: texture_storage_3d<rgba16float, write>;
-[[group(1), binding(1)]]
-var texture_out_1: texture_storage_3d<rgba16float, write>;
-[[group(1), binding(2)]]
-var texture_out_2: texture_storage_3d<rgba16float, write>;
-[[group(1), binding(3)]]
-var texture_out_3: texture_storage_3d<rgba16float, write>;
-[[group(1), binding(4)]]
-var texture_out_4: texture_storage_3d<rgba16float, write>;
-[[group(1), binding(5)]]
-var texture_out_5: texture_storage_3d<rgba16float, write>;
+#else   // MIPMAP_ANISOTROPIC
 
-#else   // MIPMAP_BASE_LEVEL
-
-[[group(1), binding(0)]]
+[[group(0), binding(0)]]
 var texture_out: texture_storage_3d<rgba16float, write>;
-[[group(2), binding(0)]]
+[[group(0), binding(1)]]
+var texture_in: texture_3d<f32>;
+[[group(0), binding(2)]]
 var<uniform> mipmap_data: Mipmap;
 
-#endif  // MIPMAP_BASE_LEVEL
+#endif  // MIPMAP_ANISOTROPIC
 
 fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> vec4<f32> {
     let location = vec3<i32>(id) * 2 + index;
@@ -96,7 +97,7 @@ fn take_samples(id: vec3<u32>) -> array<vec4<f32>, 8> {
     return samples;
 }
 
-#ifdef MIPMAP_BASE_LEVEL
+#ifndef MIPMAP_ANISOTROPIC
 
 [[stage(compute), workgroup_size(8, 8, 6)]]
 fn mipmap(
@@ -159,7 +160,7 @@ fn mipmap(
     }
 }
 
-#else   // MIPMAP_BASE_LEVEL
+#else   // MIPMAP_ANISOTROPIC
 
 [[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
@@ -213,6 +214,6 @@ fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
     textureStore(texture_out, vec3<i32>(id), color);
 }
 
-#endif  // MIPMAP_BASE_LEVEL
+#endif  // MIPMAP_ANISOTROPIC
 
 #endif  // VOXEL_BUFFER
