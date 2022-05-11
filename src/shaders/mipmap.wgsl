@@ -4,7 +4,7 @@
 
 [[group(0), binding(0)]]
 var<storage, read_write> voxel_buffer: VoxelBuffer;
-[[group(1), binding(0)]]
+[[group(0), binding(1)]]
 var texture_out: texture_storage_3d<rgba16float, write>;
 
 fn linear_index(index: vec3<i32>) -> i32 {
@@ -52,7 +52,7 @@ fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
 
 #else   // VOXEL_BUFFER
 
-[[group(0), binding(1)]]
+[[group(0), binding(0)]]
 var texture_in: texture_3d<f32>;
 
 #ifdef MIPMAP_BASE_LEVEL
@@ -74,7 +74,7 @@ var texture_out_5: texture_storage_3d<rgba16float, write>;
 [[group(1), binding(0)]]
 var texture_out: texture_storage_3d<rgba16float, write>;
 [[group(2), binding(0)]]
-var<uniform> mipmap_data: MipmapData;
+var<uniform> mipmap_data: Mipmap;
 
 #endif  // MIPMAP_BASE_LEVEL
 
@@ -97,7 +97,6 @@ fn take_samples(id: vec3<u32>) -> array<vec4<f32>, 8> {
 }
 
 #ifdef MIPMAP_BASE_LEVEL
-
 
 [[stage(compute), workgroup_size(8, 8, 6)]]
 fn mipmap(
