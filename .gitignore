@@ -1,3 +1,4 @@
 /target
 /.vscode
+/src/legacy
 Cargo.lock
