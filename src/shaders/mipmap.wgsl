@@ -159,9 +159,7 @@ fn mipmap(
     }
 }
 
-#else
-
-#endif  // MIPMAP_BASE_LEVEL
+#else   // MIPMAP_BASE_LEVEL
 
 [[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
@@ -214,5 +212,7 @@ fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {
     color = color * 0.25;
     textureStore(texture_out, vec3<i32>(id), color);
 }
+
+#endif  // MIPMAP_BASE_LEVEL
 
 #endif  // VOXEL_BUFFER
