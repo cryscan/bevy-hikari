@@ -23,6 +23,6 @@ let SAMPLE_INDICES = array<vec3<i32>, 8>(
     vec3<i32>(1, 1, 1),
 );
 
-struct MipmapData {
+struct Mipmap {
     direction: u32
 }
