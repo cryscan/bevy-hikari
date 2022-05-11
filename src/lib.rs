@@ -47,6 +47,8 @@ pub const DEFERRED_LAYER: Layer = 18;
 
 pub mod node {
     pub const VOXEL_PASS_DRIVER: &str = "voxel_pass_driver";
+    pub const VOXEL_CLEAR_PASS: &str = "voxel_clear_pass";
+    pub const MIPMAP_PASS: &str = "mipmap_pass";
 }
 
 pub mod simple_3d_graph {

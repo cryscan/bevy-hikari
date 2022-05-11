@@ -1,18 +1,19 @@
-use std::num::NonZeroU32;
-
 use crate::{
     volume::{GpuVoxelBuffer, VolumeMeta},
-    MIPMAP_SHADER_HANDLE, VOXEL_MIPMAP_LEVEL_COUNT,
+    MIPMAP_SHADER_HANDLE, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SIZE,
 };
 use bevy::{
+    core_pipeline::node,
     prelude::*,
     render::{
+        render_graph::{Node, RenderGraph},
         render_resource::{std140::AsStd140, std430::AsStd430, *},
         renderer::{RenderDevice, RenderQueue},
         RenderApp,
     },
 };
 use itertools::Itertools;
+use std::num::NonZeroU32;
 
 pub struct MipmapPlugin;
 impl Plugin for MipmapPlugin {
@@ -21,6 +22,25 @@ impl Plugin for MipmapPlugin {
         render_app
             .init_resource::<MipmapPipeline>()
             .init_resource::<MipmapMeta>();
+
+        render_app
+            .world
+            .resource_scope(|_world, mut graph: Mut<RenderGraph>| {
+                use crate::node::{MIPMAP_PASS, VOXEL_CLEAR_PASS, VOXEL_PASS_DRIVER};
+                use node::CLEAR_PASS_DRIVER;
+
+                graph.add_node(VOXEL_CLEAR_PASS, VoxelClearPassNode);
+                graph.add_node(MIPMAP_PASS, MipmapPassNode);
+
+                graph
+                    .add_node_edge(CLEAR_PASS_DRIVER, VOXEL_CLEAR_PASS)
+                    .unwrap();
+                graph
+                    .add_node_edge(VOXEL_CLEAR_PASS, VOXEL_PASS_DRIVER)
+                    .unwrap();
+
+                graph.add_node_edge(VOXEL_PASS_DRIVER, MIPMAP_PASS).unwrap();
+            });
     }
 }
 
@@ -184,7 +204,8 @@ impl FromWorld for MipmapPipeline {
 }
 
 pub struct MipmapMeta {
-    pub mipmap_uniforms: UniformVec<GpuMipmap>,
+    pub mipmap_uniforms: DynamicUniformVec<GpuMipmap>,
+    pub mipmap_uniform_offsets: [u32; 6],
 
     pub voxel_buffer_bind_group: BindGroup,
     pub mipmap_bind_group: BindGroup,
@@ -196,11 +217,13 @@ impl FromWorld for MipmapMeta {
         let render_device = world.resource::<RenderDevice>();
         let render_queue = world.resource::<RenderQueue>();
 
-        let mut mipmap_uniforms = UniformVec::default();
+        let mut mipmap_uniforms = DynamicUniformVec::default();
+        let mut mipmap_uniform_offsets = vec![];
         for direction in 0u32..6 {
-            mipmap_uniforms.push(GpuMipmap { direction });
+            mipmap_uniform_offsets.push(mipmap_uniforms.push(GpuMipmap { direction }));
         }
         mipmap_uniforms.write_buffer(render_device, render_queue);
+        let mipmap_uniform_offsets = mipmap_uniform_offsets.try_into().unwrap();
 
         let mipmap_pipeline = world.resource::<MipmapPipeline>();
         let volume_meta = world.resource::<VolumeMeta>();
@@ -303,6 +326,7 @@ impl FromWorld for MipmapMeta {
 
         Self {
             mipmap_uniforms,
+            mipmap_uniform_offsets,
             voxel_buffer_bind_group,
             mipmap_bind_group,
             mipmap_anisotropic_bind_groups,
@@ -313,4 +337,92 @@ impl FromWorld for MipmapMeta {
 #[derive(Clone, AsStd140)]
 pub struct GpuMipmap {
     direction: u32,
+}
+
+pub struct VoxelClearPassNode;
+impl Node for VoxelClearPassNode {
+    fn run(
+        &self,
+        _graph: &mut bevy::render::render_graph::RenderGraphContext,
+        render_context: &mut bevy::render::renderer::RenderContext,
+        world: &World,
+    ) -> Result<(), bevy::render::render_graph::NodeRunError> {
+        let mipmap_pipeline = world.resource::<MipmapPipeline>();
+        let mipmap_meta = world.resource::<MipmapMeta>();
+        let pipeline_cache = world.resource::<PipelineCache>();
+
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(mipmap_pipeline.clear_pipeline)
+        {
+            let mut pass = render_context
+                .command_encoder
+                .begin_compute_pass(&default());
+            let bind_group = &mipmap_meta.voxel_buffer_bind_group;
+
+            let count = (VOXEL_SIZE / 8) as u32;
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch(count, count, count);
+        }
+
+        Ok(())
+    }
+}
+
+pub struct MipmapPassNode;
+impl Node for MipmapPassNode {
+    fn run(
+        &self,
+        _graph: &mut bevy::render::render_graph::RenderGraphContext,
+        render_context: &mut bevy::render::renderer::RenderContext,
+        world: &World,
+    ) -> Result<(), bevy::render::render_graph::NodeRunError> {
+        let mipmap_pipeline = world.resource::<MipmapPipeline>();
+        let mipmap_meta = world.resource::<MipmapMeta>();
+        let pipeline_cache = world.resource::<PipelineCache>();
+
+        let mut pass = render_context
+            .command_encoder
+            .begin_compute_pass(&default());
+
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(mipmap_pipeline.fill_pipeline) {
+            let count = (VOXEL_SIZE / 8) as u32;
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &mipmap_meta.voxel_buffer_bind_group, &[]);
+            pass.dispatch(count, count, count);
+        }
+
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(mipmap_pipeline.mipmap_pipeline)
+        {
+            let size = (VOXEL_SIZE / 2) as u32;
+            let count = (size / 8).max(1);
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &mipmap_meta.mipmap_bind_group, &[]);
+            pass.dispatch(count, count, size);
+        }
+
+        if let Some(pipeline) =
+            pipeline_cache.get_compute_pipeline(mipmap_pipeline.mipmap_anisotropic_pipeline)
+        {
+            pass.set_pipeline(&pipeline);
+
+            for (level, bind_groups) in mipmap_meta
+                .mipmap_anisotropic_bind_groups
+                .iter()
+                .enumerate()
+            {
+                let level = level + 1;
+                for (bind_group, offset) in bind_groups
+                    .iter()
+                    .zip_eq(mipmap_meta.mipmap_uniform_offsets.iter())
+                {
+                    let size = (VOXEL_SIZE / (2 << level)) as u32;
+                    let count = (size / 8).max(1);
+                    pass.set_bind_group(0, &bind_group, &[*offset]);
+                    pass.dispatch(count, count, count);
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
