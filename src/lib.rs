@@ -18,6 +18,7 @@ use bevy::{
         RenderApp,
     },
 };
+use mipmap::MipmapPlugin;
 use volume::VolumePlugin;
 
 mod mipmap;
@@ -61,7 +62,9 @@ pub mod simple_3d_graph {
 pub struct GiPlugin;
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GiConfig>().add_plugin(VolumePlugin);
+        app.init_resource::<GiConfig>()
+            .add_plugin(VolumePlugin)
+            .add_plugin(MipmapPlugin);
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(

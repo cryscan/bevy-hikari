@@ -154,7 +154,7 @@ impl FromWorld for MipmapPipeline {
                     output_texture_base_bind_group_layout.clone(),
                 ]),
                 shader: MIPMAP_SHADER_HANDLE.typed(),
-                shader_defs: vec!["BASE_LEVEL".into()],
+                shader_defs: vec!["MIPMAP_BASE_LEVEL".into()],
                 entry_point: "mipmap".into(),
             });
 
