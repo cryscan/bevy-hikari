@@ -1,6 +1,6 @@
 use crate::{
-    extract_cameras_manual, SimplePassDriver, VOXEL_COUNT, VOXEL_LAYER, VOXEL_MIPMAP_LEVEL_COUNT,
-    VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+    extract_custom_cameras, GiRenderLayers, SimplePassDriver, VOXEL_COUNT,
+    VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
 };
 use bevy::{
     core_pipeline::node,
@@ -12,8 +12,9 @@ use bevy::{
     prelude::*,
     reflect::TypeUuid,
     render::{
-        camera::{ActiveCamera, Camera3d, RenderTarget},
+        camera::{ActiveCamera, Camera3d, CameraProjection, DepthCalculation, RenderTarget},
         mesh::{skinning::SkinnedMesh, MeshVertexBufferLayout},
+        primitives::Frustum,
         render_asset::{PrepareAssetError, RenderAsset, RenderAssets},
         render_graph::RenderGraph,
         render_resource::{
@@ -23,9 +24,10 @@ use bevy::{
         },
         renderer::{RenderDevice, RenderQueue},
         texture::{BevyDefault, CachedTexture, TextureCache},
-        view::RenderLayers,
+        view::{update_frusta, RenderLayers, VisibleEntities},
         RenderApp, RenderStage,
     },
+    transform::TransformSystem,
 };
 use std::f32::consts::FRAC_PI_2;
 
@@ -35,12 +37,16 @@ impl Plugin for VolumePlugin {
         app.init_resource::<Volume>()
             .add_plugin(MaterialPlugin::<VoxelMaterial>::default())
             .add_startup_system(setup_volume)
-            .add_system(attach_voxel_mesh.exclusive_system().before_commands());
+            .add_system(attach_voxel_mesh.exclusive_system().before_commands())
+            .add_system_to_stage(
+                CoreStage::PostUpdate,
+                update_frusta::<VolumeProjection>.after(TransformSystem::TransformPropagate),
+            );
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<VolumeMeta>()
-            .add_system_to_stage(RenderStage::Extract, extract_cameras_manual::<VolumeCamera>)
+            .add_system_to_stage(RenderStage::Extract, extract_custom_cameras::<VolumeCamera>)
             .add_system_to_stage(RenderStage::Extract, extract_volume)
             .add_system_to_stage(RenderStage::Prepare, prepare_volume)
             .add_system_to_stage(
@@ -84,8 +90,8 @@ impl Default for Volume {
     fn default() -> Self {
         Self {
             enabled: true,
-            min: Vec3::new(-5.0, -5.0, -5.0),
-            max: Vec3::new(5.0, 5.0, 5.0),
+            min: Vec3::new(-1.0, -1.0, -1.0),
+            max: Vec3::new(1.0, 1.0, 1.0),
             views: None,
         }
     }
@@ -382,6 +388,13 @@ impl Material for VoxelMaterial {
         descriptor: &mut RenderPipelineDescriptor,
         _layout: &MeshVertexBufferLayout,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.depth_stencil = Some(DepthStencilState {
+            format: TextureFormat::Depth32Float,
+            depth_write_enabled: false,
+            depth_compare: CompareFunction::Always,
+            stencil: default(),
+            bias: default(),
+        });
         descriptor.primitive.cull_mode = None;
         Ok(())
     }
@@ -493,6 +506,27 @@ impl Material for VoxelMaterial {
     }
 }
 
+#[derive(Component, Deref, DerefMut)]
+pub struct VolumeProjection(pub OrthographicProjection);
+
+impl CameraProjection for VolumeProjection {
+    fn get_projection_matrix(&self) -> Mat4 {
+        self.0.get_projection_matrix()
+    }
+
+    fn update(&mut self, width: f32, height: f32) {
+        self.0.update(width, height);
+    }
+
+    fn depth_calculation(&self) -> DepthCalculation {
+        self.0.depth_calculation()
+    }
+
+    fn far(&self) -> f32 {
+        self.0.far()
+    }
+}
+
 /// Setup cameras for the volume.
 pub fn setup_volume(
     mut commands: Commands,
@@ -521,14 +555,7 @@ pub fn setup_volume(
     let image_handle = images.add(image);
 
     let center = (volume.max + volume.min) / 2.0;
-    let extent = volume.max - volume.min;
-
-    let camera = Camera {
-        target: RenderTarget::Image(image_handle),
-        near: -extent.z / 2.0,
-        far: extent.z / 2.0,
-        ..default()
-    };
+    let extent = (volume.max - volume.min) / 2.0;
 
     volume.views = Some(
         [
@@ -537,23 +564,38 @@ pub fn setup_volume(
             Quat::from_rotation_x(FRAC_PI_2),
         ]
         .map(|rotation| {
-            let camera = camera.clone();
+            let projection = OrthographicProjection {
+                left: -extent.x,
+                right: extent.x,
+                bottom: -extent.y,
+                top: extent.y,
+                near: -extent.z,
+                far: extent.z,
+                ..default()
+            };
+            let camera = Camera {
+                target: RenderTarget::Image(image_handle.clone()),
+                projection_matrix: projection.get_projection_matrix(),
+                near: -extent.z,
+                far: extent.z,
+                ..default()
+            };
             let transform = Transform {
                 translation: center,
                 rotation,
-                scale: extent / (VOXEL_SIZE as f32),
+                ..default()
             };
             commands
-                .spawn_bundle(OrthographicCameraBundle {
+                .spawn_bundle((
                     camera,
-                    orthographic_projection: default(),
-                    visible_entities: default(),
-                    frustum: default(),
+                    VolumeProjection(projection),
                     transform,
-                    global_transform: default(),
-                    marker: VolumeCamera,
-                })
-                .insert(RenderLayers::layer(VOXEL_LAYER))
+                    VisibleEntities::default(),
+                    Frustum::default(),
+                    GlobalTransform::default(),
+                    VolumeCamera::default(),
+                    RenderLayers::from(GiRenderLayers::Voxel),
+                ))
                 .id()
         }),
     );
@@ -634,7 +676,7 @@ pub fn attach_voxel_mesh(
                 material,
                 ..Default::default()
             })
-            .insert(RenderLayers::layer(VOXEL_LAYER))
+            .insert(RenderLayers::from(GiRenderLayers::Voxel))
             .id();
         if let Some(skinned_mesh) = maybe_skinned_mesh {
             commands.entity(child).insert(skinned_mesh.clone());

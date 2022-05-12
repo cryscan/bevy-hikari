@@ -14,7 +14,7 @@ use bevy::{
         },
         render_phase::RenderPhase,
         renderer::RenderContext,
-        view::{ExtractedView, Layer, VisibleEntities},
+        view::{ExtractedView, RenderLayers, VisibleEntities},
         RenderApp,
     },
 };
@@ -40,10 +40,6 @@ pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
 pub const VOXEL_SIZE: usize = 256;
 pub const VOXEL_MIPMAP_LEVEL_COUNT: usize = 8;
 pub const VOXEL_COUNT: usize = 16777216;
-
-pub const VOXEL_LAYER: Layer = 16;
-pub const IRRADIANCE_LAYER: Layer = 17;
-pub const DEFERRED_LAYER: Layer = 18;
 
 pub mod node {
     pub const VOXEL_PASS_DRIVER: &str = "voxel_pass_driver";
@@ -118,6 +114,18 @@ impl Default for GiConfig {
     }
 }
 
+pub enum GiRenderLayers {
+    Voxel = 16,
+    Irradiance = 17,
+    Deferred = 18,
+}
+
+impl From<GiRenderLayers> for RenderLayers {
+    fn from(layer: GiRenderLayers) -> Self {
+        Self::layer(layer as u8)
+    }
+}
+
 /// Marker component for meshes not casting GI.
 #[derive(Component)]
 pub struct NotGiCaster;
@@ -157,7 +165,7 @@ impl<M: Component + Default> Node for SimplePassDriver<M> {
 }
 
 /// Manually extract all cameras of type `M`, as [`CameraTypePlugin`](bevy::render::camera::CameraTypePlugin) only extracts the active camera.
-pub fn extract_cameras_manual<M: Component + Default>(
+pub fn extract_custom_cameras<M: Component + Default>(
     mut commands: Commands,
     windows: Res<Windows>,
     images: Res<Assets<Image>>,

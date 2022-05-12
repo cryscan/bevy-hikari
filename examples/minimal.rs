@@ -4,7 +4,6 @@ use std::f32::consts::PI;
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         // Add the voxel cone tracing plugin
@@ -24,9 +23,13 @@ fn setup(
         material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
         ..Default::default()
     });
-    // Cube
+    // Torus
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+        mesh: meshes.add(Mesh::from(shape::Torus {
+            radius: 0.5,
+            ring_radius: 0.25,
+            ..Default::default()
+        })),
         material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
         transform: Transform::from_xyz(0.0, 0.5, 0.0),
         ..Default::default()
