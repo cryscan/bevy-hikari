@@ -1,10 +1,10 @@
 use crate::{
-    extract_custom_cameras, GiRenderLayers, SimplePassDriver, VOXEL_COUNT,
-    VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+    extract_custom_cameras, GiRenderLayers, SimplePassDriver, VOXEL_COUNT, VOXEL_SHADER_HANDLE,
+    VOXEL_SIZE,
 };
 use bevy::{
     core_pipeline::node,
-    ecs::system::{lifetimeless::SRes, SystemParamItem, SystemState},
+    ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::{
         MaterialPipeline, RenderLightSystems, StandardMaterialFlags, StandardMaterialUniformData,
         ViewShadowBindings,
@@ -23,7 +23,7 @@ use bevy::{
             *,
         },
         renderer::{RenderDevice, RenderQueue},
-        texture::{BevyDefault, CachedTexture, TextureCache},
+        texture::BevyDefault,
         view::{update_frusta, RenderLayers, VisibleEntities},
         RenderApp, RenderStage,
     },
@@ -37,7 +37,7 @@ impl Plugin for VolumePlugin {
         app.init_resource::<Volume>()
             .add_plugin(MaterialPlugin::<VoxelMaterial>::default())
             .add_startup_system(setup_volume)
-            .add_system(attach_voxel_mesh.exclusive_system().before_commands())
+            .add_system(create_voxel_mesh.exclusive_system().before_commands())
             .add_system_to_stage(
                 CoreStage::PostUpdate,
                 update_frusta::<VolumeProjection>.after(TransformSystem::TransformPropagate),
@@ -100,15 +100,11 @@ impl Default for Volume {
 pub struct VolumeMeta {
     pub volume_uniform: UniformVec<GpuVolume>,
     pub voxel_buffer: Buffer,
-    pub voxel_texture: CachedTexture,
-    pub anisotropic_textures: [CachedTexture; 6],
-    pub sampler: Sampler,
 }
 
 impl FromWorld for VolumeMeta {
     fn from_world(world: &mut World) -> Self {
-        let (render_device, mut texture_cache) =
-            SystemState::<(Res<RenderDevice>, ResMut<TextureCache>)>::new(world).get_mut(world);
+        let render_device = world.resource::<RenderDevice>();
 
         let voxel_buffer = render_device.create_buffer(&BufferDescriptor {
             label: None,
@@ -117,60 +113,9 @@ impl FromWorld for VolumeMeta {
             mapped_at_creation: false,
         });
 
-        let voxel_texture = texture_cache.get(
-            &render_device,
-            TextureDescriptor {
-                label: None,
-                size: Extent3d {
-                    width: VOXEL_SIZE as u32,
-                    height: VOXEL_SIZE as u32,
-                    depth_or_array_layers: VOXEL_SIZE as u32,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D3,
-                format: TextureFormat::Rgba16Float,
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            },
-        );
-
-        let size = (VOXEL_SIZE >> 1) as u32;
-        let anisotropic_textures = [(); 6].map(|_| {
-            texture_cache.get(
-                &render_device,
-                TextureDescriptor {
-                    label: None,
-                    size: Extent3d {
-                        width: size,
-                        height: size,
-                        depth_or_array_layers: size,
-                    },
-                    mip_level_count: VOXEL_MIPMAP_LEVEL_COUNT as u32,
-                    sample_count: 1,
-                    dimension: TextureDimension::D3,
-                    format: TextureFormat::Rgba16Float,
-                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-                },
-            )
-        });
-
-        let sampler = render_device.create_sampler(&SamplerDescriptor {
-            label: None,
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            address_mode_w: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Linear,
-            min_filter: FilterMode::Linear,
-            mipmap_filter: FilterMode::Linear,
-            ..Default::default()
-        });
-
         Self {
             volume_uniform: Default::default(),
             voxel_buffer,
-            voxel_texture,
-            anisotropic_textures,
-            sampler,
         }
     }
 }
@@ -215,13 +160,9 @@ impl From<StandardMaterial> for VoxelMaterial {
             metallic,
             metallic_roughness_texture,
             reflectance,
-            normal_map_texture: _,
-            flip_normal_map_y: _,
-            occlusion_texture: _,
-            double_sided: _,
-            cull_mode: _,
             unlit,
             alpha_mode,
+            ..
         } = material;
 
         Self {
@@ -636,12 +577,23 @@ pub fn prepare_volume_lights(
         }) = main_camera_query.get(main_camera)
         {
             for mut volume_bindings in volume_cameras.iter_mut() {
+                let (
+                    point_light_depth_texture,
+                    point_light_depth_texture_view,
+                    directional_light_depth_texture,
+                    directional_light_depth_texture_view,
+                ) = (
+                    point_light_depth_texture.clone(),
+                    point_light_depth_texture_view.clone(),
+                    directional_light_depth_texture.clone(),
+                    directional_light_depth_texture_view.clone(),
+                );
+
                 *volume_bindings = ViewShadowBindings {
-                    point_light_depth_texture: point_light_depth_texture.clone(),
-                    point_light_depth_texture_view: point_light_depth_texture_view.clone(),
-                    directional_light_depth_texture: directional_light_depth_texture.clone(),
-                    directional_light_depth_texture_view: directional_light_depth_texture_view
-                        .clone(),
+                    point_light_depth_texture,
+                    point_light_depth_texture_view,
+                    directional_light_depth_texture,
+                    directional_light_depth_texture_view,
                 };
             }
         }
@@ -649,7 +601,7 @@ pub fn prepare_volume_lights(
 }
 
 /// Attach any standard material mesh with a voxel material copy.
-pub fn attach_voxel_mesh(
+pub fn create_voxel_mesh(
     mut commands: Commands,
     mesh_query: Query<
         (

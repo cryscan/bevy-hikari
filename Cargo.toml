@@ -27,6 +27,5 @@ bevy = { version = "0.7", default-features = false, features = [
     "png",
     "x11",
 ] }
-bevy_full_throttle = { git = "https://github.com/lightsoutgames/bevy_full_throttle" }
 bevy_flycam = "0.7"
 smooth-bevy-cameras = "0.4"

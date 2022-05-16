@@ -116,8 +116,9 @@ impl Default for GiConfig {
 
 pub enum GiRenderLayers {
     Voxel = 16,
-    Irradiance = 17,
-    Deferred = 18,
+    Deferred = 17,
+    Irradiance = 18,
+    Overlay = 19,
 }
 
 impl From<GiRenderLayers> for RenderLayers {

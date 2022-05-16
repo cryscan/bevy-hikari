@@ -23,24 +23,21 @@ impl Plugin for MipmapPlugin {
             .init_resource::<MipmapPipeline>()
             .init_resource::<MipmapMeta>();
 
-        render_app
-            .world
-            .resource_scope(|_world, mut graph: Mut<RenderGraph>| {
-                use crate::node::{MIPMAP_PASS, VOXEL_CLEAR_PASS, VOXEL_PASS_DRIVER};
-                use node::CLEAR_PASS_DRIVER;
+        use crate::node::{MIPMAP_PASS, VOXEL_CLEAR_PASS, VOXEL_PASS_DRIVER};
+        use node::CLEAR_PASS_DRIVER;
 
-                graph.add_node(VOXEL_CLEAR_PASS, VoxelClearPassNode);
-                graph.add_node(MIPMAP_PASS, MipmapPassNode);
+        let mut graph = render_app.world.resource_mut::<RenderGraph>();
+        graph.add_node(VOXEL_CLEAR_PASS, VoxelClearPassNode);
+        graph.add_node(MIPMAP_PASS, MipmapPassNode);
 
-                graph
-                    .add_node_edge(CLEAR_PASS_DRIVER, VOXEL_CLEAR_PASS)
-                    .unwrap();
-                graph
-                    .add_node_edge(VOXEL_CLEAR_PASS, VOXEL_PASS_DRIVER)
-                    .unwrap();
+        graph
+            .add_node_edge(CLEAR_PASS_DRIVER, VOXEL_CLEAR_PASS)
+            .unwrap();
+        graph
+            .add_node_edge(VOXEL_CLEAR_PASS, VOXEL_PASS_DRIVER)
+            .unwrap();
 
-                graph.add_node_edge(VOXEL_PASS_DRIVER, MIPMAP_PASS).unwrap();
-            });
+        graph.add_node_edge(VOXEL_PASS_DRIVER, MIPMAP_PASS).unwrap();
     }
 }
 
@@ -207,6 +204,10 @@ pub struct MipmapMeta {
     pub mipmap_uniforms: DynamicUniformVec<GpuMipmap>,
     pub mipmap_uniform_offsets: [u32; 6],
 
+    pub voxel_texture: Texture,
+    pub anisotropic_textures: [Texture; 6],
+    pub sampler: Sampler,
+
     pub voxel_buffer_bind_group: BindGroup,
     pub mipmap_bind_group: BindGroup,
     pub mipmap_anisotropic_bind_groups: Vec<[BindGroup; 6]>,
@@ -217,6 +218,7 @@ impl FromWorld for MipmapMeta {
         let render_device = world.resource::<RenderDevice>();
         let render_queue = world.resource::<RenderQueue>();
 
+        // Mipmap uniforms
         let mut mipmap_uniforms = DynamicUniformVec::default();
         let mut mipmap_uniform_offsets = vec![];
         for direction in 0u32..6 {
@@ -224,6 +226,45 @@ impl FromWorld for MipmapMeta {
         }
         mipmap_uniforms.write_buffer(render_device, render_queue);
         let mipmap_uniform_offsets = mipmap_uniform_offsets.try_into().unwrap();
+
+        let voxel_texture = render_device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: VOXEL_SIZE as u32,
+                height: VOXEL_SIZE as u32,
+                depth_or_array_layers: VOXEL_SIZE as u32,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D3,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+        });
+        let voxel_texture_view = voxel_texture.create_view(&default());
+
+        let anisotropic_textures = [(); 6].map(|_| {
+            let size = (VOXEL_SIZE >> 1) as u32;
+            render_device.create_texture(&TextureDescriptor {
+                label: None,
+                size: Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: size,
+                },
+                mip_level_count: VOXEL_MIPMAP_LEVEL_COUNT as u32,
+                sample_count: 1,
+                dimension: TextureDimension::D3,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            })
+        });
+        let anisotropic_texture_views = anisotropic_textures.clone().map(|texture| {
+            texture.create_view(&TextureViewDescriptor {
+                base_mip_level: 0,
+                mip_level_count: NonZeroU32::new(1),
+                ..default()
+            })
+        });
 
         let mipmap_pipeline = world.resource::<MipmapPipeline>();
         let volume_meta = world.resource::<VolumeMeta>();
@@ -238,41 +279,21 @@ impl FromWorld for MipmapMeta {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(
-                        &volume_meta
-                            .voxel_texture
-                            .texture
-                            .create_view(&TextureViewDescriptor {
-                                base_mip_level: 0,
-                                mip_level_count: NonZeroU32::new(1),
-                                ..default()
-                            }),
-                    ),
+                    resource: BindingResource::TextureView(&voxel_texture_view),
                 },
             ],
         });
 
-        let mipmap_bind_group = volume_meta
-            .anisotropic_textures
-            .iter()
-            .map(|cached_texture| {
-                cached_texture.texture.create_view(&TextureViewDescriptor {
-                    base_mip_level: 0,
-                    mip_level_count: NonZeroU32::new(1),
-                    ..default()
-                })
-            })
-            .collect_vec();
-        let mipmap_bind_group = mipmap_bind_group
+        let mipmap_bind_group = &anisotropic_texture_views
             .iter()
             .enumerate()
             .map(|(direction, texture_view)| BindGroupEntry {
                 binding: direction as u32,
-                resource: BindingResource::TextureView(&texture_view),
+                resource: BindingResource::TextureView(texture_view),
             })
             .chain([BindGroupEntry {
                 binding: 6,
-                resource: BindingResource::TextureView(&volume_meta.voxel_texture.default_view),
+                resource: BindingResource::TextureView(&voxel_texture_view),
             }])
             .collect_vec();
         let mipmap_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
@@ -281,19 +302,16 @@ impl FromWorld for MipmapMeta {
             entries: &mipmap_bind_group,
         });
 
-        let mipmap_texture_views = (0..VOXEL_MIPMAP_LEVEL_COUNT).map(|level| {
-            volume_meta
-                .anisotropic_textures
-                .iter()
-                .map(move |cached_texture| {
-                    cached_texture.texture.create_view(&TextureViewDescriptor {
-                        base_mip_level: level as u32,
-                        mip_level_count: NonZeroU32::new(1),
-                        ..default()
-                    })
+        let anisotropic_texture_views = (0..VOXEL_MIPMAP_LEVEL_COUNT).map(|level| {
+            anisotropic_textures.iter().map(move |texture| {
+                texture.create_view(&TextureViewDescriptor {
+                    base_mip_level: level as u32,
+                    mip_level_count: NonZeroU32::new(1),
+                    ..default()
                 })
+            })
         });
-        let mipmap_anisotropic_bind_groups = mipmap_texture_views
+        let mipmap_anisotropic_bind_groups = anisotropic_texture_views
             .tuple_windows::<(_, _)>()
             .map(|(texture_in, texture_out)| {
                 texture_in
@@ -320,13 +338,27 @@ impl FromWorld for MipmapMeta {
                     })
                     .collect_vec()
                     .try_into()
-                    .unwrap()
+                    .expect("Direction mismatch")
             })
             .collect_vec();
+
+        let sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: None,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
 
         Self {
             mipmap_uniforms,
             mipmap_uniform_offsets,
+            voxel_texture,
+            anisotropic_textures,
+            sampler,
             voxel_buffer_bind_group,
             mipmap_bind_group,
             mipmap_anisotropic_bind_groups,
