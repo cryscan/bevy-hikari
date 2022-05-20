@@ -1,6 +1,6 @@
 use crate::{
     utils::{extract_custom_cameras, SimplePassDriver},
-    GiConfig, VOXEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+    VOXEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
 };
 use bevy::{
     core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
@@ -400,8 +400,8 @@ pub fn queue_voxel_meshes(
     render_materials: Res<RenderAssets<StandardMaterial>>,
     mut pipelines: ResMut<SpecializedMeshPipelines<VolumePipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
-    config: Res<GiConfig>,
     msaa: Res<Msaa>,
+    volume: Res<Volume>,
     mut views: Query<
         (
             &mut RenderPhase<Opaque3d>,
@@ -411,10 +411,6 @@ pub fn queue_voxel_meshes(
         (With<ExtractedView>, With<VolumeCamera>),
     >,
 ) {
-    if !config.global {
-        return;
-    }
-
     let draw_function = transparent_draw_functions
         .read()
         .get_id::<DrawVoxelMesh>()
@@ -422,6 +418,12 @@ pub fn queue_voxel_meshes(
 
     for (mut opaque_phase, mut alpha_mask_phase, mut transparent_phase) in views.iter_mut() {
         transparent_phase.items.clear();
+
+        if !volume.enabled {
+            opaque_phase.items.clear();
+            alpha_mask_phase.items.clear();
+            continue;
+        }
 
         let mut add_phase_item = |entity, distance| {
             if let Ok((material_handle, mesh_handle)) = material_meshes.get(entity) {

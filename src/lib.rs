@@ -9,7 +9,7 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         render_graph::{RenderGraph, SlotInfo, SlotType},
-        RenderApp, RenderStage,
+        RenderApp,
     },
 };
 use mipmap::MipmapPlugin;
@@ -58,9 +58,7 @@ pub mod simple_3d_graph {
 pub struct GiPlugin;
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(GiConfig { global: true })
-            .add_plugin(VolumePlugin)
-            .add_plugin(MipmapPlugin);
+        app.add_plugin(VolumePlugin).add_plugin(MipmapPlugin);
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
@@ -88,7 +86,6 @@ impl Plugin for GiPlugin {
             Ok(render_app) => render_app,
             Err(_) => return,
         };
-        render_app.add_system_to_stage(RenderStage::Extract, extract_config);
 
         let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
         let mut graph = render_app.world.resource_mut::<RenderGraph>();
@@ -111,11 +108,6 @@ impl Plugin for GiPlugin {
     }
 }
 
-#[derive(Clone)]
-pub struct GiConfig {
-    pub global: bool,
-}
-
 /// Marker component for meshes not casting GI.
 #[derive(Component)]
 pub struct NotGiCaster;
@@ -123,7 +115,3 @@ pub struct NotGiCaster;
 /// Marker component for meshes not receiving GI.
 #[derive(Component)]
 pub struct NotGiReceiver;
-
-pub fn extract_config(mut commands: Commands, config: Res<GiConfig>) {
-    commands.insert_resource(config.clone());
-}
