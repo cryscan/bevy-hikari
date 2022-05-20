@@ -4,28 +4,26 @@
 //!
 
 use bevy::{
-    core_pipeline::{AlphaMask3d, MainPass3dNode, Opaque3d, Transparent3d},
+    core_pipeline::MainPass3dNode,
     prelude::*,
     reflect::TypeUuid,
     render::{
-        camera::ExtractedCamera,
-        render_graph::{
-            Node, NodeRunError, RenderGraph, RenderGraphContext, SlotInfo, SlotType, SlotValue,
-        },
-        render_phase::RenderPhase,
-        renderer::RenderContext,
-        view::{ExtractedView, RenderLayers, VisibleEntities},
-        RenderApp,
+        render_graph::{RenderGraph, SlotInfo, SlotType},
+        RenderApp, RenderStage,
     },
 };
 use mipmap::MipmapPlugin;
 use volume::VolumePlugin;
 
+mod deferred;
 mod mipmap;
+mod utils;
 mod volume;
 
 pub const VOLUME_STRUCT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 16383356904282015386);
+pub const STANDARD_MATERIAL_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5199983296924258000);
 pub const VOXEL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14750151725749984740);
 pub const MIPMAP_SHADER_HANDLE: HandleUntyped =
@@ -60,7 +58,7 @@ pub mod simple_3d_graph {
 pub struct GiPlugin;
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GiConfig>()
+        app.insert_resource(GiConfig { global: true })
             .add_plugin(VolumePlugin)
             .add_plugin(MipmapPlugin);
 
@@ -68,6 +66,10 @@ impl Plugin for GiPlugin {
         shaders.set_untracked(
             VOLUME_STRUCT_SHADER_HANDLE,
             Shader::from_wgsl(include_str!("shaders/volume_struct.wgsl")),
+        );
+        shaders.set_untracked(
+            STANDARD_MATERIAL_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/standard_material.wgsl")),
         );
         shaders.set_untracked(
             VOXEL_SHADER_HANDLE,
@@ -82,6 +84,7 @@ impl Plugin for GiPlugin {
             Ok(render_app) => render_app,
             Err(_) => return,
         };
+        render_app.add_system_to_stage(RenderStage::Extract, extract_config);
 
         let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
         let mut graph = render_app.world.resource_mut::<RenderGraph>();
@@ -104,27 +107,9 @@ impl Plugin for GiPlugin {
     }
 }
 
+#[derive(Clone)]
 pub struct GiConfig {
     pub global: bool,
-}
-
-impl Default for GiConfig {
-    fn default() -> Self {
-        Self { global: true }
-    }
-}
-
-pub enum GiRenderLayers {
-    Voxel = 16,
-    Deferred = 17,
-    Irradiance = 18,
-    Overlay = 19,
-}
-
-impl From<GiRenderLayers> for RenderLayers {
-    fn from(layer: GiRenderLayers) -> Self {
-        Self::layer(layer as u8)
-    }
 }
 
 /// Marker component for meshes not casting GI.
@@ -135,64 +120,6 @@ pub struct NotGiCaster;
 #[derive(Component)]
 pub struct NotGiReceiver;
 
-/// A render node that executes simple graph for given camera of type `M`.
-pub struct SimplePassDriver<M: Component + Default> {
-    query: QueryState<Entity, With<M>>,
-}
-impl<M: Component + Default> SimplePassDriver<M> {
-    pub fn new(world: &mut World) -> Self {
-        Self {
-            query: QueryState::new(world),
-        }
-    }
-}
-impl<M: Component + Default> Node for SimplePassDriver<M> {
-    fn update(&mut self, world: &mut World) {
-        self.query.update_archetypes(world);
-    }
-
-    fn run(
-        &self,
-        graph: &mut RenderGraphContext,
-        _render_context: &mut RenderContext,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
-        for camera in self.query.iter_manual(world) {
-            graph.run_sub_graph(simple_3d_graph::NAME, vec![SlotValue::Entity(camera)])?;
-        }
-
-        Ok(())
-    }
-}
-
-/// Manually extract all cameras of type `M`, as [`CameraTypePlugin`](bevy::render::camera::CameraTypePlugin) only extracts the active camera.
-pub fn extract_custom_cameras<M: Component + Default>(
-    mut commands: Commands,
-    windows: Res<Windows>,
-    images: Res<Assets<Image>>,
-    cameras: Query<(Entity, &Camera, &GlobalTransform, &VisibleEntities), With<M>>,
-) {
-    for (entity, camera, transform, visible_entities) in cameras.iter() {
-        if let Some(size) = camera.target.get_physical_size(&windows, &images) {
-            commands.get_or_spawn(entity).insert_bundle((
-                ExtractedCamera {
-                    target: camera.target.clone(),
-                    physical_size: camera.target.get_physical_size(&windows, &images),
-                },
-                ExtractedView {
-                    projection: camera.projection_matrix,
-                    transform: *transform,
-                    width: size.x,
-                    height: size.y,
-                    near: camera.near,
-                    far: camera.far,
-                },
-                visible_entities.clone(),
-                M::default(),
-                RenderPhase::<Opaque3d>::default(),
-                RenderPhase::<AlphaMask3d>::default(),
-                RenderPhase::<Transparent3d>::default(),
-            ));
-        }
-    }
+pub fn extract_config(mut commands: Commands, config: Res<GiConfig>) {
+    commands.insert_resource(config.clone());
 }
