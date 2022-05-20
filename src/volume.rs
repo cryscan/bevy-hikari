@@ -1,30 +1,30 @@
 use crate::{
-    extract_custom_cameras, GiRenderLayers, SimplePassDriver, VOXEL_COUNT, VOXEL_SHADER_HANDLE,
-    VOXEL_SIZE,
+    utils::{extract_custom_cameras, SimplePassDriver},
+    GiConfig, VOXEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
 };
 use bevy::{
-    core_pipeline::node,
+    core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
     ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::{
-        MaterialPipeline, RenderLightSystems, StandardMaterialFlags, StandardMaterialUniformData,
+        queue_material_meshes, DrawMesh, MeshPipeline, MeshPipelineKey, RenderLightSystems,
+        SetMaterialBindGroup, SetMeshBindGroup, SetMeshViewBindGroup, SpecializedMaterial,
         ViewShadowBindings,
     },
     prelude::*,
-    reflect::TypeUuid,
     render::{
         camera::{ActiveCamera, Camera3d, CameraProjection, DepthCalculation, RenderTarget},
-        mesh::{skinning::SkinnedMesh, MeshVertexBufferLayout},
+        mesh::MeshVertexBufferLayout,
         primitives::Frustum,
-        render_asset::{PrepareAssetError, RenderAsset, RenderAssets},
+        render_asset::RenderAssets,
         render_graph::RenderGraph,
-        render_resource::{
-            std140::{AsStd140, Std140},
-            std430::AsStd430,
-            *,
+        render_phase::{
+            AddRenderCommand, DrawFunctions, EntityRenderCommand, RenderCommandResult, RenderPhase,
+            SetItemPipeline, TrackedRenderPass,
         },
+        render_resource::{std140::AsStd140, std430::AsStd430, *},
         renderer::{RenderDevice, RenderQueue},
         texture::BevyDefault,
-        view::{update_frusta, RenderLayers, VisibleEntities},
+        view::{update_frusta, ExtractedView, VisibleEntities},
         RenderApp, RenderStage,
     },
     transform::TransformSystem,
@@ -35,9 +35,7 @@ pub struct VolumePlugin;
 impl Plugin for VolumePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Volume>()
-            .add_plugin(MaterialPlugin::<VoxelMaterial>::default())
             .add_startup_system(setup_volume)
-            .add_system(create_voxel_mesh.exclusive_system().before_commands())
             .add_system_to_stage(
                 CoreStage::PostUpdate,
                 update_frusta::<VolumeProjection>.after(TransformSystem::TransformPropagate),
@@ -45,7 +43,10 @@ impl Plugin for VolumePlugin {
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
+            .init_resource::<VolumePipeline>()
+            .init_resource::<SpecializedMeshPipelines<VolumePipeline>>()
             .init_resource::<VolumeMeta>()
+            .add_render_command::<Transparent3d, DrawVoxelMesh>()
             .add_system_to_stage(RenderStage::Extract, extract_custom_cameras::<VolumeCamera>)
             .add_system_to_stage(RenderStage::Extract, extract_volume)
             .add_system_to_stage(RenderStage::Prepare, prepare_volume)
@@ -54,6 +55,11 @@ impl Plugin for VolumePlugin {
                 prepare_volume_lights
                     .exclusive_system()
                     .after(RenderLightSystems::PrepareLights),
+            )
+            .add_system_to_stage(RenderStage::Queue, queue_volume_bind_groups)
+            .add_system_to_stage(
+                RenderStage::Queue,
+                queue_voxel_meshes.after(queue_material_meshes::<StandardMaterial>),
             );
 
         render_app
@@ -120,6 +126,8 @@ impl FromWorld for VolumeMeta {
     }
 }
 
+pub struct VolumeBindGroup(BindGroup);
+
 #[derive(AsStd140)]
 pub struct GpuVolume {
     pub min: Vec3,
@@ -133,319 +141,6 @@ pub struct GpuVoxelBuffer {
 
 #[derive(Component, Default)]
 pub struct VolumeCamera;
-
-#[derive(Default, Clone, TypeUuid)]
-#[uuid = "e0c8e218-4a3e-4113-a231-fe39e993f6f5"]
-pub struct VoxelMaterial {
-    pub base_color: Color,
-    pub base_color_texture: Option<Handle<Image>>,
-    pub emissive: Color,
-    pub emissive_texture: Option<Handle<Image>>,
-    pub perceptual_roughness: f32,
-    pub metallic: f32,
-    pub metallic_roughness_texture: Option<Handle<Image>>,
-    pub reflectance: f32,
-    pub unlit: bool,
-    pub alpha_mode: AlphaMode,
-}
-
-impl From<StandardMaterial> for VoxelMaterial {
-    fn from(material: StandardMaterial) -> Self {
-        let StandardMaterial {
-            base_color,
-            base_color_texture,
-            emissive,
-            emissive_texture,
-            perceptual_roughness,
-            metallic,
-            metallic_roughness_texture,
-            reflectance,
-            unlit,
-            alpha_mode,
-            ..
-        } = material;
-
-        Self {
-            base_color,
-            base_color_texture,
-            emissive,
-            emissive_texture,
-            perceptual_roughness,
-            metallic,
-            metallic_roughness_texture,
-            reflectance,
-            unlit,
-            alpha_mode,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct GpuVoxelMaterial {
-    pub buffer: Buffer,
-    pub bind_group: BindGroup,
-}
-
-impl RenderAsset for VoxelMaterial {
-    type ExtractedAsset = VoxelMaterial;
-    type PreparedAsset = GpuVoxelMaterial;
-    type Param = (
-        SRes<RenderDevice>,
-        SRes<MaterialPipeline<VoxelMaterial>>,
-        SRes<RenderAssets<Image>>,
-        SRes<VolumeMeta>,
-    );
-
-    fn extract_asset(&self) -> Self::ExtractedAsset {
-        self.clone()
-    }
-
-    fn prepare_asset(
-        material: Self::ExtractedAsset,
-        (render_device, pipeline, images, volume_meta): &mut SystemParamItem<Self::Param>,
-    ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        let (base_color_texture_view, base_color_sampler) = match pipeline
-            .mesh_pipeline
-            .get_image_texture(images, &material.base_color_texture)
-        {
-            Some(result) => result,
-            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
-        };
-
-        let (emissive_texture_view, emissive_sampler) = match pipeline
-            .mesh_pipeline
-            .get_image_texture(images, &material.emissive_texture)
-        {
-            Some(result) => result,
-            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
-        };
-
-        let (metallic_roughness_texture_view, metallic_roughness_sampler) = match pipeline
-            .mesh_pipeline
-            .get_image_texture(images, &material.metallic_roughness_texture)
-        {
-            Some(result) => result,
-            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
-        };
-
-        let mut flags = StandardMaterialFlags::NONE;
-        if material.base_color_texture.is_some() {
-            flags |= StandardMaterialFlags::BASE_COLOR_TEXTURE;
-        }
-        if material.emissive_texture.is_some() {
-            flags |= StandardMaterialFlags::EMISSIVE_TEXTURE;
-        }
-        if material.metallic_roughness_texture.is_some() {
-            flags |= StandardMaterialFlags::METALLIC_ROUGHNESS_TEXTURE;
-        }
-        if material.unlit {
-            flags |= StandardMaterialFlags::UNLIT;
-        }
-
-        let mut alpha_cutoff = 0.5;
-        match material.alpha_mode {
-            AlphaMode::Opaque => flags |= StandardMaterialFlags::ALPHA_MODE_OPAQUE,
-            AlphaMode::Mask(cutoff) => {
-                alpha_cutoff = cutoff;
-                flags |= StandardMaterialFlags::ALPHA_MODE_MASK;
-            }
-            AlphaMode::Blend => flags |= StandardMaterialFlags::ALPHA_MODE_BLEND,
-        };
-
-        let volume_binding = match volume_meta.volume_uniform.binding() {
-            Some(result) => result,
-            None => return Err(PrepareAssetError::RetryNextUpdate(material)),
-        };
-
-        let value = StandardMaterialUniformData {
-            base_color: material.base_color.as_linear_rgba_f32().into(),
-            emissive: material.emissive.into(),
-            roughness: material.perceptual_roughness,
-            metallic: material.metallic,
-            reflectance: material.reflectance,
-            flags: flags.bits(),
-            alpha_cutoff,
-        };
-
-        let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: None,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            contents: value.as_std140().as_bytes(),
-        });
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.material_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(base_color_texture_view),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::Sampler(base_color_sampler),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::TextureView(emissive_texture_view),
-                },
-                BindGroupEntry {
-                    binding: 4,
-                    resource: BindingResource::Sampler(emissive_sampler),
-                },
-                BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::TextureView(metallic_roughness_texture_view),
-                },
-                BindGroupEntry {
-                    binding: 6,
-                    resource: BindingResource::Sampler(metallic_roughness_sampler),
-                },
-                BindGroupEntry {
-                    binding: 7,
-                    resource: volume_binding,
-                },
-                BindGroupEntry {
-                    binding: 8,
-                    resource: volume_meta.voxel_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
-        Ok(GpuVoxelMaterial { buffer, bind_group })
-    }
-}
-
-impl Material for VoxelMaterial {
-    fn fragment_shader(_asset_server: &AssetServer) -> Option<Handle<Shader>> {
-        Some(VOXEL_SHADER_HANDLE.typed::<Shader>())
-    }
-
-    fn specialize(
-        _pipeline: &MaterialPipeline<Self>,
-        descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayout,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.depth_stencil = Some(DepthStencilState {
-            format: TextureFormat::Depth32Float,
-            depth_write_enabled: false,
-            depth_compare: CompareFunction::Always,
-            stencil: default(),
-            bias: default(),
-        });
-        descriptor.primitive.cull_mode = None;
-        Ok(())
-    }
-
-    fn alpha_mode(_material: &<Self as RenderAsset>::PreparedAsset) -> AlphaMode {
-        AlphaMode::Blend
-    }
-
-    fn bind_group(material: &<Self as RenderAsset>::PreparedAsset) -> &BindGroup {
-        &material.bind_group
-    }
-
-    fn bind_group_layout(render_device: &RenderDevice) -> BindGroupLayout {
-        render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            StandardMaterialUniformData::std140_size_static() as u64,
-                        ),
-                    },
-                    count: None,
-                },
-                // Base Color Texture
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Base Color Texture Sampler
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Emissive Texture
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Emissive Texture Sampler
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Metallic Roughness Texture
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Metallic Roughness Texture Sampler
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Volume Uniform
-                BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
-                    },
-                    count: None,
-                },
-                // Voxel Storage Buffer
-                BindGroupLayoutEntry {
-                    binding: 8,
-                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            GpuVoxelBuffer::std430_size_static() as u64
-                        ),
-                    },
-                    count: None,
-                },
-            ],
-        })
-    }
-}
 
 #[derive(Component, Deref, DerefMut)]
 pub struct VolumeProjection(pub OrthographicProjection);
@@ -535,7 +230,6 @@ pub fn setup_volume(
                     Frustum::default(),
                     GlobalTransform::default(),
                     VolumeCamera::default(),
-                    RenderLayers::from(GiRenderLayers::Voxel),
                 ))
                 .id()
         }),
@@ -600,40 +294,188 @@ pub fn prepare_volume_lights(
     }
 }
 
-/// Attach any standard material mesh with a voxel material copy.
-pub fn create_voxel_mesh(
-    mut commands: Commands,
-    mesh_query: Query<
-        (
-            Entity,
-            &Handle<StandardMaterial>,
-            &Handle<Mesh>,
-            Option<&SkinnedMesh>,
-        ),
-        Added<Handle<StandardMaterial>>,
-    >,
-    standard_materials: Res<Assets<StandardMaterial>>,
-    mut voxel_materials: ResMut<Assets<VoxelMaterial>>,
-) {
-    for (entity, standard_material, mesh, maybe_skinned_mesh) in mesh_query.iter() {
-        let standard_material = match standard_materials.get(standard_material) {
-            Some(material) => material.clone(),
-            None => continue,
-        };
-        let material = voxel_materials.add(standard_material.into());
+pub struct VolumePipeline {
+    pub material_layout: BindGroupLayout,
+    pub volume_layout: BindGroupLayout,
+    pub mesh_pipeline: MeshPipeline,
+}
 
-        let child = commands
-            .spawn_bundle(MaterialMeshBundle {
-                mesh: mesh.clone(),
-                material,
-                ..Default::default()
-            })
-            .insert(RenderLayers::from(GiRenderLayers::Voxel))
-            .id();
-        if let Some(skinned_mesh) = maybe_skinned_mesh {
-            commands.entity(child).insert(skinned_mesh.clone());
+impl FromWorld for VolumePipeline {
+    fn from_world(world: &mut World) -> Self {
+        let mesh_pipeline = world.resource::<MeshPipeline>().clone();
+        let render_device = world.resource::<RenderDevice>();
+
+        let material_layout = StandardMaterial::bind_group_layout(render_device);
+
+        let volume_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(
+                            GpuVoxelBuffer::std430_size_static() as u64
+                        ),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        Self {
+            material_layout,
+            volume_layout,
+            mesh_pipeline,
         }
+    }
+}
 
-        commands.entity(entity).add_child(child);
+impl SpecializedMeshPipeline for VolumePipeline {
+    type Key = MeshPipelineKey;
+
+    fn specialize(
+        &self,
+        key: Self::Key,
+        layout: &MeshVertexBufferLayout,
+    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
+        let shader = VOXEL_SHADER_HANDLE.typed();
+
+        let mut descriptor = self.mesh_pipeline.specialize(key, layout)?;
+        descriptor.fragment.as_mut().unwrap().shader = shader;
+        descriptor.layout = Some(vec![
+            self.mesh_pipeline.view_layout.clone(),
+            self.material_layout.clone(),
+            self.mesh_pipeline.mesh_layout.clone(),
+            self.volume_layout.clone(),
+        ]);
+        descriptor.primitive.cull_mode = None;
+
+        Ok(descriptor)
+    }
+}
+
+pub fn queue_volume_bind_groups(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    volume_meta: Res<VolumeMeta>,
+    volume_pipeline: Res<VolumePipeline>,
+) {
+    let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+        label: None,
+        layout: &volume_pipeline.volume_layout,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: volume_meta.volume_uniform.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: volume_meta.voxel_buffer.as_entire_binding(),
+            },
+        ],
+    });
+
+    commands.insert_resource(VolumeBindGroup(bind_group));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn queue_voxel_meshes(
+    transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
+    volume_pipeline: Res<VolumePipeline>,
+    material_meshes: Query<(&Handle<StandardMaterial>, &Handle<Mesh>)>,
+    render_meshes: Res<RenderAssets<Mesh>>,
+    render_materials: Res<RenderAssets<StandardMaterial>>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<VolumePipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
+    config: Res<GiConfig>,
+    msaa: Res<Msaa>,
+    mut views: Query<
+        (
+            &mut RenderPhase<Opaque3d>,
+            &mut RenderPhase<AlphaMask3d>,
+            &mut RenderPhase<Transparent3d>,
+        ),
+        (With<ExtractedView>, With<VolumeCamera>),
+    >,
+) {
+    if !config.global {
+        return;
+    }
+
+    let draw_function = transparent_draw_functions
+        .read()
+        .get_id::<DrawVoxelMesh>()
+        .unwrap();
+
+    for (mut opaque_phase, mut alpha_mask_phase, mut transparent_phase) in views.iter_mut() {
+        transparent_phase.items.clear();
+
+        let mut add_phase_item = |entity, distance| {
+            if let Ok((material_handle, mesh_handle)) = material_meshes.get(entity) {
+                if !render_materials.contains_key(material_handle) {
+                    return;
+                }
+
+                if let Some(mesh) = render_meshes.get(mesh_handle) {
+                    let mut key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                    key |= MeshPipelineKey::from_msaa_samples(msaa.samples);
+
+                    let pipeline = pipelines
+                        .specialize(&mut pipeline_cache, &volume_pipeline, key, &mesh.layout)
+                        .unwrap();
+
+                    transparent_phase.add(Transparent3d {
+                        distance,
+                        pipeline,
+                        entity,
+                        draw_function,
+                    });
+                }
+            }
+        };
+
+        for item in opaque_phase.items.drain(..) {
+            add_phase_item(item.entity, item.distance);
+        }
+        for item in alpha_mask_phase.items.drain(..) {
+            add_phase_item(item.entity, item.distance);
+        }
+    }
+}
+
+pub type DrawVoxelMesh = (
+    SetItemPipeline,
+    SetMeshViewBindGroup<0>,
+    SetMaterialBindGroup<StandardMaterial, 1>,
+    SetMeshBindGroup<2>,
+    SetVolumeBindGroup<3>,
+    DrawMesh,
+);
+
+pub struct SetVolumeBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetVolumeBindGroup<I> {
+    type Param = SRes<VolumeBindGroup>;
+
+    fn render<'w>(
+        _view: Entity,
+        _item: Entity,
+        volume_bind_group: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        pass.set_bind_group(I, &volume_bind_group.into_inner().0, &[]);
+        RenderCommandResult::Success
     }
 }

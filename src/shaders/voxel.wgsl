@@ -1,48 +1,14 @@
 #import bevy_pbr::mesh_view_bind_group
 #import bevy_pbr::mesh_struct
 #import bevy_hikari::volume_struct
+#import bevy_hikari::standard_material
 
 [[group(2), binding(0)]]
 var<uniform> mesh: Mesh;
 
-struct StandardMaterial {
-    base_color: vec4<f32>;
-    emissive: vec4<f32>;
-    perceptual_roughness: f32;
-    metallic: f32;
-    reflectance: f32;
-    // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
-    flags: u32;
-    alpha_cutoff: f32;
-};
-
-let STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT: u32 = 1u;
-let STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT: u32 = 2u;
-let STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT: u32 = 4u;
-let STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT: u32 = 8u;
-let STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT: u32 = 16u;
-let STANDARD_MATERIAL_FLAGS_UNLIT_BIT: u32 = 32u;
-let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE: u32 = 64u;
-let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK: u32 = 128u;
-let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND: u32 = 256u;
-
-[[group(1), binding(0)]]
-var<uniform> material: StandardMaterial;
-[[group(1), binding(1)]]
-var base_color_texture: texture_2d<f32>;
-[[group(1), binding(2)]]
-var base_color_sampler: sampler;
-[[group(1), binding(3)]]
-var emissive_texture: texture_2d<f32>;
-[[group(1), binding(4)]]
-var emissive_sampler: sampler;
-[[group(1), binding(5)]]
-var metallic_roughness_texture: texture_2d<f32>;
-[[group(1), binding(6)]]
-var metallic_roughness_sampler: sampler;
-[[group(1), binding(7)]]
+[[group(3), binding(0)]]
 var<uniform> volume: Volume;
-[[group(1), binding(8)]]
+[[group(3), binding(1)]]
 var<storage, read_write> voxel_buffer: VoxelBuffer;
 
 let PI: f32 = 3.141592653589793;
@@ -158,6 +124,9 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     if ((material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u) {
         discard;
     }
+    if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND) != 0u) {
+        discard;
+    }
 
     var output_color = material.base_color;
     if ((material.flags & STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
@@ -192,9 +161,6 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         } else {
             discard;
         }
-    } else if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND) != 0u) {
-        // Blend mode not supported.
-        discard;
     }
 
     let normal = normalize(in.world_normal);
@@ -218,7 +184,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
     // Tone mapping, but keep HDR info.
     let color = reinhard_luminance(output_color.rgb);
-    var packed = pack4x8unorm(vec4<f32>(color.rgb, color.a / 255.0));
+    let packed = pack4x8unorm(vec4<f32>(color.rgb, color.a / 255.0));
 
     let index = spatial_index(in.world_position.xyz);
     let voxel = &voxel_buffer.data[linear_index(index)];
