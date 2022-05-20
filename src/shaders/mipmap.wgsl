@@ -1,22 +1,15 @@
 #import bevy_hikari::volume_struct
 
-#ifdef VOXEL_BUFFER
-
-[[group(0), binding(0)]]
-var<storage, read_write> voxel_buffer: VoxelBuffer;
-[[group(0), binding(1)]]
-var texture_out: texture_storage_3d<rgba16float, write>;
-
 fn linear_index(index: vec3<i32>) -> i32 {
     var spatial = vec3<u32>(index);
     var morton = 0u;
     for (var i = 0u; i < 8u; i = i + 1u) {
-        let coord = (vec3<u32>(index) >> vec3<u32>(i)) & vec3<u32>(1u);
+        let coords = (vec3<u32>(index) >> vec3<u32>(i)) & vec3<u32>(1u);
         let offset = 3u * i;
 
-        morton = morton | (coord.x << offset);
-        morton = morton | (coord.y << (offset + 1u));
-        morton = morton | (coord.z << (offset + 2u));
+        morton = morton | (coords.x << offset);
+        morton = morton | (coords.y << (offset + 1u));
+        morton = morton | (coords.z << (offset + 2u));
     }
 
     return i32(morton);
@@ -29,25 +22,17 @@ fn unpack_color(voxel: u32) -> vec4<f32> {
     return vec4<f32>(multiplier * unpacked.rgb, alpha);
 }
 
+#ifdef VOXEL_BUFFER
+
+[[group(0), binding(0)]]
+var<storage, read_write> voxel_buffer: VoxelBuffer;
+
 [[stage(compute), workgroup_size(8, 8, 8)]]
 fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
     let coords = vec3<i32>(id);
-    if (all(coords < textureDimensions(texture_out))) {
-        let index = linear_index(coords);
-        let voxel = &voxel_buffer.data[index];
-        atomicStore(voxel, 0u);
-    }
-}
-
-[[stage(compute), workgroup_size(8, 8, 8)]]
-fn fill([[builtin(global_invocation_id)]] id: vec3<u32>) {
-    let coords = vec3<i32>(id);
-    if (all(coords < textureDimensions(texture_out))) {
-        let index = linear_index(coords);
-        let voxel = &voxel_buffer.data[index];
-        let color = unpack_color(atomicLoad(voxel));
-        textureStore(texture_out, coords, color);
-    }
+    let index = linear_index(coords);
+    let voxel = &voxel_buffer.data[index];
+    atomicStore(voxel, 0u);
 }
 
 #else   // VOXEL_BUFFER
@@ -66,7 +51,9 @@ var texture_out_4: texture_storage_3d<rgba16float, write>;
 [[group(0), binding(5)]]
 var texture_out_5: texture_storage_3d<rgba16float, write>;
 [[group(0), binding(6)]]
-var texture_in: texture_3d<f32>;
+var<storage, read> voxel_buffer: VoxelBuffer;
+
+var<workgroup> voxel_cache: array<array<array<u32, 8>, 8>, 8>;
 
 #else   // MIPMAP_ANISOTROPIC
 
@@ -79,34 +66,69 @@ var<uniform> mipmap_data: Mipmap;
 
 #endif  // MIPMAP_ANISOTROPIC
 
-fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> vec4<f32> {
-    let location = vec3<i32>(id) * 2 + index;
-    return textureLoad(texture_in, location, 0);
+#ifndef MIPMAP_ANISOTROPIC
+
+fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> u32 {
+    let coords = vec3<i32>(id) * 2 + index;
+    let voxel = &voxel_buffer.data[linear_index(coords)];
+    return atomicLoad(voxel);
 }
 
-fn take_samples(id: vec3<u32>) -> array<vec4<f32>, 8> {
+fn cache_voxel(id: vec3<u32>, local_invocation_id: vec3<u32>) {
+    let index = vec2<u32>(local_invocation_id);
+    voxel_cache[index.x][index.y][0] = sample_voxel(id, SAMPLE_INDICES[0]);
+    voxel_cache[index.x][index.y][1] = sample_voxel(id, SAMPLE_INDICES[1]);
+    voxel_cache[index.x][index.y][2] = sample_voxel(id, SAMPLE_INDICES[2]);
+    voxel_cache[index.x][index.y][3] = sample_voxel(id, SAMPLE_INDICES[3]);
+    voxel_cache[index.x][index.y][4] = sample_voxel(id, SAMPLE_INDICES[4]);
+    voxel_cache[index.x][index.y][5] = sample_voxel(id, SAMPLE_INDICES[5]);
+    voxel_cache[index.x][index.y][6] = sample_voxel(id, SAMPLE_INDICES[6]);
+    voxel_cache[index.x][index.y][7] = sample_voxel(id, SAMPLE_INDICES[7]);
+}
+
+fn take_samples(local_invocation_id: vec3<u32>) -> array<vec4<f32>, 8> {
     var samples: array<vec4<f32>, 8>;
-    samples[0] = sample_voxel(id, SAMPLE_INDICES[0]);
-    samples[1] = sample_voxel(id, SAMPLE_INDICES[1]);
-    samples[2] = sample_voxel(id, SAMPLE_INDICES[2]);
-    samples[3] = sample_voxel(id, SAMPLE_INDICES[3]);
-    samples[4] = sample_voxel(id, SAMPLE_INDICES[4]);
-    samples[5] = sample_voxel(id, SAMPLE_INDICES[5]);
-    samples[6] = sample_voxel(id, SAMPLE_INDICES[6]);
-    samples[7] = sample_voxel(id, SAMPLE_INDICES[7]);
+    let index = vec2<u32>(local_invocation_id);
+    samples[0] = unpack_color(voxel_cache[index.x][index.y][0]);
+    samples[1] = unpack_color(voxel_cache[index.x][index.y][1]);
+    samples[2] = unpack_color(voxel_cache[index.x][index.y][2]);
+    samples[3] = unpack_color(voxel_cache[index.x][index.y][3]);
+    samples[4] = unpack_color(voxel_cache[index.x][index.y][4]);
+    samples[5] = unpack_color(voxel_cache[index.x][index.y][5]);
+    samples[6] = unpack_color(voxel_cache[index.x][index.y][6]);
+    samples[7] = unpack_color(voxel_cache[index.x][index.y][7]);
     return samples;
 }
 
-#ifndef MIPMAP_ANISOTROPIC
+#ifdef 0
+fn take_samples(id: vec3<u32>) -> array<vec4<f32>, 8> {
+    var samples: array<vec4<f32>, 8>;
+    samples[0] = unpack_color(sample_voxel(id, SAMPLE_INDICES[0]));
+    samples[1] = unpack_color(sample_voxel(id, SAMPLE_INDICES[1]));
+    samples[2] = unpack_color(sample_voxel(id, SAMPLE_INDICES[2]));
+    samples[3] = unpack_color(sample_voxel(id, SAMPLE_INDICES[3]));
+    samples[4] = unpack_color(sample_voxel(id, SAMPLE_INDICES[4]));
+    samples[5] = unpack_color(sample_voxel(id, SAMPLE_INDICES[5]));
+    samples[6] = unpack_color(sample_voxel(id, SAMPLE_INDICES[6]));
+    samples[7] = unpack_color(sample_voxel(id, SAMPLE_INDICES[7]));
+    return samples;
+}
+#endif
 
 [[stage(compute), workgroup_size(8, 8, 6)]]
 fn mipmap(
     [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
     [[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
+    [[builtin(workgroup_id)]] workgroup_id: vec3<u32>,
 ) {
-    let id = vec3<u32>(global_invocation_id.xy, global_invocation_id.z / 6u);
+    let id = vec3<u32>(global_invocation_id.xy, workgroup_id.z);
     let direction = local_invocation_id.z;
-    let samples = take_samples(id);
+
+    if (local_invocation_id.z == 0u) {
+        cache_voxel(id, local_invocation_id);
+    }
+    workgroupBarrier();
+    let samples = take_samples(local_invocation_id);
 
     var color = vec4<f32>(0.);
     if (direction == 0u) {
@@ -161,6 +183,24 @@ fn mipmap(
 }
 
 #else   // MIPMAP_ANISOTROPIC
+
+fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> vec4<f32> {
+    let coords = vec3<i32>(id) * 2 + index;
+    return textureLoad(texture_in, coords, 0);
+}
+
+fn take_samples(id: vec3<u32>) -> array<vec4<f32>, 8> {
+    var samples: array<vec4<f32>, 8>;
+    samples[0] = sample_voxel(id, SAMPLE_INDICES[0]);
+    samples[1] = sample_voxel(id, SAMPLE_INDICES[1]);
+    samples[2] = sample_voxel(id, SAMPLE_INDICES[2]);
+    samples[3] = sample_voxel(id, SAMPLE_INDICES[3]);
+    samples[4] = sample_voxel(id, SAMPLE_INDICES[4]);
+    samples[5] = sample_voxel(id, SAMPLE_INDICES[5]);
+    samples[6] = sample_voxel(id, SAMPLE_INDICES[6]);
+    samples[7] = sample_voxel(id, SAMPLE_INDICES[7]);
+    return samples;
+}
 
 [[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {

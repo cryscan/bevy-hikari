@@ -79,6 +79,10 @@ impl Plugin for GiPlugin {
             MIPMAP_SHADER_HANDLE,
             Shader::from_wgsl(include_str!("shaders/mipmap.wgsl")),
         );
+        shaders.set_untracked(
+            ALBEDO_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/albedo.wgsl")),
+        );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
             Ok(render_app) => render_app,
