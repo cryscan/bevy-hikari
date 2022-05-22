@@ -13,13 +13,15 @@ use bevy::{
     },
 };
 use deferred::DeferredPlugin;
+use irradiance::IrradiancePlugin;
 use mipmap::MipmapPlugin;
 use volume::VolumePlugin;
 
-mod deferred;
-mod mipmap;
-mod utils;
-mod volume;
+pub mod deferred;
+pub mod irradiance;
+pub mod mipmap;
+pub mod utils;
+pub mod volume;
 
 pub const VOLUME_STRUCT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 16383356904282015386);
@@ -36,8 +38,8 @@ pub const IRRADIANCE_SHADER_HANDLE: HandleUntyped =
 pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15849919474767323744);
 
-pub const VOXEL_SIZE: usize = 256;
-pub const VOXEL_MIPMAP_LEVEL_COUNT: usize = 8;
+pub const VOXEL_RESOLUTION: usize = 256;
+pub const VOXEL_LEVELS: usize = 8;
 pub const VOXEL_COUNT: usize = 16777216;
 
 pub mod node {
@@ -45,6 +47,7 @@ pub mod node {
     pub const VOXEL_CLEAR_PASS: &str = "voxel_clear_pass";
     pub const MIPMAP_PASS: &str = "mipmap_pass";
     pub const DEFERRED_PASS_DRIVER: &str = "deferred_pass_driver";
+    pub const IRRADIANCE_PASS_DRIVER: &str = "irradiance_pass_driver";
 }
 
 pub mod simple_3d_graph {
@@ -108,7 +111,8 @@ impl Plugin for GiPlugin {
 
         app.add_plugin(VolumePlugin)
             .add_plugin(MipmapPlugin)
-            .add_plugin(DeferredPlugin);
+            .add_plugin(DeferredPlugin)
+            .add_plugin(IrradiancePlugin);
     }
 }
 

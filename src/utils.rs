@@ -2,7 +2,7 @@ use bevy::{
     core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d},
     prelude::*,
     render::{
-        camera::ExtractedCamera,
+        camera::{ActiveCamera, Camera3d, ExtractedCamera},
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotValue},
         render_phase::RenderPhase,
         renderer::RenderContext,
@@ -73,5 +73,33 @@ pub fn extract_custom_cameras<M: Component + Default>(
                 RenderPhase::<Transparent3d>::default(),
             ));
         }
+    }
+}
+
+/// Sync the custom camera's states with the main camera.
+pub fn update_custom_camera<M: Default + Component>(
+    main_active: Res<ActiveCamera<Camera3d>>,
+    custom_active: Res<ActiveCamera<M>>,
+    mut query: Query<(&mut Transform, &mut Camera)>,
+) {
+    if let Some((main_camera, custom_camera)) = main_active.get().zip(custom_active.get()) {
+        let [(main_transform, main_camera), (mut custom_transform, mut custom_camera)] =
+            query.many_mut([main_camera, custom_camera]);
+        *custom_transform = *main_transform;
+        custom_camera.projection_matrix = main_camera.projection_matrix;
+        custom_camera.depth_calculation = main_camera.depth_calculation;
+    }
+}
+
+pub fn extract_custom_camera_phases<M: Default + Component>(
+    mut commands: Commands,
+    active: Res<ActiveCamera<M>>,
+) {
+    if let Some(entity) = active.get() {
+        commands.get_or_spawn(entity).insert_bundle((
+            RenderPhase::<Opaque3d>::default(),
+            RenderPhase::<AlphaMask3d>::default(),
+            RenderPhase::<Transparent3d>::default(),
+        ));
     }
 }

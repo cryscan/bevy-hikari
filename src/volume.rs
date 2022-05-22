@@ -1,6 +1,6 @@
 use crate::{
     utils::{extract_custom_cameras, SimplePassDriver},
-    VOXEL_COUNT, VOXEL_SHADER_HANDLE, VOXEL_SIZE,
+    VOXEL_COUNT, VOXEL_RESOLUTION, VOXEL_SHADER_HANDLE,
 };
 use bevy::{
     core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
@@ -162,8 +162,8 @@ pub fn setup_volume(
     mut volume: ResMut<Volume>,
 ) {
     let size = Extent3d {
-        width: VOXEL_SIZE as u32,
-        height: VOXEL_SIZE as u32,
+        width: VOXEL_RESOLUTION as u32,
+        height: VOXEL_RESOLUTION as u32,
         ..default()
     };
 
@@ -229,7 +229,9 @@ pub fn setup_volume(
 }
 
 pub fn extract_volume(mut commands: Commands, volume: Res<Volume>) {
-    commands.insert_resource(volume.clone());
+    if volume.is_added() || volume.is_changed() {
+        commands.insert_resource(volume.clone());
+    }
 }
 
 pub fn prepare_volume(
@@ -427,6 +429,7 @@ pub fn queue_voxel_meshes(
                 if let Some(mesh) = render_meshes.get(mesh_handle) {
                     let mut key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                     key |= MeshPipelineKey::from_msaa_samples(msaa.samples);
+                    key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
 
                     if let Ok(pipeline) = pipelines.specialize(
                         &mut pipeline_cache,

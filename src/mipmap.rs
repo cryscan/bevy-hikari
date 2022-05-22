@@ -1,6 +1,6 @@
 use crate::{
     volume::{GpuVoxelBuffer, VolumeMeta},
-    MIPMAP_SHADER_HANDLE, VOXEL_MIPMAP_LEVEL_COUNT, VOXEL_SIZE,
+    MIPMAP_SHADER_HANDLE, VOXEL_LEVELS, VOXEL_RESOLUTION,
 };
 use bevy::{
     core_pipeline::node,
@@ -203,7 +203,7 @@ impl FromWorld for MipmapMeta {
         let mipmap_uniform_offsets = mipmap_uniform_offsets.try_into().unwrap();
 
         let anisotropic_textures = [(); 6].map(|_| {
-            let size = (VOXEL_SIZE >> 1) as u32;
+            let size = (VOXEL_RESOLUTION >> 1) as u32;
             render_device.create_texture(&TextureDescriptor {
                 label: None,
                 size: Extent3d {
@@ -211,7 +211,7 @@ impl FromWorld for MipmapMeta {
                     height: size,
                     depth_or_array_layers: size,
                 },
-                mip_level_count: VOXEL_MIPMAP_LEVEL_COUNT as u32,
+                mip_level_count: VOXEL_LEVELS as u32,
                 sample_count: 1,
                 dimension: TextureDimension::D3,
                 format: TextureFormat::Rgba16Float,
@@ -256,7 +256,7 @@ impl FromWorld for MipmapMeta {
             entries: mipmap_bind_group,
         });
 
-        let anisotropic_texture_views = (0..VOXEL_MIPMAP_LEVEL_COUNT).map(|level| {
+        let anisotropic_texture_views = (0..VOXEL_LEVELS).map(|level| {
             anisotropic_textures.iter().map(move |texture| {
                 texture.create_view(&TextureViewDescriptor {
                     base_mip_level: level as u32,
@@ -343,7 +343,7 @@ impl Node for VoxelClearPassNode {
                 .begin_compute_pass(&default());
             let bind_group = &mipmap_meta.voxel_buffer_bind_group;
 
-            let count = (VOXEL_SIZE / 8) as u32;
+            let count = (VOXEL_RESOLUTION / 8) as u32;
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
             pass.dispatch(count, count, count);
@@ -371,7 +371,7 @@ impl Node for MipmapPassNode {
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(mipmap_pipeline.mipmap_pipeline)
         {
-            let size = (VOXEL_SIZE / 2) as u32;
+            let size = (VOXEL_RESOLUTION / 2) as u32;
             let count = (size / 8).max(1);
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &mipmap_meta.mipmap_bind_group, &[]);
@@ -393,7 +393,7 @@ impl Node for MipmapPassNode {
                     .iter()
                     .zip_eq(mipmap_meta.mipmap_uniform_offsets.iter())
                 {
-                    let size = (VOXEL_SIZE / (2 << level)) as u32;
+                    let size = (VOXEL_RESOLUTION / (2 << level)) as u32;
                     let count = (size / 8).max(1);
                     pass.set_bind_group(0, bind_group, &[*offset]);
                     pass.dispatch(count, count, count);
