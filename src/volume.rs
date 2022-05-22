@@ -5,11 +5,7 @@ use crate::{
 use bevy::{
     core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
     ecs::system::{lifetimeless::SRes, SystemParamItem},
-    pbr::{
-        queue_material_meshes, DrawMesh, MeshPipeline, MeshPipelineKey, RenderLightSystems,
-        SetMaterialBindGroup, SetMeshBindGroup, SetMeshViewBindGroup, SpecializedMaterial,
-        ViewShadowBindings,
-    },
+    pbr::*,
     prelude::*,
     render::{
         camera::{ActiveCamera, Camera3d, CameraProjection, DepthCalculation, RenderTarget},
@@ -17,10 +13,7 @@ use bevy::{
         primitives::Frustum,
         render_asset::RenderAssets,
         render_graph::RenderGraph,
-        render_phase::{
-            AddRenderCommand, DrawFunctions, EntityRenderCommand, RenderCommandResult, RenderPhase,
-            SetItemPipeline, TrackedRenderPass,
-        },
+        render_phase::*,
         render_resource::{std140::AsStd140, std430::AsStd430, *},
         renderer::{RenderDevice, RenderQueue},
         texture::BevyDefault,
@@ -62,25 +55,22 @@ impl Plugin for VolumePlugin {
                 queue_voxel_meshes.after(queue_material_meshes::<StandardMaterial>),
             );
 
-        render_app
-            .world
-            .resource_scope(|world, mut graph: Mut<RenderGraph>| {
-                use crate::node::VOXEL_PASS_DRIVER;
-                use node::{CLEAR_PASS_DRIVER, MAIN_PASS_DEPENDENCIES, MAIN_PASS_DRIVER};
+        use crate::node::VOXEL_PASS_DRIVER;
+        use node::{CLEAR_PASS_DRIVER, MAIN_PASS_DEPENDENCIES, MAIN_PASS_DRIVER};
 
-                let driver = SimplePassDriver::<VolumeCamera>::new(world);
-                graph.add_node(VOXEL_PASS_DRIVER, driver);
+        let driver = SimplePassDriver::<VolumeCamera>::new(&mut render_app.world);
+        let mut graph = render_app.world.resource_mut::<RenderGraph>();
+        graph.add_node(VOXEL_PASS_DRIVER, driver);
 
-                graph
-                    .add_node_edge(MAIN_PASS_DEPENDENCIES, VOXEL_PASS_DRIVER)
-                    .unwrap();
-                graph
-                    .add_node_edge(CLEAR_PASS_DRIVER, VOXEL_PASS_DRIVER)
-                    .unwrap();
-                graph
-                    .add_node_edge(MAIN_PASS_DRIVER, VOXEL_PASS_DRIVER)
-                    .unwrap();
-            });
+        graph
+            .add_node_edge(MAIN_PASS_DEPENDENCIES, VOXEL_PASS_DRIVER)
+            .unwrap();
+        graph
+            .add_node_edge(CLEAR_PASS_DRIVER, VOXEL_PASS_DRIVER)
+            .unwrap();
+        graph
+            .add_node_edge(MAIN_PASS_DRIVER, VOXEL_PASS_DRIVER)
+            .unwrap();
     }
 }
 
@@ -142,6 +132,8 @@ pub struct GpuVoxelBuffer {
 #[derive(Component, Default)]
 pub struct VolumeCamera;
 
+/// Use custom projection to prevent [`camera_system`](bevy::render::camera::camera_system) from running
+/// and updating the projection automatically.
 #[derive(Component, Deref, DerefMut)]
 pub struct VolumeProjection(pub OrthographicProjection);
 
@@ -392,6 +384,7 @@ pub fn queue_volume_bind_groups(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn queue_voxel_meshes(
     transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
     volume_pipeline: Res<VolumePipeline>,
@@ -435,16 +428,19 @@ pub fn queue_voxel_meshes(
                     let mut key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                     key |= MeshPipelineKey::from_msaa_samples(msaa.samples);
 
-                    let pipeline = pipelines
-                        .specialize(&mut pipeline_cache, &volume_pipeline, key, &mesh.layout)
-                        .unwrap();
-
-                    transparent_phase.add(Transparent3d {
-                        distance,
-                        pipeline,
-                        entity,
-                        draw_function,
-                    });
+                    if let Ok(pipeline) = pipelines.specialize(
+                        &mut pipeline_cache,
+                        &volume_pipeline,
+                        key,
+                        &mesh.layout,
+                    ) {
+                        transparent_phase.add(Transparent3d {
+                            distance,
+                            pipeline,
+                            entity,
+                            draw_function,
+                        });
+                    }
                 }
             }
         };
@@ -458,7 +454,7 @@ pub fn queue_voxel_meshes(
     }
 }
 
-pub type DrawVoxelMesh = (
+type DrawVoxelMesh = (
     SetItemPipeline,
     SetMeshViewBindGroup<0>,
     SetMaterialBindGroup<StandardMaterial, 1>,

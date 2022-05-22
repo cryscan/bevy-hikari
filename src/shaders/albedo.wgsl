@@ -15,6 +15,9 @@ struct FragmentInput {
 
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
+#ifdef TRANSPARENT_MAIN_PASS
+    return vec4<f32>(0.0);
+#else
     var output_color = material.base_color;
 #ifdef VERTEX_COLORS
     output_color = output_color * in.color;
@@ -24,4 +27,5 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
     }
 
     return output_color;
+#endif
 }
