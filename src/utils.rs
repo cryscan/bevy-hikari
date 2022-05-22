@@ -16,6 +16,7 @@ use crate::simple_3d_graph;
 pub struct SimplePassDriver<M: Component + Default> {
     query: QueryState<Entity, With<M>>,
 }
+
 impl<M: Component + Default> SimplePassDriver<M> {
     pub fn new(world: &mut World) -> Self {
         Self {
@@ -23,6 +24,7 @@ impl<M: Component + Default> SimplePassDriver<M> {
         }
     }
 }
+
 impl<M: Component + Default> Node for SimplePassDriver<M> {
     fn update(&mut self, world: &mut World) {
         self.query.update_archetypes(world);
@@ -42,7 +44,7 @@ impl<M: Component + Default> Node for SimplePassDriver<M> {
     }
 }
 
-/// Manually extract all cameras of type `M`, as [`CameraTypePlugin`](bevy::render::camera::CameraTypePlugin) only extracts the active camera.
+/// Extract all cameras of type `M`, as [`extract_cameras`](bevy::render::camera::extract_cameras) only extracts active cameras.
 pub fn extract_custom_cameras<M: Component + Default>(
     mut commands: Commands,
     windows: Res<Windows>,

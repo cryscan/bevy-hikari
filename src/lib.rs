@@ -12,6 +12,7 @@ use bevy::{
         RenderApp,
     },
 };
+use deferred::DeferredPlugin;
 use mipmap::MipmapPlugin;
 use volume::VolumePlugin;
 
@@ -43,6 +44,7 @@ pub mod node {
     pub const VOXEL_PASS_DRIVER: &str = "voxel_pass_driver";
     pub const VOXEL_CLEAR_PASS: &str = "voxel_clear_pass";
     pub const MIPMAP_PASS: &str = "mipmap_pass";
+    pub const DEFERRED_PASS_DRIVER: &str = "deferred_pass_driver";
 }
 
 pub mod simple_3d_graph {
@@ -58,8 +60,6 @@ pub mod simple_3d_graph {
 pub struct GiPlugin;
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(VolumePlugin).add_plugin(MipmapPlugin);
-
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         shaders.set_untracked(
             VOLUME_STRUCT_SHADER_HANDLE,
@@ -105,6 +105,10 @@ impl Plugin for GiPlugin {
             )
             .unwrap();
         graph.add_sub_graph(simple_3d_graph::NAME, simple_3d_graph);
+
+        app.add_plugin(VolumePlugin)
+            .add_plugin(MipmapPlugin)
+            .add_plugin(DeferredPlugin);
     }
 }
 
