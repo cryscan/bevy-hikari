@@ -90,7 +90,7 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
 }
 
 fn spatial_index(position: vec3<f32>) -> vec3<i32> {
-    let dims = vec3<u32>(VOXEL_SIZE - 1u);
+    let dims = vec3<u32>(VOXEL_RESOLUTION - 1u);
     let coords = (position - volume.min) / (volume.max - volume.min);
     return vec3<i32>(0.5 + vec3<f32>(dims) * coords);
 }

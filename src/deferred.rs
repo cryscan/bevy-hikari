@@ -1,10 +1,14 @@
-use crate::{utils::SimplePassDriver, volume::Volume, ALBEDO_SHADER_HANDLE};
+use crate::{
+    utils::{extract_custom_camera_phases, update_custom_camera, SimplePassDriver},
+    volume::Volume,
+    ALBEDO_SHADER_HANDLE,
+};
 use bevy::{
     core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
     pbr::*,
     prelude::*,
     render::{
-        camera::{ActiveCamera, Camera3d, CameraTypePlugin, RenderTarget},
+        camera::{CameraTypePlugin, RenderTarget},
         mesh::MeshVertexBufferLayout,
         render_asset::RenderAssets,
         render_graph::RenderGraph,
@@ -25,14 +29,17 @@ impl Plugin for DeferredPlugin {
             .add_startup_system(setup_deferred_camera)
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                update_deferred_camera.before(TransformSystem::TransformPropagate),
+                update_custom_camera::<DeferredCamera>.before(TransformSystem::TransformPropagate),
             );
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<DeferredPipeline>()
             .init_resource::<SpecializedMeshPipelines<DeferredPipeline>>()
-            .add_system_to_stage(RenderStage::Extract, extract_deferred_camera_phases)
+            .add_system_to_stage(
+                RenderStage::Extract,
+                extract_custom_camera_phases::<DeferredCamera>,
+            )
             .add_system_to_stage(
                 RenderStage::Queue,
                 queue_deferred_meshes.after(queue_material_meshes::<StandardMaterial>),
@@ -98,32 +105,6 @@ pub fn setup_deferred_camera(
         global_transform: default(),
         marker: default(),
     });
-}
-
-/// Sync deferred camera's transform with main camera.
-pub fn update_deferred_camera(
-    main_active: Res<ActiveCamera<Camera3d>>,
-    deferred_active: Res<ActiveCamera<DeferredCamera>>,
-    mut query: Query<&mut Transform>,
-) {
-    if let Some((main_camera, deferred_camera)) = main_active.get().zip(deferred_active.get()) {
-        let [main_transform, mut deferred_transform] =
-            query.many_mut([main_camera, deferred_camera]);
-        *deferred_transform = *main_transform;
-    }
-}
-
-pub fn extract_deferred_camera_phases(
-    mut commands: Commands,
-    active: Res<ActiveCamera<DeferredCamera>>,
-) {
-    if let Some(entity) = active.get() {
-        commands.get_or_spawn(entity).insert_bundle((
-            RenderPhase::<Opaque3d>::default(),
-            RenderPhase::<AlphaMask3d>::default(),
-            RenderPhase::<Transparent3d>::default(),
-        ));
-    }
 }
 
 pub struct DeferredPipeline {
