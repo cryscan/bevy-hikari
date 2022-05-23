@@ -183,7 +183,7 @@ pub struct MipmapMeta {
     pub anisotropic_textures: [Texture; 6],
     pub sampler: Sampler,
 
-    pub voxel_buffer_bind_group: BindGroup,
+    pub clear_bind_group: BindGroup,
     pub mipmap_bind_group: BindGroup,
     pub mipmap_anisotropic_bind_groups: Vec<[BindGroup; 6]>,
 }
@@ -229,7 +229,7 @@ impl FromWorld for MipmapMeta {
         let mipmap_pipeline = world.resource::<MipmapPipeline>();
         let volume_meta = world.resource::<VolumeMeta>();
 
-        let voxel_buffer_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+        let clear_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &mipmap_pipeline.clear_layout,
             entries: &[BindGroupEntry {
@@ -312,7 +312,7 @@ impl FromWorld for MipmapMeta {
             mipmap_uniform_offsets,
             anisotropic_textures,
             sampler,
-            voxel_buffer_bind_group,
+            clear_bind_group,
             mipmap_bind_group,
             mipmap_anisotropic_bind_groups,
         }
@@ -341,7 +341,7 @@ impl Node for VoxelClearPassNode {
             let mut pass = render_context
                 .command_encoder
                 .begin_compute_pass(&default());
-            let bind_group = &mipmap_meta.voxel_buffer_bind_group;
+            let bind_group = &mipmap_meta.clear_bind_group;
 
             let count = (VOXEL_RESOLUTION / 8) as u32;
             pass.set_pipeline(pipeline);
