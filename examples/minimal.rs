@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_hikari::GiPlugin;
+use bevy_hikari::{volume::Volume, GiPlugin};
 use std::f32::consts::PI;
 
 fn main() {
@@ -17,6 +17,11 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    commands.insert_resource(Volume::new(
+        Vec3::new(-2.5, -2.5, -2.5),
+        Vec3::new(2.5, 2.5, 2.5),
+    ));
+
     // Plane
     commands.spawn_bundle(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),

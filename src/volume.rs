@@ -28,7 +28,7 @@ pub struct VolumePlugin;
 impl Plugin for VolumePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Volume>()
-            .add_startup_system(setup_volume)
+            .add_system(update_volume)
             .add_system_to_stage(
                 CoreStage::PostUpdate,
                 update_frusta::<VolumeProjection>.after(TransformSystem::TransformPropagate),
@@ -82,6 +82,17 @@ pub struct Volume {
     pub views: Option<[Entity; 3]>,
 }
 
+impl Volume {
+    pub const fn new(min: Vec3, max: Vec3) -> Self {
+        Self {
+            enabled: true,
+            min,
+            max,
+            views: None,
+        }
+    }
+}
+
 impl Default for Volume {
     fn default() -> Self {
         Self {
@@ -95,6 +106,7 @@ impl Default for Volume {
 
 pub struct VolumeMeta {
     pub volume_uniform: UniformVec<GpuVolume>,
+    pub directions_uniform: UniformVec<GpuDirections>,
     pub voxel_buffer: Buffer,
 }
 
@@ -110,7 +122,8 @@ impl FromWorld for VolumeMeta {
         });
 
         Self {
-            volume_uniform: Default::default(),
+            volume_uniform: default(),
+            directions_uniform: default(),
             voxel_buffer,
         }
     }
@@ -127,6 +140,34 @@ pub struct GpuVolume {
 #[derive(AsStd430)]
 pub struct GpuVoxelBuffer {
     data: [u32; VOXEL_COUNT],
+}
+
+#[derive(AsStd140)]
+pub struct GpuDirections {
+    pub data: [Vec3; 14],
+}
+
+impl Default for GpuDirections {
+    fn default() -> Self {
+        Self {
+            data: [
+                Vec3::new(1.0, 1.0, 1.0).normalize(),
+                Vec3::new(-1.0, 1.0, 1.0).normalize(),
+                Vec3::new(1.0, -1.0, 1.0).normalize(),
+                Vec3::new(-1.0, -1.0, 1.0).normalize(),
+                Vec3::new(1.0, 1.0, -1.0).normalize(),
+                Vec3::new(-1.0, 1.0, -1.0).normalize(),
+                Vec3::new(1.0, -1.0, -1.0).normalize(),
+                Vec3::new(-1.0, -1.0, -1.0).normalize(),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Vec3::new(-1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+            ],
+        }
+    }
 }
 
 #[derive(Component, Default)]
@@ -156,11 +197,15 @@ impl CameraProjection for VolumeProjection {
 }
 
 /// Setup cameras for the volume.
-pub fn setup_volume(
+pub fn update_volume(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut volume: ResMut<Volume>,
 ) {
+    if !volume.is_changed() {
+        return;
+    }
+
     let size = Extent3d {
         width: VOXEL_RESOLUTION as u32,
         height: VOXEL_RESOLUTION as u32,
@@ -184,6 +229,12 @@ pub fn setup_volume(
 
     let center = (volume.max + volume.min) / 2.0;
     let extent = (volume.max - volume.min) / 2.0;
+
+    if let Some(views) = volume.views {
+        for entity in views {
+            commands.entity(entity).despawn();
+        }
+    }
 
     volume.views = Some(
         [
@@ -240,31 +291,49 @@ pub fn prepare_volume(
     volume: Res<Volume>,
     mut volume_meta: ResMut<VolumeMeta>,
 ) {
-    volume_meta.volume_uniform.clear();
-    volume_meta.volume_uniform.push(GpuVolume {
-        min: volume.min,
-        max: volume.max,
-    });
-    volume_meta
-        .volume_uniform
-        .write_buffer(&render_device, &render_queue);
+    if volume.is_added() || volume.is_changed() {
+        volume_meta.volume_uniform.clear();
+        volume_meta.volume_uniform.push(GpuVolume {
+            min: volume.min,
+            max: volume.max,
+        });
+        volume_meta
+            .volume_uniform
+            .write_buffer(&render_device, &render_queue);
+
+        volume_meta.directions_uniform.clear();
+        volume_meta.directions_uniform.push(default());
+        volume_meta
+            .directions_uniform
+            .write_buffer(&render_device, &render_queue);
+    }
 }
 
 /// Hijack main camera's [`ViewShadowBindings`](bevy::pbr::ViewShadowBindings).
 pub fn prepare_volume_lights(
+    mut commands: Commands,
     active: Res<ActiveCamera<Camera3d>>,
-    main_camera_query: Query<&ViewShadowBindings, Without<VolumeCamera>>,
-    mut volume_cameras: Query<&mut ViewShadowBindings, With<VolumeCamera>>,
+    main_camera_query: Query<
+        (
+            &ViewShadowBindings,
+            &ViewLightEntities,
+            &ViewLightsUniformOffset,
+        ),
+        Without<VolumeCamera>,
+    >,
+    volume_cameras: Query<Entity, With<VolumeCamera>>,
 ) {
     if let Some(main_camera) = active.get() {
-        if let Ok(ViewShadowBindings {
-            point_light_depth_texture,
-            point_light_depth_texture_view,
-            directional_light_depth_texture,
-            directional_light_depth_texture_view,
-        }) = main_camera_query.get(main_camera)
+        if let Ok((view_shadow_bindings, view_light_entities, view_lights_uniform_offset)) =
+            main_camera_query.get(main_camera)
         {
-            for mut volume_bindings in volume_cameras.iter_mut() {
+            for entity in volume_cameras.iter() {
+                let ViewShadowBindings {
+                    point_light_depth_texture,
+                    point_light_depth_texture_view,
+                    directional_light_depth_texture,
+                    directional_light_depth_texture_view,
+                } = view_shadow_bindings;
                 let (
                     point_light_depth_texture,
                     point_light_depth_texture_view,
@@ -277,12 +346,23 @@ pub fn prepare_volume_lights(
                     directional_light_depth_texture_view.clone(),
                 );
 
-                *volume_bindings = ViewShadowBindings {
-                    point_light_depth_texture,
-                    point_light_depth_texture_view,
-                    directional_light_depth_texture,
-                    directional_light_depth_texture_view,
-                };
+                commands.entity(entity).insert_bundle((
+                    ViewShadowBindings {
+                        point_light_depth_texture,
+                        point_light_depth_texture_view,
+                        directional_light_depth_texture,
+                        directional_light_depth_texture_view,
+                    },
+                    ViewLightEntities {
+                        lights: view_light_entities.lights.clone(),
+                    },
+                    ViewLightsUniformOffset {
+                        offset: view_lights_uniform_offset.offset,
+                    },
+                    RenderPhase::<Opaque3d>::default(),
+                    RenderPhase::<AlphaMask3d>::default(),
+                    RenderPhase::<Transparent3d>::default(),
+                ));
             }
         }
     }

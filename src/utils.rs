@@ -68,9 +68,10 @@ pub fn extract_custom_cameras<M: Component + Default>(
                 },
                 visible_entities.clone(),
                 M::default(),
-                RenderPhase::<Opaque3d>::default(),
-                RenderPhase::<AlphaMask3d>::default(),
-                RenderPhase::<Transparent3d>::default(),
+                // Prevent lights from being prepared automatically.
+                // RenderPhase::<Opaque3d>::default(),
+                // RenderPhase::<AlphaMask3d>::default(),
+                // RenderPhase::<Transparent3d>::default(),
             ));
         }
     }
@@ -80,14 +81,11 @@ pub fn extract_custom_cameras<M: Component + Default>(
 pub fn update_custom_camera<M: Default + Component>(
     main_active: Res<ActiveCamera<Camera3d>>,
     custom_active: Res<ActiveCamera<M>>,
-    mut query: Query<(&mut Transform, &mut Camera)>,
+    mut query: Query<&mut Transform>,
 ) {
-    if let Some((main_camera, custom_camera)) = main_active.get().zip(custom_active.get()) {
-        let [(main_transform, main_camera), (mut custom_transform, mut custom_camera)] =
-            query.many_mut([main_camera, custom_camera]);
+    if let Some((main, custom)) = main_active.get().zip(custom_active.get()) {
+        let [main_transform, mut custom_transform] = query.many_mut([main, custom]);
         *custom_transform = *main_transform;
-        custom_camera.projection_matrix = main_camera.projection_matrix;
-        custom_camera.depth_calculation = main_camera.depth_calculation;
     }
 }
 

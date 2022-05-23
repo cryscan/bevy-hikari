@@ -82,9 +82,7 @@ pub fn setup_deferred_camera(
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::bevy_default(),
-            usage: TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_DST,
         },
         ..default()
     };
@@ -153,10 +151,18 @@ impl SpecializedMeshPipeline for DeferredPipeline {
     }
 }
 
+type DrawMaterial<M> = (
+    SetItemPipeline,
+    SetMeshViewBindGroup<0>,
+    SetMaterialBindGroup<M, 1>,
+    SetMeshBindGroup<2>,
+    DrawMesh,
+);
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn queue_deferred_meshes(
-    transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
+    opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
     deferred_pipeline: Res<DeferredPipeline>,
     material_meshes: Query<(&Handle<StandardMaterial>, &Handle<Mesh>)>,
     render_meshes: Res<RenderAssets<Mesh>>,
@@ -224,7 +230,7 @@ pub fn queue_deferred_meshes(
             }
         }
 
-        let draw_function = transparent_draw_functions
+        let draw_function = opaque_draw_functions
             .read()
             .get_id::<DrawMaterial<StandardMaterial>>()
             .unwrap();
@@ -260,11 +266,3 @@ pub fn queue_deferred_meshes(
         }
     }
 }
-
-type DrawMaterial<M> = (
-    SetItemPipeline,
-    SetMeshViewBindGroup<0>,
-    SetMaterialBindGroup<M, 1>,
-    SetMeshBindGroup<2>,
-    DrawMesh,
-);

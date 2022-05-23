@@ -9,7 +9,7 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         render_graph::{RenderGraph, SlotInfo, SlotType},
-        RenderApp,
+        RenderApp, RenderStage,
     },
 };
 use deferred::DeferredPlugin;
@@ -60,6 +60,13 @@ pub mod simple_3d_graph {
     }
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
+pub enum GiRenderStage {
+    PostExtract,
+    PostPrepare,
+    PostQueue,
+}
+
 pub struct GiPlugin;
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
@@ -84,11 +91,31 @@ impl Plugin for GiPlugin {
             ALBEDO_SHADER_HANDLE,
             Shader::from_wgsl(include_str!("shaders/albedo.wgsl")),
         );
+        shaders.set_untracked(
+            IRRADIANCE_SHADER_HANDLE,
+            Shader::from_wgsl(include_str!("shaders/irradiance.wgsl")),
+        );
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
             Ok(render_app) => render_app,
             Err(_) => return,
         };
+        render_app
+            .add_stage_after(
+                RenderStage::Extract,
+                GiRenderStage::PostExtract,
+                SystemStage::parallel(),
+            )
+            .add_stage_after(
+                RenderStage::Prepare,
+                GiRenderStage::PostPrepare,
+                SystemStage::parallel(),
+            )
+            .add_stage_after(
+                RenderStage::Queue,
+                GiRenderStage::PostQueue,
+                SystemStage::parallel(),
+            );
 
         let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
         let mut graph = render_app.world.resource_mut::<RenderGraph>();
