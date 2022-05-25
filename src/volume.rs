@@ -1,5 +1,8 @@
 use crate::{
-    utils::{extract_custom_cameras, SimplePassDriver},
+    utils::{
+        custom_camera::{extract_camera, prepare_lights},
+        SimplePassDriver,
+    },
     VOXEL_COUNT, VOXEL_RESOLUTION, VOXEL_SHADER_HANDLE,
 };
 use bevy::{
@@ -8,7 +11,7 @@ use bevy::{
     pbr::*,
     prelude::*,
     render::{
-        camera::{ActiveCamera, Camera3d, CameraProjection, DepthCalculation, RenderTarget},
+        camera::{CameraProjection, DepthCalculation, RenderTarget},
         mesh::MeshVertexBufferLayout,
         primitives::Frustum,
         render_asset::RenderAssets,
@@ -40,12 +43,12 @@ impl Plugin for VolumePlugin {
             .init_resource::<SpecializedMeshPipelines<VolumePipeline>>()
             .init_resource::<VolumeMeta>()
             .add_render_command::<Transparent3d, DrawVoxelMesh>()
-            .add_system_to_stage(RenderStage::Extract, extract_custom_cameras::<VolumeCamera>)
+            .add_system_to_stage(RenderStage::Extract, extract_camera::<VolumeCamera>)
             .add_system_to_stage(RenderStage::Extract, extract_volume)
             .add_system_to_stage(RenderStage::Prepare, prepare_volume)
             .add_system_to_stage(
                 RenderStage::Prepare,
-                prepare_volume_lights
+                prepare_lights::<VolumeCamera>
                     .exclusive_system()
                     .after(RenderLightSystems::PrepareLights),
             )
@@ -306,65 +309,6 @@ pub fn prepare_volume(
         volume_meta
             .directions_uniform
             .write_buffer(&render_device, &render_queue);
-    }
-}
-
-/// Hijack main camera's [`ViewShadowBindings`](bevy::pbr::ViewShadowBindings).
-pub fn prepare_volume_lights(
-    mut commands: Commands,
-    active: Res<ActiveCamera<Camera3d>>,
-    main_camera_query: Query<
-        (
-            &ViewShadowBindings,
-            &ViewLightEntities,
-            &ViewLightsUniformOffset,
-        ),
-        Without<VolumeCamera>,
-    >,
-    volume_cameras: Query<Entity, With<VolumeCamera>>,
-) {
-    if let Some(main_camera) = active.get() {
-        if let Ok((view_shadow_bindings, view_light_entities, view_lights_uniform_offset)) =
-            main_camera_query.get(main_camera)
-        {
-            for entity in volume_cameras.iter() {
-                let ViewShadowBindings {
-                    point_light_depth_texture,
-                    point_light_depth_texture_view,
-                    directional_light_depth_texture,
-                    directional_light_depth_texture_view,
-                } = view_shadow_bindings;
-                let (
-                    point_light_depth_texture,
-                    point_light_depth_texture_view,
-                    directional_light_depth_texture,
-                    directional_light_depth_texture_view,
-                ) = (
-                    point_light_depth_texture.clone(),
-                    point_light_depth_texture_view.clone(),
-                    directional_light_depth_texture.clone(),
-                    directional_light_depth_texture_view.clone(),
-                );
-
-                commands.entity(entity).insert_bundle((
-                    ViewShadowBindings {
-                        point_light_depth_texture,
-                        point_light_depth_texture_view,
-                        directional_light_depth_texture,
-                        directional_light_depth_texture_view,
-                    },
-                    ViewLightEntities {
-                        lights: view_light_entities.lights.clone(),
-                    },
-                    ViewLightsUniformOffset {
-                        offset: view_lights_uniform_offset.offset,
-                    },
-                    RenderPhase::<Opaque3d>::default(),
-                    RenderPhase::<AlphaMask3d>::default(),
-                    RenderPhase::<Transparent3d>::default(),
-                ));
-            }
-        }
     }
 }
 

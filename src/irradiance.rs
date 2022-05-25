@@ -1,6 +1,9 @@
 use crate::{
     mipmap::MipmapMeta,
-    utils::{extract_custom_camera_phases, update_custom_camera, SimplePassDriver},
+    utils::{
+        custom_camera::{extract_phases, update_transform},
+        SimplePassDriver,
+    },
     volume::{GpuDirections, GpuVolume, GpuVoxelBuffer, Volume, VolumeMeta},
     NotGiReceiver, IRRADIANCE_SHADER_HANDLE,
 };
@@ -10,7 +13,7 @@ use bevy::{
     pbr::*,
     prelude::*,
     render::{
-        camera::{CameraTypePlugin, RenderTarget},
+        camera::{CameraTypePlugin, ExtractedCamera, RenderTarget},
         mesh::MeshVertexBufferLayout,
         render_asset::RenderAssets,
         render_graph::RenderGraph,
@@ -20,7 +23,8 @@ use bevy::{
         },
         render_resource::{std140::AsStd140, std430::AsStd430, *},
         renderer::RenderDevice,
-        view::ExtractedView,
+        texture::TextureCache,
+        view::{ExtractedView, ViewTarget},
         RenderApp, RenderStage,
     },
     transform::TransformSystem,
@@ -34,8 +38,7 @@ impl Plugin for IrradiancePlugin {
             .add_startup_system(setup_irradiance_camera)
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                update_custom_camera::<IrradianceCamera>
-                    .before(TransformSystem::TransformPropagate),
+                update_transform::<IrradianceCamera>.before(TransformSystem::TransformPropagate),
             );
 
         let render_app = app.sub_app_mut(RenderApp);
@@ -45,9 +48,10 @@ impl Plugin for IrradiancePlugin {
             .add_render_command::<Opaque3d, DrawIrradiance>()
             .add_render_command::<AlphaMask3d, DrawIrradiance>()
             .add_render_command::<Transparent3d, DrawIrradiance>()
+            .add_system_to_stage(RenderStage::Extract, extract_phases::<IrradianceCamera>)
             .add_system_to_stage(
-                RenderStage::Extract,
-                extract_custom_camera_phases::<IrradianceCamera>,
+                RenderStage::Prepare,
+                prepare_irradiance_view_target.exclusive_system().at_end(),
             )
             .add_system_to_stage(RenderStage::Queue, queue_irradiance_bind_groups)
             .add_system_to_stage(
@@ -74,6 +78,8 @@ impl Plugin for IrradiancePlugin {
     }
 }
 
+const IRRADIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+
 #[derive(Default, Component)]
 pub struct IrradianceCamera;
 
@@ -94,7 +100,7 @@ pub fn setup_irradiance_camera(
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rg11b10Float,
+            format: IRRADIANCE_TEXTURE_FORMAT,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_DST,
         },
         ..default()
@@ -228,14 +234,50 @@ impl SpecializedMeshPipeline for IrradiancePipeline {
         let shader = IRRADIANCE_SHADER_HANDLE.typed();
         let fragment = descriptor.fragment.as_mut().unwrap();
         fragment.shader = shader;
-        fragment.targets[0].blend = Some(BlendState::REPLACE);
         if mesh_key.contains(MeshPipelineKey::TRANSPARENT_MAIN_PASS)
             || irradiance_key.contains(IrradiancePipelineKey::NOT_GI_RECEIVER)
         {
             fragment.shader_defs.push("NOT_GI_RECEIVER".into());
         }
 
+        let mut target = &mut fragment.targets[0];
+        target.blend = Some(BlendState::REPLACE);
+        target.format = IRRADIANCE_TEXTURE_FORMAT;
+
         Ok(descriptor)
+    }
+}
+
+pub fn prepare_irradiance_view_target(
+    render_device: Res<RenderDevice>,
+    mut texture_cache: ResMut<TextureCache>,
+    msaa: Res<Msaa>,
+    mut cameras: Query<(&ExtractedCamera, &mut ViewTarget), With<IrradianceCamera>>,
+) {
+    if msaa.samples == 1 {
+        return;
+    }
+
+    for (camera, mut view_target) in cameras.iter_mut() {
+        if let Some(size) = camera.physical_size {
+            let sampled_texture = texture_cache.get(
+                &render_device,
+                TextureDescriptor {
+                    label: None,
+                    size: Extent3d {
+                        width: size.x,
+                        height: size.y,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: msaa.samples,
+                    dimension: TextureDimension::D2,
+                    format: IRRADIANCE_TEXTURE_FORMAT,
+                    usage: TextureUsages::RENDER_ATTACHMENT,
+                },
+            );
+            view_target.sampled_target = Some(sampled_texture.default_view);
+        }
     }
 }
 

@@ -9,7 +9,7 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         render_graph::{RenderGraph, SlotInfo, SlotType},
-        RenderApp, RenderStage,
+        RenderApp,
     },
 };
 use deferred::DeferredPlugin;
@@ -60,13 +60,6 @@ pub mod simple_3d_graph {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
-pub enum GiRenderStage {
-    PostExtract,
-    PostPrepare,
-    PostQueue,
-}
-
 pub struct GiPlugin;
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
@@ -100,22 +93,6 @@ impl Plugin for GiPlugin {
             Ok(render_app) => render_app,
             Err(_) => return,
         };
-        render_app
-            .add_stage_after(
-                RenderStage::Extract,
-                GiRenderStage::PostExtract,
-                SystemStage::parallel(),
-            )
-            .add_stage_after(
-                RenderStage::Prepare,
-                GiRenderStage::PostPrepare,
-                SystemStage::parallel(),
-            )
-            .add_stage_after(
-                RenderStage::Queue,
-                GiRenderStage::PostQueue,
-                SystemStage::parallel(),
-            );
 
         let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
         let mut graph = render_app.world.resource_mut::<RenderGraph>();

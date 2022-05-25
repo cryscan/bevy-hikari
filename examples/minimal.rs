@@ -31,12 +31,12 @@ fn setup(
     // Torus
     commands.spawn_bundle(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Torus {
-            radius: 0.5,
-            ring_radius: 0.25,
+            radius: 0.8,
+            ring_radius: 0.4,
             ..Default::default()
         })),
         material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
+        transform: Transform::from_xyz(0.0, 0.2, 0.0),
         ..Default::default()
     });
 
