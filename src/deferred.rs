@@ -7,7 +7,7 @@ use crate::{
     ALBEDO_SHADER_HANDLE,
 };
 use bevy::{
-    core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
+    core_pipeline::{node, AlphaMask3d, Opaque3d, RenderTargetClearColors, Transparent3d},
     pbr::*,
     prelude::*,
     render::{
@@ -67,6 +67,7 @@ pub struct DeferredCamera;
 pub fn setup_deferred_camera(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut clear_colors: ResMut<RenderTargetClearColors>,
     windows: Res<Windows>,
 ) {
     let size = Extent3d {
@@ -89,8 +90,10 @@ pub fn setup_deferred_camera(
     image.resize(size);
     let image_handle = images.add(image);
 
+    let target = RenderTarget::Image(image_handle);
+    clear_colors.insert(target.clone(), Color::NONE);
     let camera = Camera {
-        target: RenderTarget::Image(image_handle),
+        target,
         ..default()
     };
 
