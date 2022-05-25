@@ -1,5 +1,8 @@
 use crate::{
-    utils::{extract_custom_camera_phases, update_custom_camera, SimplePassDriver},
+    utils::{
+        custom_camera::{extract_phases, update_transform},
+        SimplePassDriver,
+    },
     volume::Volume,
     ALBEDO_SHADER_HANDLE,
 };
@@ -29,17 +32,14 @@ impl Plugin for DeferredPlugin {
             .add_startup_system(setup_deferred_camera)
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                update_custom_camera::<DeferredCamera>.before(TransformSystem::TransformPropagate),
+                update_transform::<DeferredCamera>.before(TransformSystem::TransformPropagate),
             );
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<DeferredPipeline>()
             .init_resource::<SpecializedMeshPipelines<DeferredPipeline>>()
-            .add_system_to_stage(
-                RenderStage::Extract,
-                extract_custom_camera_phases::<DeferredCamera>,
-            )
+            .add_system_to_stage(RenderStage::Extract, extract_phases::<DeferredCamera>)
             .add_system_to_stage(
                 RenderStage::Queue,
                 queue_deferred_meshes.after(queue_material_meshes::<StandardMaterial>),
