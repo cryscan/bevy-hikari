@@ -139,62 +139,8 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32, 
         }
 
         if (level < 1.0) {
-            let base_sample = sample_voxel(position);
-            sample = mix(base_sample, sample, level);
-        }
-
-        color = color + (1.0 - color.a) * sample;
-
-        if (distance < max_distance) {
-            alpha = color.a;
-        }
-
-        let step_size = max(diameter / 2.0, voxel_size);
-        distance = distance + step_size;
-    }
-
-    return vec4<f32>(color.rgb, alpha);
-}
-
-fn cone_single(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32, alpha_distance: f32) -> vec4<f32> {
-    let voxel_size = 1.0 / f32(VOXEL_RESOLUTION);
-    let max_level = f32(VOXEL_LEVELS);
-
-    var color = vec4<f32>(0.0);
-    var alpha = 0.0;
-    var distance = voxel_size;
-
-    loop {
-        let position = origin + distance * direction;
-        if (any(position < vec3<f32>(0.)) || any(position > vec3<f32>(1., 1., 1.)) || color.a >= 1.0 || distance > max_distance) {
-            break;
-        }
-
-        let diameter = distance * ratio;
-        let level = clamp(max_level + log2(diameter), 0.0, max_level);
-
-        let anisotropic_level = max(level - 1., 0.);
-
-        var sample = vec4<f32>(0.);
-        if (direction.x > 0.5) {
-            sample = sample + textureSampleLevel(anisotropic_texture_0, texture_sampler, position, anisotropic_level);
-        } else if (direction.x < -0.5) {
-            sample = sample + textureSampleLevel(anisotropic_texture_1, texture_sampler, position, anisotropic_level);
-        }
-        if (direction.y > 0.5) {
-            sample = sample + textureSampleLevel(anisotropic_texture_2, texture_sampler, position, anisotropic_level);
-        } else if (direction.y < -0.5) {
-            sample = sample + textureSampleLevel(anisotropic_texture_3, texture_sampler, position, anisotropic_level);
-        }
-        if (direction.z > 0.5) {
-            sample = sample + textureSampleLevel(anisotropic_texture_4, texture_sampler, position, anisotropic_level);
-        } else if (direction.z < -0.5) {
-            sample = sample + textureSampleLevel(anisotropic_texture_5, texture_sampler, position, anisotropic_level);
-        }
-
-        if (level < 1.0) {
-            let base_sample = sample_voxel(position);
-            sample = mix(base_sample, sample, level);
+            // let base_sample = sample_voxel(position);
+            // sample = mix(base_sample, sample, level);
         }
 
         color = color + (1.0 - color.a) * sample;
@@ -207,8 +153,64 @@ fn cone_single(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance
         distance = distance + step_size;
     }
 
-    return vec4<f32>(color.rgb, alpha);
+    color.a = alpha;
+    return color;
 }
+
+// fn cone_single(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32, alpha_distance: f32) -> vec4<f32> {
+//     let voxel_size = 1.0 / f32(VOXEL_RESOLUTION);
+//     let max_level = f32(VOXEL_LEVELS);
+
+//     var color = vec4<f32>(0.0);
+//     var alpha = 0.0;
+//     var distance = voxel_size;
+
+//     loop {
+//         let position = origin + distance * direction;
+//         if (any(position < vec3<f32>(0.)) || any(position > vec3<f32>(1., 1., 1.)) || color.a >= 1.0 || distance > max_distance) {
+//             break;
+//         }
+
+//         let diameter = distance * ratio;
+//         let level = clamp(max_level + log2(diameter), 0.0, max_level);
+
+//         let anisotropic_level = max(level - 1., 0.);
+
+//         var sample = vec4<f32>(0.);
+//         if (direction.x > 0.5) {
+//             sample = sample + textureSampleLevel(anisotropic_texture_0, texture_sampler, position, anisotropic_level);
+//         } else if (direction.x < -0.5) {
+//             sample = sample + textureSampleLevel(anisotropic_texture_1, texture_sampler, position, anisotropic_level);
+//         }
+//         if (direction.y > 0.5) {
+//             sample = sample + textureSampleLevel(anisotropic_texture_2, texture_sampler, position, anisotropic_level);
+//         } else if (direction.y < -0.5) {
+//             sample = sample + textureSampleLevel(anisotropic_texture_3, texture_sampler, position, anisotropic_level);
+//         }
+//         if (direction.z > 0.5) {
+//             sample = sample + textureSampleLevel(anisotropic_texture_4, texture_sampler, position, anisotropic_level);
+//         } else if (direction.z < -0.5) {
+//             sample = sample + textureSampleLevel(anisotropic_texture_5, texture_sampler, position, anisotropic_level);
+//         }
+
+//         if (level < 1.0) {
+//             let base_sample = sample_voxel(position);
+//             sample = mix(base_sample, sample, level);
+//         }
+
+//         color = color + (1.0 - color.a) * sample;
+
+//         if (distance < alpha_distance) {
+//             alpha = color.a;
+//         }
+
+//         let step_size = max(diameter / 2.0, voxel_size);
+//         distance = distance + step_size;
+//     }
+
+//     color.a = alpha;
+//     return color;
+// }
 
 struct FragmentInput {
     [[builtin(position)]] clip_position: vec4<f32>;
@@ -230,22 +232,31 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 #else
     let ratio = 1.0;
     let max_distance = 1.0;
-    let alpha_distance = 0.1;
+    let alpha_distance = 0.02;
     var color = vec4<f32>(0.);
-    for (var i = 0u; i < 8u; i = i + 1u) {
-        let direction = directions.data[i];
-        let factor = dot(N, direction);
-        if (factor > 0.0) {
-            color = color + cone(origin, direction, ratio, max_distance, alpha_distance) * factor;
-        }
-    }
-    for (var i = 8u; i < 14u; i = i + 1u) {
-        let direction = directions.data[i];
-        let factor = dot(N, direction);
-        if (factor > 0.0) {
-            color = color + cone_single(origin, direction, ratio, max_distance, alpha_distance) * factor;
-        }
-    }
+
+    // for (var i = 0u; i < 8u; i = i + 1u) {
+    //     let direction = directions.data[i];
+    //     let factor = dot(N, direction);
+    //     if (factor > 0.0) {
+    //         color = color + cone(origin, direction, ratio, max_distance, alpha_distance) * factor;
+    //     }
+    // }
+    // for (var i = 8u; i < 14u; i = i + 1u) {
+    //     let direction = directions.data[i];
+    //     let factor = dot(N, direction);
+    //     if (factor > 0.0) {
+    //         color = color + cone_single(origin, direction, ratio, max_distance, alpha_distance) * factor;
+    //     }
+    // }
+
+    let tbn = normal_basis(N);
+    color = color + cone(origin, N, ratio, max_distance, alpha_distance);
+    color = color + cone(origin, vec3<f32>(0.707, 0.0, 0.707) * tbn, ratio, max_distance, alpha_distance) * 0.707;
+    color = color + cone(origin, vec3<f32>(-0.707, 0.0, 0.707) * tbn, ratio, max_distance, alpha_distance) * 0.707;
+    color = color + cone(origin, vec3<f32>(0.0, 0.707, 0.707) * tbn, ratio, max_distance, alpha_distance) * 0.707;
+    color = color + cone(origin, vec3<f32>(0.0, -0.707, 0.707) * tbn, ratio, max_distance, alpha_distance) * 0.707;
+    color = color * 0.2;
 
     // let roughness = clamp(material.perceptual_roughness, 0.01, 1.0);
     // if (roughness < 0.5) {
