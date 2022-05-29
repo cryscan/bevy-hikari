@@ -244,7 +244,6 @@ impl SpecializedMeshPipeline for IrradiancePipeline {
         }
 
         let mut target = &mut fragment.targets[0];
-        target.blend = Some(BlendState::REPLACE);
         target.format = IRRADIANCE_TEXTURE_FORMAT;
 
         Ok(descriptor)
