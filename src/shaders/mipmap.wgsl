@@ -26,10 +26,18 @@ fn unpack_color(voxel: u32) -> vec4<f32> {
 
 [[group(0), binding(0)]]
 var<storage, read_write> voxel_buffer: VoxelBuffer;
+[[group(0), binding(1)]]
+var voxel_texture: texture_storage_3d<rgbafloat, write>;
+[[group(0), binding(2)]]
+var<uniform> clusters: Clusters;
 
 [[stage(compute), workgroup_size(8, 8, 8)]]
-fn clear([[builtin(global_invocation_id)]] id: vec3<u32>) {
-    let coords = vec3<i32>(id);
+fn clear(
+    [[builtin(local_invocation_id)]] local_id: vec3<u32>,
+    [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
+) {
+    let cluster = 8u * clusters.data[workgroup_id.x];
+    let coords = vec3<i32>(cluster + local_id);
     let index = linear_index(coords);
     let voxel = &voxel_buffer.data[index];
     atomicStore(voxel, 0u);
@@ -51,9 +59,7 @@ var texture_out_4: texture_storage_3d<rgba16float, write>;
 [[group(0), binding(5)]]
 var texture_out_5: texture_storage_3d<rgba16float, write>;
 [[group(0), binding(6)]]
-var<storage, read> voxel_buffer: VoxelBuffer;
-
-var<workgroup> voxel_cache: array<array<array<u32, 8>, 8>, 8>;
+var texture_in: texture_3d<f32>;
 
 #else   // MIPMAP_ANISOTROPIC
 
@@ -66,69 +72,71 @@ var<uniform> mipmap_data: Mipmap;
 
 #endif  // MIPMAP_ANISOTROPIC
 
-#ifndef MIPMAP_ANISOTROPIC
-
-fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> u32 {
+fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> vec4<f32> {
     let coords = vec3<i32>(id) * 2 + index;
-    let voxel = &voxel_buffer.data[linear_index(coords)];
-    return atomicLoad(voxel);
+    return textureLoad(texture_in, coords, 0);
 }
 
-fn cache_voxel(id: vec3<u32>, local_invocation_id: vec3<u32>) {
-    let index = vec2<u32>(local_invocation_id);
-    voxel_cache[index.x][index.y][0] = sample_voxel(id, SAMPLE_INDICES[0]);
-    voxel_cache[index.x][index.y][1] = sample_voxel(id, SAMPLE_INDICES[1]);
-    voxel_cache[index.x][index.y][2] = sample_voxel(id, SAMPLE_INDICES[2]);
-    voxel_cache[index.x][index.y][3] = sample_voxel(id, SAMPLE_INDICES[3]);
-    voxel_cache[index.x][index.y][4] = sample_voxel(id, SAMPLE_INDICES[4]);
-    voxel_cache[index.x][index.y][5] = sample_voxel(id, SAMPLE_INDICES[5]);
-    voxel_cache[index.x][index.y][6] = sample_voxel(id, SAMPLE_INDICES[6]);
-    voxel_cache[index.x][index.y][7] = sample_voxel(id, SAMPLE_INDICES[7]);
-}
-
-fn take_samples(local_invocation_id: vec3<u32>) -> array<vec4<f32>, 8> {
-    var samples: array<vec4<f32>, 8>;
-    let index = vec2<u32>(local_invocation_id);
-    samples[0] = unpack_color(voxel_cache[index.x][index.y][0]);
-    samples[1] = unpack_color(voxel_cache[index.x][index.y][1]);
-    samples[2] = unpack_color(voxel_cache[index.x][index.y][2]);
-    samples[3] = unpack_color(voxel_cache[index.x][index.y][3]);
-    samples[4] = unpack_color(voxel_cache[index.x][index.y][4]);
-    samples[5] = unpack_color(voxel_cache[index.x][index.y][5]);
-    samples[6] = unpack_color(voxel_cache[index.x][index.y][6]);
-    samples[7] = unpack_color(voxel_cache[index.x][index.y][7]);
-    return samples;
-}
-
-#ifdef 0
 fn take_samples(id: vec3<u32>) -> array<vec4<f32>, 8> {
     var samples: array<vec4<f32>, 8>;
-    samples[0] = unpack_color(sample_voxel(id, SAMPLE_INDICES[0]));
-    samples[1] = unpack_color(sample_voxel(id, SAMPLE_INDICES[1]));
-    samples[2] = unpack_color(sample_voxel(id, SAMPLE_INDICES[2]));
-    samples[3] = unpack_color(sample_voxel(id, SAMPLE_INDICES[3]));
-    samples[4] = unpack_color(sample_voxel(id, SAMPLE_INDICES[4]));
-    samples[5] = unpack_color(sample_voxel(id, SAMPLE_INDICES[5]));
-    samples[6] = unpack_color(sample_voxel(id, SAMPLE_INDICES[6]));
-    samples[7] = unpack_color(sample_voxel(id, SAMPLE_INDICES[7]));
+    samples[0] = sample_voxel(id, SAMPLE_INDICES[0]);
+    samples[1] = sample_voxel(id, SAMPLE_INDICES[1]);
+    samples[2] = sample_voxel(id, SAMPLE_INDICES[2]);
+    samples[3] = sample_voxel(id, SAMPLE_INDICES[3]);
+    samples[4] = sample_voxel(id, SAMPLE_INDICES[4]);
+    samples[5] = sample_voxel(id, SAMPLE_INDICES[5]);
+    samples[6] = sample_voxel(id, SAMPLE_INDICES[6]);
+    samples[7] = sample_voxel(id, SAMPLE_INDICES[7]);
     return samples;
 }
-#endif
+
+#ifndef MIPMAP_ANISOTROPIC
+// fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> u32 {
+//     let coords = vec3<i32>(id) * 2 + index;
+//     let voxel = &voxel_buffer.data[linear_index(coords)];
+//     return atomicLoad(voxel);
+// }
+
+// fn cache_voxel(id: vec3<u32>, local_invocation_id: vec3<u32>) {
+//     let index = vec2<u32>(local_invocation_id);
+//     voxel_cache[index.x][index.y][0] = sample_voxel(id, SAMPLE_INDICES[0]);
+//     voxel_cache[index.x][index.y][1] = sample_voxel(id, SAMPLE_INDICES[1]);
+//     voxel_cache[index.x][index.y][2] = sample_voxel(id, SAMPLE_INDICES[2]);
+//     voxel_cache[index.x][index.y][3] = sample_voxel(id, SAMPLE_INDICES[3]);
+//     voxel_cache[index.x][index.y][4] = sample_voxel(id, SAMPLE_INDICES[4]);
+//     voxel_cache[index.x][index.y][5] = sample_voxel(id, SAMPLE_INDICES[5]);
+//     voxel_cache[index.x][index.y][6] = sample_voxel(id, SAMPLE_INDICES[6]);
+//     voxel_cache[index.x][index.y][7] = sample_voxel(id, SAMPLE_INDICES[7]);
+// }
+
+// fn take_samples(local_invocation_id: vec3<u32>) -> array<vec4<f32>, 8> {
+//     var samples: array<vec4<f32>, 8>;
+//     let index = vec2<u32>(local_invocation_id);
+//     samples[0] = unpack_color(voxel_cache[index.x][index.y][0]);
+//     samples[1] = unpack_color(voxel_cache[index.x][index.y][1]);
+//     samples[2] = unpack_color(voxel_cache[index.x][index.y][2]);
+//     samples[3] = unpack_color(voxel_cache[index.x][index.y][3]);
+//     samples[4] = unpack_color(voxel_cache[index.x][index.y][4]);
+//     samples[5] = unpack_color(voxel_cache[index.x][index.y][5]);
+//     samples[6] = unpack_color(voxel_cache[index.x][index.y][6]);
+//     samples[7] = unpack_color(voxel_cache[index.x][index.y][7]);
+//     return samples;
+// }
 
 [[stage(compute), workgroup_size(8, 8, 6)]]
 fn mipmap(
-    [[builtin(global_invocation_id)]] global_invocation_id: vec3<u32>,
-    [[builtin(local_invocation_id)]] local_invocation_id: vec3<u32>,
+    [[builtin(global_invocation_id)]] global_id: vec3<u32>,
+    [[builtin(local_invocation_id)]] local_id: vec3<u32>,
     [[builtin(workgroup_id)]] workgroup_id: vec3<u32>,
 ) {
-    let id = vec3<u32>(global_invocation_id.xy, workgroup_id.z);
-    let direction = local_invocation_id.z;
+    let id = vec3<u32>(global_id.xy, workgroup_id.z);
+    let direction = local_id.z;
 
-    if (local_invocation_id.z == 0u) {
-        cache_voxel(id, local_invocation_id);
-    }
-    workgroupBarrier();
-    let samples = take_samples(local_invocation_id);
+    // if (local_invocation_id.z == 0u) {
+    //     cache_voxel(id, local_invocation_id);
+    // }
+    // workgroupBarrier();
+    let samples = take_samples(local_id);
 
     var color = vec4<f32>(0.);
     if (direction == 0u) {
@@ -183,24 +191,6 @@ fn mipmap(
 }
 
 #else   // MIPMAP_ANISOTROPIC
-
-fn sample_voxel(id: vec3<u32>, index: vec3<i32>) -> vec4<f32> {
-    let coords = vec3<i32>(id) * 2 + index;
-    return textureLoad(texture_in, coords, 0);
-}
-
-fn take_samples(id: vec3<u32>) -> array<vec4<f32>, 8> {
-    var samples: array<vec4<f32>, 8>;
-    samples[0] = sample_voxel(id, SAMPLE_INDICES[0]);
-    samples[1] = sample_voxel(id, SAMPLE_INDICES[1]);
-    samples[2] = sample_voxel(id, SAMPLE_INDICES[2]);
-    samples[3] = sample_voxel(id, SAMPLE_INDICES[3]);
-    samples[4] = sample_voxel(id, SAMPLE_INDICES[4]);
-    samples[5] = sample_voxel(id, SAMPLE_INDICES[5]);
-    samples[6] = sample_voxel(id, SAMPLE_INDICES[6]);
-    samples[7] = sample_voxel(id, SAMPLE_INDICES[7]);
-    return samples;
-}
 
 [[stage(compute), workgroup_size(8, 8, 8)]]
 fn mipmap([[builtin(global_invocation_id)]] id: vec3<u32>) {

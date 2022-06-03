@@ -4,7 +4,7 @@ use crate::{
         custom_camera::{extract_phases, update_transform},
         SimplePassDriver,
     },
-    volume::{GpuDirections, GpuVolume, GpuVoxelBuffer, Volume, VolumeMeta},
+    volume::{GpuVolume, Volume, VolumeMeta},
     NotGiReceiver, IRRADIANCE_SHADER_HANDLE,
 };
 use bevy::{
@@ -165,35 +165,21 @@ impl FromWorld for IrradiancePipeline {
                 BindGroupLayoutEntry {
                     binding: 6,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D3,
+                        multisampled: false,
+                    },
                     count: None,
                 },
                 BindGroupLayoutEntry {
                     binding: 7,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            GpuVoxelBuffer::std430_size_static() as u64
-                        ),
-                    },
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
                 BindGroupLayoutEntry {
                     binding: 8,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            GpuDirections::std140_size_static() as u64
-                        ),
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 9,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
@@ -307,16 +293,9 @@ pub fn queue_irradiance_bind_groups(
                 binding: 6,
                 resource: BindingResource::Sampler(&mipmap_meta.sampler),
             },
-            BindGroupEntry {
-                binding: 7,
-                resource: volume_meta.voxel_buffer.as_entire_binding(),
-            },
+            todo!("Bind base texture"),
             BindGroupEntry {
                 binding: 8,
-                resource: volume_meta.directions_uniform.binding().unwrap(),
-            },
-            BindGroupEntry {
-                binding: 9,
                 resource: volume_meta.volume_uniform.binding().unwrap(),
             },
         ])
