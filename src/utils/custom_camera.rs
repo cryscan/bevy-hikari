@@ -22,7 +22,7 @@ pub fn update_transform<M: Default + Component>(
 }
 
 /// Extract all cameras of type `M`, as [`extract_cameras`](bevy::render::camera::extract_cameras) only extracts active cameras.
-pub fn extract_camera<M: Component + Default>(
+pub fn extract_cameras<M: Component + Default>(
     mut commands: Commands,
     windows: Res<Windows>,
     images: Res<Assets<Image>>,
@@ -45,10 +45,9 @@ pub fn extract_camera<M: Component + Default>(
                 },
                 visible_entities.clone(),
                 M::default(),
-                // Prevent lights from being prepared automatically.
-                // RenderPhase::<Opaque3d>::default(),
-                // RenderPhase::<AlphaMask3d>::default(),
-                // RenderPhase::<Transparent3d>::default(),
+                RenderPhase::<Opaque3d>::default(),
+                RenderPhase::<AlphaMask3d>::default(),
+                RenderPhase::<Transparent3d>::default(),
             ));
         }
     }
@@ -69,29 +68,20 @@ pub fn extract_phases<M: Default + Component>(
 
 /// Hijack main camera's [`ViewShadowBindings`](bevy::pbr::ViewShadowBindings).
 pub fn prepare_lights<M: Default + Component>(
-    mut commands: Commands,
     active: Res<ActiveCamera<Camera3d>>,
-    query: Query<
-        (
-            &ViewShadowBindings,
-            &ViewLightEntities,
-            &ViewLightsUniformOffset,
-        ),
-        Without<M>,
-    >,
-    cameras: Query<Entity, With<M>>,
+    query: Query<&ViewShadowBindings, Without<M>>,
+    mut cameras: Query<&mut ViewShadowBindings, With<M>>,
 ) {
     if let Some(main_camera) = active.get() {
-        if let Ok((view_shadow_bindings, view_light_entities, view_lights_uniform_offset)) =
-            query.get(main_camera)
-        {
-            for entity in cameras.iter() {
-                let ViewShadowBindings {
-                    point_light_depth_texture,
-                    point_light_depth_texture_view,
-                    directional_light_depth_texture,
-                    directional_light_depth_texture_view,
-                } = view_shadow_bindings;
+        if let Ok(view_shadow_bindings) = query.get(main_camera) {
+            let ViewShadowBindings {
+                point_light_depth_texture,
+                point_light_depth_texture_view,
+                directional_light_depth_texture,
+                directional_light_depth_texture_view,
+            } = view_shadow_bindings;
+
+            for mut view_shadow_bindings in cameras.iter_mut() {
                 let (
                     point_light_depth_texture,
                     point_light_depth_texture_view,
@@ -103,25 +93,55 @@ pub fn prepare_lights<M: Default + Component>(
                     directional_light_depth_texture.clone(),
                     directional_light_depth_texture_view.clone(),
                 );
-
-                commands.entity(entity).insert_bundle((
-                    ViewShadowBindings {
-                        point_light_depth_texture,
-                        point_light_depth_texture_view,
-                        directional_light_depth_texture,
-                        directional_light_depth_texture_view,
-                    },
-                    ViewLightEntities {
-                        lights: view_light_entities.lights.clone(),
-                    },
-                    ViewLightsUniformOffset {
-                        offset: view_lights_uniform_offset.offset,
-                    },
-                    RenderPhase::<Opaque3d>::default(),
-                    RenderPhase::<AlphaMask3d>::default(),
-                    RenderPhase::<Transparent3d>::default(),
-                ));
+                *view_shadow_bindings = ViewShadowBindings {
+                    point_light_depth_texture,
+                    point_light_depth_texture_view,
+                    directional_light_depth_texture,
+                    directional_light_depth_texture_view,
+                };
             }
         }
+
+        // if let Ok((view_shadow_bindings, view_light_entities, view_lights_uniform_offset)) =
+        //     query.get(main_camera)
+        // {
+        //     for entity in cameras.iter() {
+        //         let ViewShadowBindings {
+        //             point_light_depth_texture,
+        //             point_light_depth_texture_view,
+        //             directional_light_depth_texture,
+        //             directional_light_depth_texture_view,
+        //         } = view_shadow_bindings;
+        //         let (
+        //             point_light_depth_texture,
+        //             point_light_depth_texture_view,
+        //             directional_light_depth_texture,
+        //             directional_light_depth_texture_view,
+        //         ) = (
+        //             point_light_depth_texture.clone(),
+        //             point_light_depth_texture_view.clone(),
+        //             directional_light_depth_texture.clone(),
+        //             directional_light_depth_texture_view.clone(),
+        //         );
+
+        //         commands.entity(entity).insert_bundle((
+        //             ViewShadowBindings {
+        //                 point_light_depth_texture,
+        //                 point_light_depth_texture_view,
+        //                 directional_light_depth_texture,
+        //                 directional_light_depth_texture_view,
+        //             },
+        //             ViewLightEntities {
+        //                 lights: view_light_entities.lights.clone(),
+        //             },
+        //             ViewLightsUniformOffset {
+        //                 offset: view_lights_uniform_offset.offset,
+        //             },
+        //             RenderPhase::<Opaque3d>::default(),
+        //             RenderPhase::<AlphaMask3d>::default(),
+        //             RenderPhase::<Transparent3d>::default(),
+        //         ));
+        //     }
+        // }
     }
 }

@@ -58,16 +58,30 @@ impl FromWorld for MipmapPipeline {
 
         let clear_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: BufferSize::new(GpuVoxelBuffer::std430_size_static() as u64),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(
+                            GpuVoxelBuffer::std430_size_static() as u64
+                        ),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: BufferSize::new(UVec3::std140_size_static() as u64),
+                    },
+                    count: None,
+                },
+            ],
         });
 
         let mipmap_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {

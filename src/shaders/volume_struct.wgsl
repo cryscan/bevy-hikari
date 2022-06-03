@@ -2,15 +2,19 @@
 
 let VOXEL_RESOLUTION: u32 = 256u;
 let VOXEL_LEVELS: u32 = 8u;
-let VOXEL_COUNT: u32 = 16777216u;
 
 struct Volume {
     min: vec3<f32>;
     max: vec3<f32>;
 };
 
+struct Clusters {
+    // A list of 8^3-sized blocks in the volume need updating.
+    data: array<vec3<u32>>;
+};
+
 struct VoxelBuffer {
-    data: array<atomic<u32>, VOXEL_COUNT>;
+    data: array<atomic<u32>>;
 };
 
 let SAMPLE_INDICES = array<vec3<i32>, 8>(

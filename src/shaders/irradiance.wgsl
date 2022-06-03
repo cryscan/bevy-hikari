@@ -6,60 +6,26 @@
 [[group(2), binding(0)]]
 var<uniform> mesh: Mesh;
 
-struct Directions {
-    data: array<vec3<f32>, 14>;
-};
-
 [[group(3), binding(0)]]
-var anisotropic_texture_0: texture_3d<f32>;
+var voxel_texture_0: texture_3d<f32>;
 [[group(3), binding(1)]]
-var anisotropic_texture_1: texture_3d<f32>;
+var voxel_texture_1: texture_3d<f32>;
 [[group(3), binding(2)]]
-var anisotropic_texture_2: texture_3d<f32>;
+var voxel_texture_2: texture_3d<f32>;
 [[group(3), binding(3)]]
-var anisotropic_texture_3: texture_3d<f32>;
+var voxel_texture_3: texture_3d<f32>;
 [[group(3), binding(4)]]
-var anisotropic_texture_4: texture_3d<f32>;
+var voxel_texture_4: texture_3d<f32>;
 [[group(3), binding(5)]]
-var anisotropic_texture_5: texture_3d<f32>;
+var voxel_texture_5: texture_3d<f32>;
 [[group(3), binding(6)]]
-var texture_sampler: sampler;
+var voxel_texture: texture_3d<f32>;
 [[group(3), binding(7)]]
-var<storage, read> voxel_buffer: VoxelBuffer;
+var texture_sampler: sampler;
 [[group(3), binding(8)]]
-var<uniform> directions: Directions;
-[[group(3), binding(9)]]
 var<uniform> volume: Volume;
 
 let PI: f32 = 3.141592653589793;
-
-fn linear_index(index: vec3<i32>) -> i32 {
-    var spatial = vec3<u32>(index);
-    var morton = 0u;
-    for (var i = 0u; i < 8u; i = i + 1u) {
-        let coords = (vec3<u32>(index) >> vec3<u32>(i)) & vec3<u32>(1u);
-        let offset = 3u * i;
-
-        morton = morton | (coords.x << offset);
-        morton = morton | (coords.y << (offset + 1u));
-        morton = morton | (coords.z << (offset + 2u));
-    }
-
-    return i32(morton);
-}
-
-fn unpack_color(voxel: u32) -> vec4<f32> {
-    let unpacked = unpack4x8unorm(voxel);
-    let multiplier = unpacked.a * 255.0;
-    let alpha = min(1.0, multiplier);
-    return vec4<f32>(multiplier * unpacked.rgb, alpha);
-}
-
-fn sample_voxel(position: vec3<f32>) -> vec4<f32> {
-    let coords = vec3<i32>(position * f32(VOXEL_RESOLUTION - 1u));
-    let voxel = &voxel_buffer.data[linear_index(coords)];
-    return unpack_color(atomicLoad(voxel));
-}
 
 // luminance coefficients from Rec. 709.
 // https://en.wikipedia.org/wiki/Rec._709
@@ -123,24 +89,23 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32, 
 
         var sample = vec4<f32>(0.);
         if (direction.x > 0.0) {
-            sample = sample + weight.x * textureSampleLevel(anisotropic_texture_0, texture_sampler, position, anisotropic_level);
+            sample = sample + weight.x * textureSampleLevel(voxel_texture_0, texture_sampler, position, anisotropic_level);
         } else {
-            sample = sample + weight.x * textureSampleLevel(anisotropic_texture_1, texture_sampler, position, anisotropic_level);
+            sample = sample + weight.x * textureSampleLevel(voxel_texture_1, texture_sampler, position, anisotropic_level);
         }
         if (direction.y > 0.0) {
-            sample = sample + weight.y * textureSampleLevel(anisotropic_texture_2, texture_sampler, position, anisotropic_level);
+            sample = sample + weight.y * textureSampleLevel(voxel_texture_2, texture_sampler, position, anisotropic_level);
         } else {
-            sample = sample + weight.y * textureSampleLevel(anisotropic_texture_3, texture_sampler, position, anisotropic_level);
+            sample = sample + weight.y * textureSampleLevel(voxel_texture_3, texture_sampler, position, anisotropic_level);
         }
         if (direction.z > 0.0) {
-            sample = sample + weight.z * textureSampleLevel(anisotropic_texture_4, texture_sampler, position, anisotropic_level);
+            sample = sample + weight.z * textureSampleLevel(voxel_texture_4, texture_sampler, position, anisotropic_level);
         } else {
-            sample = sample + weight.z * textureSampleLevel(anisotropic_texture_5, texture_sampler, position, anisotropic_level);
+            sample = sample + weight.z * textureSampleLevel(voxel_texture_5, texture_sampler, position, anisotropic_level);
         }
 
         if (level < 1.0) {
-            // let base_sample = sample_voxel(position);
-            // sample = mix(base_sample, sample, level);
+            sample = mix(textureSampleLevel(voxel_texture, texture_sampler, position, 0.0), sample, level);
         }
 
         color = color + (1.0 - color.a) * sample;
@@ -178,19 +143,19 @@ fn cone(origin: vec3<f32>, direction: vec3<f32>, ratio: f32, max_distance: f32, 
 
 //         var sample = vec4<f32>(0.);
 //         if (direction.x > 0.5) {
-//             sample = sample + textureSampleLevel(anisotropic_texture_0, texture_sampler, position, anisotropic_level);
+//             sample = sample + textureSampleLevel(voxel_texture_0, texture_sampler, position, anisotropic_level);
 //         } else if (direction.x < -0.5) {
-//             sample = sample + textureSampleLevel(anisotropic_texture_1, texture_sampler, position, anisotropic_level);
+//             sample = sample + textureSampleLevel(voxel_texture_1, texture_sampler, position, anisotropic_level);
 //         }
 //         if (direction.y > 0.5) {
-//             sample = sample + textureSampleLevel(anisotropic_texture_2, texture_sampler, position, anisotropic_level);
+//             sample = sample + textureSampleLevel(voxel_texture_2, texture_sampler, position, anisotropic_level);
 //         } else if (direction.y < -0.5) {
-//             sample = sample + textureSampleLevel(anisotropic_texture_3, texture_sampler, position, anisotropic_level);
+//             sample = sample + textureSampleLevel(voxel_texture_3, texture_sampler, position, anisotropic_level);
 //         }
 //         if (direction.z > 0.5) {
-//             sample = sample + textureSampleLevel(anisotropic_texture_4, texture_sampler, position, anisotropic_level);
+//             sample = sample + textureSampleLevel(voxel_texture_4, texture_sampler, position, anisotropic_level);
 //         } else if (direction.z < -0.5) {
-//             sample = sample + textureSampleLevel(anisotropic_texture_5, texture_sampler, position, anisotropic_level);
+//             sample = sample + textureSampleLevel(voxel_texture_5, texture_sampler, position, anisotropic_level);
 //         }
 
 //         if (level < 1.0) {

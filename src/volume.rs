@@ -1,6 +1,6 @@
 use crate::{
     utils::{
-        custom_camera::{extract_camera, prepare_lights},
+        custom_camera::{extract_cameras, prepare_lights},
         SimplePassDriver,
     },
     VOXEL_COUNT, VOXEL_RESOLUTION, VOXEL_SHADER_HANDLE,
@@ -43,7 +43,7 @@ impl Plugin for VolumePlugin {
             .init_resource::<SpecializedMeshPipelines<VolumePipeline>>()
             .init_resource::<VolumeMeta>()
             .add_render_command::<Transparent3d, DrawVoxelMesh>()
-            .add_system_to_stage(RenderStage::Extract, extract_camera::<VolumeCamera>)
+            .add_system_to_stage(RenderStage::Extract, extract_cameras::<VolumeCamera>)
             .add_system_to_stage(RenderStage::Extract, extract_volume)
             .add_system_to_stage(RenderStage::Prepare, prepare_volume)
             .add_system_to_stage(
@@ -82,7 +82,8 @@ pub struct Volume {
     pub enabled: bool,
     pub min: Vec3,
     pub max: Vec3,
-    pub views: Option<[Entity; 3]>,
+    views: Option<[Entity; 3]>,
+    clusters: Vec<UVec3>,
 }
 
 impl Volume {
@@ -92,24 +93,20 @@ impl Volume {
             min,
             max,
             views: None,
+            clusters: vec![],
         }
     }
 }
 
 impl Default for Volume {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            min: Vec3::new(-1.0, -1.0, -1.0),
-            max: Vec3::new(1.0, 1.0, 1.0),
-            views: None,
-        }
+        Self::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0))
     }
 }
 
 pub struct VolumeMeta {
     pub volume_uniform: UniformVec<GpuVolume>,
-    pub directions_uniform: UniformVec<GpuDirections>,
+    pub clusters_uniform: UniformVec<UVec3>,
     pub voxel_buffer: Buffer,
 }
 
@@ -126,7 +123,7 @@ impl FromWorld for VolumeMeta {
 
         Self {
             volume_uniform: default(),
-            directions_uniform: default(),
+            clusters_uniform: default(),
             voxel_buffer,
         }
     }
@@ -143,34 +140,6 @@ pub struct GpuVolume {
 #[derive(AsStd430)]
 pub struct GpuVoxelBuffer {
     data: [u32; VOXEL_COUNT],
-}
-
-#[derive(AsStd140)]
-pub struct GpuDirections {
-    pub data: [Vec3; 14],
-}
-
-impl Default for GpuDirections {
-    fn default() -> Self {
-        Self {
-            data: [
-                Vec3::new(1.0, 1.0, 1.0).normalize(),
-                Vec3::new(-1.0, 1.0, 1.0).normalize(),
-                Vec3::new(1.0, -1.0, 1.0).normalize(),
-                Vec3::new(-1.0, -1.0, 1.0).normalize(),
-                Vec3::new(1.0, 1.0, -1.0).normalize(),
-                Vec3::new(-1.0, 1.0, -1.0).normalize(),
-                Vec3::new(1.0, -1.0, -1.0).normalize(),
-                Vec3::new(-1.0, -1.0, -1.0).normalize(),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-                Vec3::new(0.0, 0.0, 1.0),
-                Vec3::new(-1.0, 0.0, 0.0),
-                Vec3::new(0.0, -1.0, 0.0),
-                Vec3::new(0.0, 0.0, -1.0),
-            ],
-        }
-    }
 }
 
 #[derive(Component, Default)]
@@ -205,81 +174,80 @@ pub fn update_volume(
     mut images: ResMut<Assets<Image>>,
     mut volume: ResMut<Volume>,
 ) {
-    if !volume.is_changed() {
-        return;
-    }
+    if volume.is_changed() {
+        let size = Extent3d {
+            width: VOXEL_RESOLUTION as u32,
+            height: VOXEL_RESOLUTION as u32,
+            ..default()
+        };
 
-    let size = Extent3d {
-        width: VOXEL_RESOLUTION as u32,
-        height: VOXEL_RESOLUTION as u32,
-        ..default()
-    };
+        let mut image = Image {
+            texture_descriptor: TextureDescriptor {
+                label: None,
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::bevy_default(),
+                usage: TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
+            },
+            ..default()
+        };
+        image.resize(size);
+        let image_handle = images.add(image);
 
-    let mut image = Image {
-        texture_descriptor: TextureDescriptor {
-            label: None,
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::bevy_default(),
-            usage: TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
-        },
-        ..default()
-    };
-    image.resize(size);
-    let image_handle = images.add(image);
+        let center = (volume.max + volume.min) / 2.0;
+        let extent = (volume.max - volume.min) / 2.0;
 
-    let center = (volume.max + volume.min) / 2.0;
-    let extent = (volume.max - volume.min) / 2.0;
-
-    if let Some(views) = volume.views {
-        for entity in views {
-            commands.entity(entity).despawn();
+        if let Some(views) = volume.views {
+            for entity in views {
+                commands.entity(entity).despawn();
+            }
         }
-    }
 
-    volume.views = Some(
-        [
-            Quat::IDENTITY,
-            Quat::from_rotation_y(FRAC_PI_2),
-            Quat::from_rotation_x(FRAC_PI_2),
-        ]
-        .map(|rotation| {
-            let projection = OrthographicProjection {
-                left: -extent.x,
-                right: extent.x,
-                bottom: -extent.y,
-                top: extent.y,
-                near: -extent.z,
-                far: extent.z,
-                ..default()
-            };
-            let camera = Camera {
-                target: RenderTarget::Image(image_handle.clone()),
-                projection_matrix: projection.get_projection_matrix(),
-                near: -extent.z,
-                far: extent.z,
-                ..default()
-            };
-            let transform = Transform {
-                translation: center,
-                rotation,
-                ..default()
-            };
-            commands
-                .spawn_bundle((
-                    camera,
-                    VolumeProjection(projection),
-                    transform,
-                    VisibleEntities::default(),
-                    Frustum::default(),
-                    GlobalTransform::default(),
-                    VolumeCamera::default(),
-                ))
-                .id()
-        }),
-    );
+        volume.views = Some(
+            [
+                Quat::IDENTITY,
+                Quat::from_rotation_y(FRAC_PI_2),
+                Quat::from_rotation_x(FRAC_PI_2),
+            ]
+            .map(|rotation| {
+                let projection = OrthographicProjection {
+                    left: -extent.x,
+                    right: extent.x,
+                    bottom: -extent.y,
+                    top: extent.y,
+                    near: -extent.z,
+                    far: extent.z,
+                    ..default()
+                };
+                let camera = Camera {
+                    target: RenderTarget::Image(image_handle.clone()),
+                    projection_matrix: projection.get_projection_matrix(),
+                    near: -extent.z,
+                    far: extent.z,
+                    ..default()
+                };
+                let transform = Transform {
+                    translation: center,
+                    rotation,
+                    ..default()
+                };
+                commands
+                    .spawn_bundle((
+                        camera,
+                        VolumeProjection(projection),
+                        transform,
+                        VisibleEntities::default(),
+                        Frustum::default(),
+                        GlobalTransform::default(),
+                        VolumeCamera::default(),
+                        ClusterConfig::Single,
+                    ))
+                    .id()
+            }),
+        );
+    }
 }
 
 pub fn extract_volume(mut commands: Commands, volume: Res<Volume>) {
@@ -302,12 +270,6 @@ pub fn prepare_volume(
         });
         volume_meta
             .volume_uniform
-            .write_buffer(&render_device, &render_queue);
-
-        volume_meta.directions_uniform.clear();
-        volume_meta.directions_uniform.push(default());
-        volume_meta
-            .directions_uniform
             .write_buffer(&render_device, &render_queue);
     }
 }
