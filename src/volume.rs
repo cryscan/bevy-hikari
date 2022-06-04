@@ -1,468 +1,431 @@
-use crate::{
-    utils::{
-        custom_camera::{extract_cameras, prepare_lights},
-        SimplePassDriver,
-    },
-    VOXEL_COUNT, VOXEL_RESOLUTION, VOXEL_SHADER_HANDLE,
-};
+use crate::MIN_VOXEL_COUNT;
 use bevy::{
-    core_pipeline::{node, AlphaMask3d, Opaque3d, Transparent3d},
-    ecs::system::{lifetimeless::SRes, SystemParamItem},
-    pbr::*,
+    ecs::system::{
+        lifetimeless::{SRes, SResMut},
+        SystemParamItem,
+    },
+    pbr::{MeshPipeline, SpecializedMaterial},
     prelude::*,
+    reflect::TypeUuid,
     render::{
-        camera::{CameraProjection, DepthCalculation, RenderTarget},
-        mesh::MeshVertexBufferLayout,
-        primitives::Frustum,
-        render_asset::RenderAssets,
-        render_graph::RenderGraph,
-        render_phase::*,
+        primitives::Aabb,
+        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin},
         render_resource::{std140::AsStd140, std430::AsStd430, *},
         renderer::{RenderDevice, RenderQueue},
-        texture::BevyDefault,
-        view::{update_frusta, ExtractedView, VisibleEntities},
-        RenderApp, RenderStage,
+        texture::TextureCache,
+        RenderApp,
     },
-    transform::TransformSystem,
 };
-use std::f32::consts::FRAC_PI_2;
+use itertools::Itertools;
+use std::num::NonZeroU32;
 
 pub struct VolumePlugin;
 impl Plugin for VolumePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Volume>()
-            .add_system(update_volume)
-            .add_system_to_stage(
-                CoreStage::PostUpdate,
-                update_frusta::<VolumeProjection>.after(TransformSystem::TransformPropagate),
-            );
+        app.add_plugin(RenderAssetPlugin::<VolumeAsset>::default());
 
         let render_app = app.sub_app_mut(RenderApp);
-        render_app
-            .init_resource::<VolumePipeline>()
-            .init_resource::<SpecializedMeshPipelines<VolumePipeline>>()
-            .init_resource::<VolumeMeta>()
-            .add_render_command::<Transparent3d, DrawVoxelMesh>()
-            .add_system_to_stage(RenderStage::Extract, extract_cameras::<VolumeCamera>)
-            .add_system_to_stage(RenderStage::Extract, extract_volume)
-            .add_system_to_stage(RenderStage::Prepare, prepare_volume)
-            .add_system_to_stage(
-                RenderStage::Prepare,
-                prepare_lights::<VolumeCamera>
-                    .exclusive_system()
-                    .after(RenderLightSystems::PrepareLights),
-            )
-            .add_system_to_stage(RenderStage::Queue, queue_volume_bind_groups)
-            .add_system_to_stage(
-                RenderStage::Queue,
-                queue_voxel_meshes.after(queue_material_meshes::<StandardMaterial>),
-            );
-
-        use crate::node::VOXEL_PASS_DRIVER;
-        use node::{CLEAR_PASS_DRIVER, MAIN_PASS_DEPENDENCIES, MAIN_PASS_DRIVER};
-
-        let driver = SimplePassDriver::<VolumeCamera>::new(&mut render_app.world);
-        let mut graph = render_app.world.resource_mut::<RenderGraph>();
-        graph.add_node(VOXEL_PASS_DRIVER, driver);
-
-        graph
-            .add_node_edge(MAIN_PASS_DEPENDENCIES, VOXEL_PASS_DRIVER)
-            .unwrap();
-        graph
-            .add_node_edge(CLEAR_PASS_DRIVER, VOXEL_PASS_DRIVER)
-            .unwrap();
-        graph
-            .add_node_edge(MAIN_PASS_DRIVER, VOXEL_PASS_DRIVER)
-            .unwrap();
-    }
-}
-
-#[derive(Clone)]
-pub struct Volume {
-    pub enabled: bool,
-    pub min: Vec3,
-    pub max: Vec3,
-    views: Option<[Entity; 3]>,
-    clusters: Vec<UVec3>,
-}
-
-impl Volume {
-    pub const fn new(min: Vec3, max: Vec3) -> Self {
-        Self {
-            enabled: true,
-            min,
-            max,
-            views: None,
-            clusters: vec![],
-        }
-    }
-}
-
-impl Default for Volume {
-    fn default() -> Self {
-        Self::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0))
-    }
-}
-
-pub struct VolumeMeta {
-    pub volume_uniform: UniformVec<GpuVolume>,
-    pub clusters_uniform: UniformVec<UVec3>,
-    pub voxel_buffer: Buffer,
-}
-
-impl FromWorld for VolumeMeta {
-    fn from_world(world: &mut World) -> Self {
-        let render_device = world.resource::<RenderDevice>();
-
-        let voxel_buffer = render_device.create_buffer(&BufferDescriptor {
-            label: None,
-            size: GpuVoxelBuffer::std430_size_static() as u64,
-            usage: BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-
-        Self {
-            volume_uniform: default(),
-            clusters_uniform: default(),
-            voxel_buffer,
-        }
-    }
-}
-
-pub struct VolumeBindGroup(BindGroup);
-
-#[derive(AsStd140)]
-pub struct GpuVolume {
-    pub min: Vec3,
-    pub max: Vec3,
-}
-
-#[derive(AsStd430)]
-pub struct GpuVoxelBuffer {
-    data: [u32; VOXEL_COUNT],
-}
-
-#[derive(Component, Default)]
-pub struct VolumeCamera;
-
-/// Use custom projection to prevent [`camera_system`](bevy::render::camera::camera_system) from running
-/// and updating the projection automatically.
-#[derive(Component, Deref, DerefMut)]
-pub struct VolumeProjection(pub OrthographicProjection);
-
-impl CameraProjection for VolumeProjection {
-    fn get_projection_matrix(&self) -> Mat4 {
-        self.0.get_projection_matrix()
-    }
-
-    fn update(&mut self, width: f32, height: f32) {
-        self.0.update(width, height);
-    }
-
-    fn depth_calculation(&self) -> DepthCalculation {
-        self.0.depth_calculation()
-    }
-
-    fn far(&self) -> f32 {
-        self.0.far()
-    }
-}
-
-/// Setup cameras for the volume.
-pub fn update_volume(
-    mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
-    mut volume: ResMut<Volume>,
-) {
-    if volume.is_changed() {
-        let size = Extent3d {
-            width: VOXEL_RESOLUTION as u32,
-            height: VOXEL_RESOLUTION as u32,
-            ..default()
-        };
-
-        let mut image = Image {
-            texture_descriptor: TextureDescriptor {
-                label: None,
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::bevy_default(),
-                usage: TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
-            },
-            ..default()
-        };
-        image.resize(size);
-        let image_handle = images.add(image);
-
-        let center = (volume.max + volume.min) / 2.0;
-        let extent = (volume.max - volume.min) / 2.0;
-
-        if let Some(views) = volume.views {
-            for entity in views {
-                commands.entity(entity).despawn();
-            }
-        }
-
-        volume.views = Some(
-            [
-                Quat::IDENTITY,
-                Quat::from_rotation_y(FRAC_PI_2),
-                Quat::from_rotation_x(FRAC_PI_2),
-            ]
-            .map(|rotation| {
-                let projection = OrthographicProjection {
-                    left: -extent.x,
-                    right: extent.x,
-                    bottom: -extent.y,
-                    top: extent.y,
-                    near: -extent.z,
-                    far: extent.z,
-                    ..default()
-                };
-                let camera = Camera {
-                    target: RenderTarget::Image(image_handle.clone()),
-                    projection_matrix: projection.get_projection_matrix(),
-                    near: -extent.z,
-                    far: extent.z,
-                    ..default()
-                };
-                let transform = Transform {
-                    translation: center,
-                    rotation,
-                    ..default()
-                };
-                commands
-                    .spawn_bundle((
-                        camera,
-                        VolumeProjection(projection),
-                        transform,
-                        VisibleEntities::default(),
-                        Frustum::default(),
-                        GlobalTransform::default(),
-                        VolumeCamera::default(),
-                        ClusterConfig::Single,
-                    ))
-                    .id()
-            }),
-        );
-    }
-}
-
-pub fn extract_volume(mut commands: Commands, volume: Res<Volume>) {
-    if volume.is_added() || volume.is_changed() {
-        commands.insert_resource(volume.clone());
-    }
-}
-
-pub fn prepare_volume(
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    volume: Res<Volume>,
-    mut volume_meta: ResMut<VolumeMeta>,
-) {
-    if volume.is_added() || volume.is_changed() {
-        volume_meta.volume_uniform.clear();
-        volume_meta.volume_uniform.push(GpuVolume {
-            min: volume.min,
-            max: volume.max,
-        });
-        volume_meta
-            .volume_uniform
-            .write_buffer(&render_device, &render_queue);
+        render_app.init_resource::<VolumePipeline>();
     }
 }
 
 pub struct VolumePipeline {
+    pub mesh_pipeline: MeshPipeline,
     pub material_layout: BindGroupLayout,
     pub volume_layout: BindGroupLayout,
-    pub mesh_pipeline: MeshPipeline,
+
+    pub voxel_buffer_layout: BindGroupLayout,
+    pub clear_pipeline: CachedComputePipelineId,
+    pub transfer_pipeline: CachedComputePipelineId,
+
+    pub mipmap_layout: BindGroupLayout,
+    pub mipmap_pipeline: CachedComputePipelineId,
+
+    pub anisotropic_layout: BindGroupLayout,
+    pub anisotropic_pipeline: CachedComputePipelineId,
 }
 
 impl FromWorld for VolumePipeline {
     fn from_world(world: &mut World) -> Self {
         let mesh_pipeline = world.resource::<MeshPipeline>().clone();
-        let render_device = world.resource::<RenderDevice>();
 
+        let render_device = world.resource::<RenderDevice>();
         let material_layout = StandardMaterial::bind_group_layout(render_device);
 
         let volume_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
+                // volume bound
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
+                        min_binding_size: BufferSize::new(
+                            GpuVolumeBound::std140_size_static() as u64
+                        ),
                     },
                     count: None,
                 },
+                // volume clusters
                 BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
+                        ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            GpuVoxelBuffer::std430_size_static() as u64
-                        ),
+                        min_binding_size: BufferSize::new(u32::std140_size_static() as u64),
                     },
                     count: None,
                 },
             ],
         });
 
+        let voxel_buffer_layout =
+            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    // voxel buffer
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: BufferSize::new(
+                                <[u32; MIN_VOXEL_COUNT]>::std430_size_static() as u64,
+                            ),
+                        },
+                        count: None,
+                    },
+                    // voxel texture
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::WriteOnly,
+                            format: TextureFormat::Rgba16Float,
+                            view_dimension: TextureViewDimension::D3,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let mipmap_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: (0u32..6)
+                .map(
+                    // output textures
+                    |direction| BindGroupLayoutEntry {
+                        binding: direction,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::WriteOnly,
+                            format: TextureFormat::Rgba16Float,
+                            view_dimension: TextureViewDimension::D3,
+                        },
+                        count: None,
+                    },
+                )
+                .chain([
+                    // input texture
+                    BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D3,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ])
+                .collect_vec()
+                .as_slice(),
+        });
+
+        let anisotropic_layout =
+            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    // output texture
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::WriteOnly,
+                            format: TextureFormat::Rgba16Float,
+                            view_dimension: TextureViewDimension::D3,
+                        },
+                        count: None,
+                    },
+                    // input texture
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D3,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // direction uniform
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: BufferSize::new(
+                                <[u32; 6]>::std140_size_static() as u64
+                            ),
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
         Self {
+            mesh_pipeline,
             material_layout,
             volume_layout,
-            mesh_pipeline,
+            voxel_buffer_layout,
+            clear_pipeline: todo!(),
+            transfer_pipeline: todo!(),
+            mipmap_layout,
+            mipmap_pipeline: todo!(),
+            anisotropic_layout,
+            anisotropic_pipeline: todo!(),
         }
     }
 }
 
-impl SpecializedMeshPipeline for VolumePipeline {
-    type Key = MeshPipelineKey;
+#[derive(Debug, Clone, TypeUuid)]
+#[uuid = "6c15c8a0-cb01-4913-b1ee-86b11a60cf58"]
+pub struct VolumeAsset {
+    pub resolution: u32,
+    pub cascades: u8,
+}
 
-    fn specialize(
-        &self,
-        key: Self::Key,
-        layout: &MeshVertexBufferLayout,
-    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
-        let shader = VOXEL_SHADER_HANDLE.typed();
+impl RenderAsset for VolumeAsset {
+    type ExtractedAsset = VolumeAsset;
+    type PreparedAsset = GpuVolumeAsset;
+    type Param = (
+        SRes<RenderDevice>,
+        SRes<RenderQueue>,
+        SResMut<TextureCache>,
+        SRes<VolumePipeline>,
+    );
 
-        let mut descriptor = self.mesh_pipeline.specialize(key, layout)?;
-        descriptor.fragment.as_mut().unwrap().shader = shader;
-        descriptor.layout = Some(vec![
-            self.mesh_pipeline.view_layout.clone(),
-            self.material_layout.clone(),
-            self.mesh_pipeline.mesh_layout.clone(),
-            self.volume_layout.clone(),
-        ]);
-        descriptor.primitive.cull_mode = None;
-
-        Ok(descriptor)
+    fn extract_asset(&self) -> Self::ExtractedAsset {
+        self.clone()
     }
-}
 
-pub fn queue_volume_bind_groups(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    volume_meta: Res<VolumeMeta>,
-    volume_pipeline: Res<VolumePipeline>,
-) {
-    let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &volume_pipeline.volume_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: volume_meta.volume_uniform.binding().unwrap(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: volume_meta.voxel_buffer.as_entire_binding(),
-            },
-        ],
-    });
-
-    commands.insert_resource(VolumeBindGroup(bind_group));
-}
-
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
-pub fn queue_voxel_meshes(
-    transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
-    volume_pipeline: Res<VolumePipeline>,
-    material_meshes: Query<(&Handle<StandardMaterial>, &Handle<Mesh>)>,
-    render_meshes: Res<RenderAssets<Mesh>>,
-    render_materials: Res<RenderAssets<StandardMaterial>>,
-    mut pipelines: ResMut<SpecializedMeshPipelines<VolumePipeline>>,
-    mut pipeline_cache: ResMut<PipelineCache>,
-    msaa: Res<Msaa>,
-    volume: Res<Volume>,
-    mut views: Query<
-        (
-            &mut RenderPhase<Opaque3d>,
-            &mut RenderPhase<AlphaMask3d>,
-            &mut RenderPhase<Transparent3d>,
-        ),
-        (With<ExtractedView>, With<VolumeCamera>),
-    >,
-) {
-    let draw_function = transparent_draw_functions
-        .read()
-        .get_id::<DrawVoxelMesh>()
-        .unwrap();
-
-    for (mut opaque_phase, mut alpha_mask_phase, mut transparent_phase) in views.iter_mut() {
-        transparent_phase.items.clear();
-
-        if !volume.enabled {
-            opaque_phase.items.clear();
-            alpha_mask_phase.items.clear();
-            continue;
+    fn prepare_asset(
+        volume: Self::ExtractedAsset,
+        (render_device, render_queue, texture_cache, volume_pipeline): &mut SystemParamItem<
+            Self::Param,
+        >,
+    ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
+        let mut mipmap_uniforms = DynamicUniformVec::default();
+        let mut mipmap_uniform_offsets = vec![];
+        for direction in 0u32..6 {
+            mipmap_uniform_offsets.push(mipmap_uniforms.push(direction));
         }
+        mipmap_uniforms.write_buffer(render_device, render_queue);
+        let mipmap_uniform_offsets = mipmap_uniform_offsets.try_into().unwrap();
 
-        let mut add_phase_item = |entity, distance| {
-            if let Ok((material_handle, mesh_handle)) = material_meshes.get(entity) {
-                if !render_materials.contains_key(material_handle) {
-                    return;
-                }
+        let mut voxel_buffer = StorageBuffer::default();
+        let mut voxel_data = vec![0; volume.resolution.pow(3) as usize];
+        voxel_buffer.append(&mut voxel_data);
+        voxel_buffer.write_buffer(render_device, render_queue);
 
-                if let Some(mesh) = render_meshes.get(mesh_handle) {
-                    let mut key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
-                    key |= MeshPipelineKey::from_msaa_samples(msaa.samples);
-                    key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
+        let voxel_texture = texture_cache.get(
+            render_device,
+            TextureDescriptor {
+                label: None,
+                size: Extent3d {
+                    width: volume.resolution,
+                    height: volume.resolution,
+                    depth_or_array_layers: volume.resolution,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D3,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            },
+        );
 
-                    if let Ok(pipeline) = pipelines.specialize(
-                        &mut pipeline_cache,
-                        &volume_pipeline,
-                        key,
-                        &mesh.layout,
-                    ) {
-                        transparent_phase.add(Transparent3d {
-                            distance,
-                            pipeline,
-                            entity,
-                            draw_function,
-                        });
-                    }
-                }
-            }
+        let size = Extent3d {
+            width: volume.resolution / 2,
+            height: volume.resolution / 2,
+            depth_or_array_layers: volume.resolution / 2,
         };
+        let anisotropic_textures = [(); 6].map(|_| {
+            texture_cache.get(
+                render_device,
+                TextureDescriptor {
+                    label: None,
+                    size,
+                    mip_level_count: size.max_mips(),
+                    sample_count: 1,
+                    dimension: TextureDimension::D3,
+                    format: TextureFormat::Rgba16Float,
+                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                },
+            )
+        });
+        let voxel_sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: None,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
 
-        for item in opaque_phase.items.drain(..) {
-            add_phase_item(item.entity, item.distance);
-        }
-        for item in alpha_mask_phase.items.drain(..) {
-            add_phase_item(item.entity, item.distance);
+        let voxel_buffer_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &volume_pipeline.voxel_buffer_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: voxel_buffer.binding().unwrap(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&voxel_texture.default_view),
+                },
+            ],
+        });
+
+        let texture_views = anisotropic_textures
+            .clone()
+            .map(|texture| texture.default_view);
+        let mipmap_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &volume_pipeline.mipmap_layout,
+            entries: texture_views
+                .iter()
+                .enumerate()
+                .map(|(direction, texture_view)| BindGroupEntry {
+                    binding: direction as u32,
+                    resource: BindingResource::TextureView(texture_view),
+                })
+                .chain([BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(&voxel_texture.default_view),
+                }])
+                .collect_vec()
+                .as_slice(),
+        });
+
+        let texture_views = (0..size.max_mips()).map(|level| {
+            anisotropic_textures.clone().map(|texture| {
+                texture.texture.create_view(&TextureViewDescriptor {
+                    base_mip_level: level as u32,
+                    mip_level_count: NonZeroU32::new(1),
+                    ..Default::default()
+                })
+            })
+        });
+        let anisotropic_bind_groups = texture_views
+            .tuple_windows()
+            .map(|(input_textures, output_textures)| {
+                itertools::zip_eq(input_textures, output_textures)
+                    .map(|(texture_in, texture_out)| {
+                        render_device.create_bind_group(&BindGroupDescriptor {
+                            label: None,
+                            layout: &volume_pipeline.anisotropic_layout,
+                            entries: &[
+                                BindGroupEntry {
+                                    binding: 0,
+                                    resource: BindingResource::TextureView(&texture_out),
+                                },
+                                BindGroupEntry {
+                                    binding: 1,
+                                    resource: BindingResource::TextureView(&texture_in),
+                                },
+                                BindGroupEntry {
+                                    binding: 2,
+                                    resource: mipmap_uniforms.binding().unwrap(),
+                                },
+                            ],
+                        })
+                    })
+                    .collect_vec()
+                    .try_into()
+                    .unwrap()
+            })
+            .collect_vec();
+
+        let voxel_texture = voxel_texture.texture;
+        let anisotropic_textures = anisotropic_textures.map(|texture| texture.texture);
+
+        Ok(GpuVolumeAsset {
+            mipmap_uniforms,
+            mipmap_uniform_offsets,
+            voxel_buffer,
+            voxel_texture,
+            anisotropic_textures,
+            voxel_sampler,
+            voxel_buffer_bind_group,
+            mipmap_bind_group,
+            anisotropic_bind_groups,
+        })
+    }
+}
+
+pub struct GpuVolumeAsset {
+    pub mipmap_uniforms: DynamicUniformVec<u32>,
+    pub mipmap_uniform_offsets: [u32; 6],
+
+    pub voxel_buffer: StorageBuffer<u32>,
+    pub voxel_texture: Texture,
+    pub anisotropic_textures: [Texture; 6],
+    pub voxel_sampler: Sampler,
+
+    pub voxel_buffer_bind_group: BindGroup,
+    pub mipmap_bind_group: BindGroup,
+    pub anisotropic_bind_groups: Vec<[BindGroup; 6]>,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct Volume {
+    pub asset: Handle<VolumeAsset>,
+    pub bound: Aabb,
+    views: Option<[Entity; 3]>,
+    clusters: Vec<u32>,
+}
+
+impl Volume {
+    pub fn new(asset: Handle<VolumeAsset>, min: Vec3, max: Vec3) -> Self {
+        Self {
+            asset,
+            bound: Aabb::from_min_max(min, max),
+            views: None,
+            clusters: vec![],
         }
     }
 }
 
-type DrawVoxelMesh = (
-    SetItemPipeline,
-    SetMeshViewBindGroup<0>,
-    SetMaterialBindGroup<StandardMaterial, 1>,
-    SetMeshBindGroup<2>,
-    SetVolumeBindGroup<3>,
-    DrawMesh,
-);
+#[derive(AsStd140)]
+pub struct GpuVolumeBound {
+    pub min: Vec3,
+    pub max: Vec3,
+}
 
-pub struct SetVolumeBindGroup<const I: usize>;
-impl<const I: usize> EntityRenderCommand for SetVolumeBindGroup<I> {
-    type Param = SRes<VolumeBindGroup>;
-
-    fn render<'w>(
-        _view: Entity,
-        _item: Entity,
-        volume_bind_group: SystemParamItem<'w, '_, Self::Param>,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        pass.set_bind_group(I, &volume_bind_group.into_inner().0, &[]);
-        RenderCommandResult::Success
+impl From<Aabb> for GpuVolumeBound {
+    fn from(aabb: Aabb) -> Self {
+        Self {
+            min: aabb.min().into(),
+            max: aabb.max().into(),
+        }
     }
 }
