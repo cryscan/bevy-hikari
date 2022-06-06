@@ -22,25 +22,51 @@ fn unpack_color(voxel: u32) -> vec4<f32> {
     return vec4<f32>(multiplier * unpacked.rgb, alpha);
 }
 
+fn unpack_cluster(cluster: u32) -> vec3<u32> {
+    let mask = 0xffffu;
+    let x = cluster & mask;
+    let y = (cluster >> 8u) & mask;
+    let z = (cluster >> 16u) & mask;
+    return vec3<u32>(x, y, z);
+}
+
 #ifdef VOXEL_BUFFER
 
 [[group(0), binding(0)]]
 var<storage, read_write> voxel_buffer: VoxelBuffer;
 [[group(0), binding(1)]]
 var voxel_texture: texture_storage_3d<rgbafloat, write>;
-[[group(0), binding(2)]]
+
+[[group(1), binding(0)]]
 var<uniform> clusters: Clusters;
 
-[[stage(compute), workgroup_size(8, 8, 8)]]
+fn compute_coords(cluster_id: u32, local_id: vec3<u32>) -> vec3<i32> {
+    let cluster = unpack_cluster(clusters.data[cluster_id.x]);
+    return vec3<i32>(CLUSTER_SIZE * cluster + local_id);
+}
+
+[[stage(compute), workgroup_size(CLUSTER_SIZE, CLUSTER_SIZE, CLUSTER_SIZE)]]
 fn clear(
-    [[builtin(local_invocation_id)]] local_id: vec3<u32>,
     [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
+    [[builtin(local_invocation_id)]] local_id: vec3<u32>,
 ) {
-    let cluster = 8u * clusters.data[workgroup_id.x];
-    let coords = vec3<i32>(cluster + local_id);
+    let coords = compute_coords(workgroup_id.x, local_id);
     let index = linear_index(coords);
     let voxel = &voxel_buffer.data[index];
     atomicStore(voxel, 0u);
+    textureStore(voxel_texture, coords, vec4<f32>(0.0));
+}
+
+[[stage(compute), workgroup_size(CLUSTER_SIZE, CLUSTER_SIZE, CLUSTER_SIZE)]]
+fn transfer(
+    [[builtin(workgroup_id)]] workgroup_id: vec3<u32>
+    [[builtin(local_invocation_id)]] local_id: vec3<u32>,
+) {
+    let coords = compute_coords(workgroup_id.x, local_id);
+    let index = linear_index(coords);
+    let voxel = &voxel_buffer.data[index];
+    let color = unpack_color(atomicLoad(voxel));
+    textureStore(voxel_texture, coords, color);
 }
 
 #else   // VOXEL_BUFFER

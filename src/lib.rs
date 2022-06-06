@@ -31,10 +31,7 @@ pub const IRRADIANCE_SHADER_HANDLE: HandleUntyped =
 pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15849919474767323744);
 
-// pub const VOXEL_RESOLUTION: usize = 256;
-// pub const VOXEL_LEVELS: usize = 8;
-// pub const VOXEL_COUNT: usize = 16777216;
-pub const MIN_VOXEL_COUNT: usize = 262144;
+pub const MIN_VOXEL_COUNT: usize = 32768;
 pub const VOLUME_CLUSTER_SIZE: usize = 8;
 
 pub mod node {
