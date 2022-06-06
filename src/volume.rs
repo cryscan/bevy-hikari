@@ -1,4 +1,4 @@
-use crate::MIN_VOXEL_COUNT;
+use crate::{MIN_VOXEL_COUNT, MIPMAP_SHADER_HANDLE};
 use bevy::{
     ecs::system::{
         lifetimeless::{SRes, SResMut},
@@ -62,9 +62,7 @@ impl FromWorld for VolumePipeline {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            GpuVolumeBound::std140_size_static() as u64
-                        ),
+                        min_binding_size: BufferSize::new(GpuVolume::std140_size_static() as u64),
                     },
                     count: None,
                 },
@@ -188,17 +186,52 @@ impl FromWorld for VolumePipeline {
                 ],
             });
 
+        let mut pipeline_cache = world.resource_mut::<PipelineCache>();
+
+        let clear_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: None,
+            layout: Some(vec![voxel_buffer_layout.clone()]),
+            shader: MIPMAP_SHADER_HANDLE.typed(),
+            shader_defs: vec!["VOXEL_BUFFER".into()],
+            entry_point: "clear".into(),
+        });
+
+        let transfer_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: None,
+            layout: Some(vec![voxel_buffer_layout.clone()]),
+            shader: MIPMAP_SHADER_HANDLE.typed(),
+            shader_defs: vec!["VOXEL_BUFFER".into()],
+            entry_point: "transfer".into(),
+        });
+
+        let mipmap_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: None,
+            layout: Some(vec![mipmap_layout.clone()]),
+            shader: MIPMAP_SHADER_HANDLE.typed(),
+            shader_defs: vec![],
+            entry_point: "mipmap".into(),
+        });
+
+        let anisotropic_pipeline =
+            pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+                label: None,
+                layout: Some(vec![anisotropic_layout.clone()]),
+                shader: MIPMAP_SHADER_HANDLE.typed(),
+                shader_defs: vec!["MIPMAP_ANISOTROPIC".into()],
+                entry_point: "mipmap".into(),
+            });
+
         Self {
             mesh_pipeline,
             material_layout,
             volume_layout,
             voxel_buffer_layout,
-            clear_pipeline: todo!(),
-            transfer_pipeline: todo!(),
+            clear_pipeline,
+            transfer_pipeline,
             mipmap_layout,
-            mipmap_pipeline: todo!(),
+            mipmap_pipeline,
             anisotropic_layout,
-            anisotropic_pipeline: todo!(),
+            anisotropic_pipeline,
         }
     }
 }
@@ -207,7 +240,6 @@ impl FromWorld for VolumePipeline {
 #[uuid = "6c15c8a0-cb01-4913-b1ee-86b11a60cf58"]
 pub struct VolumeAsset {
     pub resolution: u32,
-    pub cascades: u8,
 }
 
 impl RenderAsset for VolumeAsset {
@@ -416,16 +448,24 @@ impl Volume {
 }
 
 #[derive(AsStd140)]
-pub struct GpuVolumeBound {
+pub struct GpuVolume {
     pub min: Vec3,
     pub max: Vec3,
+    pub resolution: u32,
 }
 
-impl From<Aabb> for GpuVolumeBound {
-    fn from(aabb: Aabb) -> Self {
+impl GpuVolume {
+    pub fn new(aabb: Aabb, resolution: u32) -> Self {
         Self {
             min: aabb.min().into(),
             max: aabb.max().into(),
+            resolution,
         }
     }
+}
+
+#[derive(Component)]
+pub struct VolumeMeta {
+    pub volume_uniform: UniformVec<GpuVolume>,
+    pub clusters_uniform: UniformVec<u32>,
 }
