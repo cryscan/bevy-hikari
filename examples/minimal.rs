@@ -1,13 +1,10 @@
 use bevy::prelude::*;
-use bevy_hikari::{volume::Volume, GiPlugin};
 use std::f32::consts::PI;
 
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
-        // Add the voxel cone tracing plugin
-        .add_plugin(GiPlugin)
         .add_startup_system(setup)
         .run();
 }
@@ -17,11 +14,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.insert_resource(Volume::new(
-        Vec3::new(-2.5, -2.5, -2.5),
-        Vec3::new(2.5, 2.5, 2.5),
-    ));
-
     // Plane
     commands.spawn_bundle(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
@@ -66,7 +58,7 @@ fn setup(
     });
 
     // Camera
-    commands.spawn_bundle(PerspectiveCameraBundle {
+    commands.spawn_bundle(Camera3dBundle {
         transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
