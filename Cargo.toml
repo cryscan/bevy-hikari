@@ -27,4 +27,3 @@ bevy = { git = "https://github.com/bevyengine/bevy.git", branch = "main", defaul
     "x11",
 ] }
 bevy_flycam = "0.7"
-smooth-bevy-cameras = "0.4"
