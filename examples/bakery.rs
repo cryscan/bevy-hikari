@@ -17,7 +17,7 @@ fn main() {
         .add_startup_system(setup)
         .add_system_to_stage(
             CoreStage::PostUpdate,
-            update_triangle_table.after(TransformSystem::TransformPropagate),
+            create_triangle_table.after(TransformSystem::TransformPropagate),
         )
         .run();
 }
@@ -73,6 +73,8 @@ fn setup(
     });
 }
 
+struct CollectMeshesEvent;
+
 #[derive(Default, Deref, DerefMut)]
 struct TriangleTable(BTreeMap<Entity, Vec<Triangle>>);
 
@@ -92,14 +94,18 @@ impl Triangle {
 }
 
 #[allow(clippy::type_complexity)]
-fn update_triangle_table(
+fn create_triangle_table(
     meshes: Res<Assets<Mesh>>,
     mut triangle_table: ResMut<TriangleTable>,
-    query: Query<
-        (Entity, &Handle<Mesh>, &GlobalTransform),
-        Or<(Added<Handle<Mesh>>, Changed<GlobalTransform>)>,
-    >,
+    events: EventReader<CollectMeshesEvent>,
+    query: Query<(Entity, &Handle<Mesh>, &GlobalTransform)>,
 ) {
+    if events.is_empty() {
+        return;
+    }
+    events.clear();
+    triangle_table.clear();
+
     for (entity, mesh, transform) in query.iter() {
         if let Some(mesh) = meshes.get(mesh) {
             if let Some((vertices, indices)) = mesh
