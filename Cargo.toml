@@ -12,18 +12,19 @@ categories = ["game-engines", "rendering"]
 exclude = ["assets"]
 
 [dependencies]
-bevy = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false, features = [
+bevy = { version = "0.8", default-features = false, features = [
     "bevy_core_pipeline",
     "bevy_render",
     "bevy_pbr",
 ] }
+bytemuck = "1.9"
 itertools = "0.10"
+bvh = "0.6"
 
 [dev-dependencies]
-bevy = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false, features = [
+bevy = { version = "0.8", default-features = true, features = [
     "bevy_gltf",
     "jpeg",
     "png",
     "x11",
 ] }
-bevy_flycam = "0.7"

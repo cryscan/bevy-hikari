@@ -1,32 +1,30 @@
 use bevy::prelude::*;
+use bevy_hikari::{BatchMesh, GiPlugin};
 use std::f32::consts::PI;
 
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
+        .add_plugin(GiPlugin)
         .add_startup_system(setup)
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn setup(mut commands: Commands, mut meshes: ResMut<Assets<BatchMesh>>) {
     // Plane
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        ..Default::default()
-    });
+    commands
+        .spawn_bundle(TransformBundle::default())
+        .insert_bundle(VisibilityBundle::default())
+        .insert(meshes.add(BatchMesh::from(shape::Plane { size: 5.0 })));
     // Cube
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cube::default())),
-        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
-        ..Default::default()
-    });
+    commands
+        .spawn_bundle(TransformBundle {
+            local: Transform::from_xyz(0.0, 0.5, 0.0),
+            ..Default::default()
+        })
+        .insert_bundle(VisibilityBundle::default())
+        .insert(meshes.add(BatchMesh::from(shape::Cube::default())));
 
     // Only directional light is supported
     const HALF_SIZE: f32 = 5.0;
