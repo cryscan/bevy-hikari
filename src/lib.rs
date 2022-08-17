@@ -6,22 +6,19 @@ use bevy::{
     prelude::*,
     reflect::TypeUuid,
     render::{
-        mesh::MeshVertexBufferLayout,
         render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin},
-        render_resource::{BufferUsages, BufferVec, IndexFormat, PrimitiveTopology},
+        render_resource::{ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
         RenderApp,
     },
 };
-use bvh::aabb::{Bounded, AABB};
-use std::collections::BTreeMap;
+use bvh::{aabb::Bounded, bounding_hierarchy::BHShape};
 
 pub struct GiPlugin;
 
 impl Plugin for GiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TriangleTable>()
-            .add_asset::<BatchMesh>()
+        app.add_asset::<BatchMesh>()
             .add_plugin(RenderAssetPlugin::<BatchMesh>::default());
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -30,59 +27,83 @@ impl Plugin for GiPlugin {
     }
 }
 
-pub struct Triangle {
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuFace {
     /// Global positions of vertices.
-    pub vertices: [[f32; 3]; 3],
-    /// Indices of vertices in the universal vertex buffer.
-    pub indices: [usize; 3],
-    /// Instance id the triangle belongs to.
-    pub instance: usize,
+    pub vertices: [Vec3; 3],
+    /// Indices of vertices in the vertex buffer (offset not applied).
+    pub indices: [u32; 3],
+    /// Index of the material of the face.
+    pub material: u32,
+    /// Index of the node in the node buffer (offset not applied).
+    node_index: u32,
 }
 
-impl Bounded for Triangle {
-    fn aabb(&self) -> AABB {
-        let mut aabb = AABB::empty();
-        for vertex in self.vertices {
-            aabb.grow_mut(&vertex.into());
-        }
-        aabb
+impl Bounded for GpuFace {
+    fn aabb(&self) -> bvh::aabb::AABB {
+        bvh::aabb::AABB::empty()
+            .grow(&self.vertices[0].to_array().into())
+            .grow(&self.vertices[1].to_array().into())
+            .grow(&self.vertices[2].to_array().into())
     }
 }
 
-pub type TriangleTable = BTreeMap<Entity, Vec<Triangle>>;
+impl BHShape for GpuFace {
+    fn set_bh_node_index(&mut self, index: usize) {
+        self.node_index = index as u32;
+    }
 
+    fn bh_node_index(&self) -> usize {
+        self.node_index as usize
+    }
+}
+
+#[derive(Default, Clone, Copy, ShaderType)]
+pub struct GpuVertex {
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub uv: Vec2,
+}
+
+#[derive(Default, Clone, ShaderType)]
+pub struct GpuNode {
+    pub min: Vec3,
+    pub max: Vec3,
+    pub entry_index: u32,
+    pub exit_index: u32,
+    pub face_index: u32,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuVertexBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuVertex>,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuFaceBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuFace>,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuNodeBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuNode>,
+}
+
+#[derive(Default)]
 pub struct BatchMeshMeta {
-    pub index_buffer: BufferVec<u8>,
-    pub vertex_buffer: BufferVec<u8>,
-}
-
-impl Default for BatchMeshMeta {
-    fn default() -> Self {
-        Self {
-            index_buffer: BufferVec::new(BufferUsages::COPY_DST | BufferUsages::UNIFORM),
-            vertex_buffer: BufferVec::new(BufferUsages::COPY_DST | BufferUsages::UNIFORM),
-        }
-    }
+    pub vertex_buffer: StorageBuffer<GpuVertexBuffer>,
+    pub face_buffer: StorageBuffer<GpuFaceBuffer>,
+    pub node_buffer: StorageBuffer<GpuNodeBuffer>,
 }
 
 #[derive(Debug, Clone)]
 pub struct GpuBatchMesh {
     pub vertex_offset: u32,
-    pub buffer_info: GpuBatchBufferInfo,
-    pub primitive_topology: PrimitiveTopology,
-    pub layout: MeshVertexBufferLayout,
-}
-
-#[derive(Debug, Clone)]
-pub enum GpuBatchBufferInfo {
-    Indexed {
-        offset: u32,
-        count: u32,
-        index_format: IndexFormat,
-    },
-    NonIndexed {
-        vertex_count: u32,
-    },
+    pub face_offset: u32,
+    pub node_offset: u32,
 }
 
 #[derive(Debug, TypeUuid, Clone, Deref, DerefMut)]
@@ -109,9 +130,10 @@ impl RenderAsset for BatchMesh {
     }
 
     fn prepare_asset(
-        mesh: Self::ExtractedAsset,
-        (render_device, render_queue, mesh_meta): &mut SystemParamItem<Self::Param>,
+        _mesh: Self::ExtractedAsset,
+        (_render_device, _render_queue, _mesh_meta): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
+        /*
         let vertex_offset = mesh_meta.vertex_buffer.len() as u32;
         for value in mesh.get_vertex_buffer_data() {
             mesh_meta.vertex_buffer.push(value);
@@ -146,5 +168,7 @@ impl RenderAsset for BatchMesh {
             primitive_topology,
             layout,
         })
+        */
+        todo!()
     }
 }
