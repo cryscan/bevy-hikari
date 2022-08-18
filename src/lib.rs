@@ -6,13 +6,15 @@ use bevy::{
     prelude::*,
     reflect::TypeUuid,
     render::{
+        mesh::VertexAttributeValues,
         render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin},
-        render_resource::{ShaderType, StorageBuffer},
+        render_resource::{PrimitiveTopology, ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
         RenderApp,
     },
 };
-use bvh::{aabb::Bounded, bounding_hierarchy::BHShape};
+use bvh::{aabb::Bounded, bounding_hierarchy::BHShape, bvh::BVH};
+use itertools::Itertools;
 
 pub struct GiPlugin;
 
@@ -33,8 +35,6 @@ pub struct GpuFace {
     pub vertices: [Vec3; 3],
     /// Indices of vertices in the vertex buffer (offset not applied).
     pub indices: [u32; 3],
-    /// Index of the material of the face.
-    pub material: u32,
     /// Index of the node in the node buffer (offset not applied).
     node_index: u32,
 }
@@ -116,6 +116,93 @@ impl<T: Into<Mesh>> From<T> for BatchMesh {
     }
 }
 
+#[derive(Debug)]
+pub enum BatchMeshPrepareError {
+    MissAttributePosition,
+    MissAttributeNormal,
+    MissAttributeUV,
+    IncompatiblePrimitiveTopology,
+}
+
+impl BatchMesh {
+    pub fn prepare_resources(
+        &self,
+    ) -> Result<(Vec<GpuVertex>, Vec<GpuFace>), BatchMeshPrepareError> {
+        let positions = self
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(VertexAttributeValues::as_float3)
+            .ok_or(BatchMeshPrepareError::MissAttributePosition)?;
+        let normals = self
+            .attribute(Mesh::ATTRIBUTE_NORMAL)
+            .and_then(VertexAttributeValues::as_float3)
+            .ok_or(BatchMeshPrepareError::MissAttributeNormal)?;
+        let uvs = self
+            .attribute(Mesh::ATTRIBUTE_UV_0)
+            .and_then(|attribute| match attribute {
+                VertexAttributeValues::Float32x2(value) => Some(value),
+                _ => None,
+            })
+            .ok_or(BatchMeshPrepareError::MissAttributeUV)?;
+
+        let mut vertices = vec![];
+        for (position, normal, uv) in itertools::multizip((positions, normals, uvs)) {
+            vertices.push(GpuVertex {
+                position: Vec3::from_slice(position),
+                normal: Vec3::from_slice(normal),
+                uv: Vec2::from_slice(uv),
+            });
+        }
+
+        let indices = match self.indices() {
+            Some(indices) => indices.iter().collect_vec(),
+            None => vertices.iter().enumerate().map(|(id, _)| id).collect_vec(),
+        };
+
+        let faces = match self.primitive_topology() {
+            PrimitiveTopology::TriangleList => {
+                let mut faces = vec![];
+                for chunk in &indices.iter().chunks(3) {
+                    let (v0, v1, v2) = chunk
+                        .cloned()
+                        .next_tuple()
+                        .ok_or(BatchMeshPrepareError::IncompatiblePrimitiveTopology)?;
+                    let vertices = [v0, v1, v2]
+                        .map(|id| vertices[id])
+                        .map(|vertex| vertex.position);
+                    let indices = [v0, v1, v2].map(|id| id as u32);
+                    faces.push(GpuFace {
+                        vertices,
+                        indices,
+                        node_index: 0,
+                    });
+                }
+                Ok(faces)
+            }
+            PrimitiveTopology::TriangleStrip => {
+                let mut faces = vec![];
+                for (id, (v0, v1, v2)) in indices.iter().cloned().tuple_windows().enumerate() {
+                    let indices = if id & 1 == 0 {
+                        [v0, v1, v2]
+                    } else {
+                        [v1, v0, v2]
+                    };
+                    let vertices = indices.map(|id| vertices[id]).map(|vertex| vertex.position);
+                    let indices = indices.map(|id| id as u32);
+                    faces.push(GpuFace {
+                        vertices,
+                        indices,
+                        node_index: 0,
+                    })
+                }
+                Ok(faces)
+            }
+            _ => Err(BatchMeshPrepareError::IncompatiblePrimitiveTopology),
+        }?;
+
+        Ok((vertices, faces))
+    }
+}
+
 impl RenderAsset for BatchMesh {
     type ExtractedAsset = Self;
     type PreparedAsset = GpuBatchMesh;
@@ -130,45 +217,42 @@ impl RenderAsset for BatchMesh {
     }
 
     fn prepare_asset(
-        _mesh: Self::ExtractedAsset,
-        (_render_device, _render_queue, _mesh_meta): &mut SystemParamItem<Self::Param>,
+        mesh: Self::ExtractedAsset,
+        (render_device, render_queue, mesh_meta): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        /*
-        let vertex_offset = mesh_meta.vertex_buffer.len() as u32;
-        for value in mesh.get_vertex_buffer_data() {
-            mesh_meta.vertex_buffer.push(value);
-        }
+        let (mut vertices, mut faces) = mesh.prepare_resources().unwrap();
+
+        let vertex_offset = mesh_meta.vertex_buffer.get().data.len() as u32;
+        mesh_meta.vertex_buffer.get_mut().data.append(&mut vertices);
         mesh_meta
             .vertex_buffer
             .write_buffer(render_device, render_queue);
 
-        let buffer_info = mesh.get_index_buffer_bytes().map_or(
-            GpuBatchBufferInfo::NonIndexed {
-                vertex_count: mesh.count_vertices() as u32,
-            },
-            |data| {
-                let offset = mesh_meta.index_buffer.len() as u32;
-                for value in data {
-                    mesh_meta.index_buffer.push(*value);
-                }
-                GpuBatchBufferInfo::Indexed {
-                    offset,
-                    count: mesh.indices().unwrap().len() as u32,
-                    index_format: mesh.indices().unwrap().into(),
-                }
-            },
-        );
+        let bvh = BVH::build(&mut faces);
+        let mut nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, face_index| GpuNode {
+            min: aabb.min.to_array().into(),
+            max: aabb.max.to_array().into(),
+            entry_index,
+            exit_index,
+            face_index,
+        });
 
-        let primitive_topology = mesh.primitive_topology();
-        let layout = mesh.get_mesh_vertex_buffer_layout();
+        let face_offset = mesh_meta.face_buffer.get().data.len() as u32;
+        mesh_meta.face_buffer.get_mut().data.append(&mut faces);
+        mesh_meta
+            .face_buffer
+            .write_buffer(render_device, render_queue);
+
+        let node_offset = mesh_meta.node_buffer.get().data.len() as u32;
+        mesh_meta.node_buffer.get_mut().data.append(&mut nodes);
+        mesh_meta
+            .node_buffer
+            .write_buffer(render_device, render_queue);
 
         Ok(GpuBatchMesh {
             vertex_offset,
-            buffer_info,
-            primitive_topology,
-            layout,
+            face_offset,
+            node_offset,
         })
-        */
-        todo!()
     }
 }
