@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_hikari::{BatchMesh, GiPlugin};
+use bevy_hikari::prelude::*;
 use std::f32::consts::PI;
 
 fn main() {
