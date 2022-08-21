@@ -1,1 +1,1 @@
-pub use crate::{mesh::BatchMesh, GiPlugin};
+pub use crate::{mesh::BoundedMesh, HikariPlugin};

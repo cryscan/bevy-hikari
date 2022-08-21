@@ -2,11 +2,12 @@ use bevy::prelude::*;
 
 pub mod mesh;
 pub mod prelude;
+pub mod prepass;
 
-pub struct GiPlugin;
+pub struct HikariPlugin;
 
-impl Plugin for GiPlugin {
+impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(mesh::BatchMeshPlugin);
+        app.add_plugin(mesh::BoundedMeshPlugin);
     }
 }

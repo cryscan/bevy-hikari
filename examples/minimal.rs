@@ -6,17 +6,17 @@ fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
-        .add_plugin(GiPlugin)
+        .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .run();
 }
 
-fn setup(mut commands: Commands, mut meshes: ResMut<Assets<BatchMesh>>) {
+fn setup(mut commands: Commands, mut meshes: ResMut<Assets<BoundedMesh>>) {
     // Plane
     commands
         .spawn_bundle(TransformBundle::default())
         .insert_bundle(VisibilityBundle::default())
-        .insert(meshes.add(BatchMesh::from(shape::Plane { size: 5.0 })));
+        .insert(meshes.add(BoundedMesh::from(shape::Plane { size: 5.0 })));
     // Cube
     commands
         .spawn_bundle(TransformBundle {
@@ -24,7 +24,7 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<BatchMesh>>) {
             ..Default::default()
         })
         .insert_bundle(VisibilityBundle::default())
-        .insert(meshes.add(BatchMesh::from(shape::Cube::default())));
+        .insert(meshes.add(BoundedMesh::from(shape::Cube::default())));
 
     // Only directional light is supported
     const HALF_SIZE: f32 = 5.0;

@@ -1,37 +1,45 @@
 use bevy::{
     asset::AddAsset,
     ecs::system::{
-        lifetimeless::{SRes, SResMut},
+        lifetimeless::{Read, SQuery, SRes, SResMut},
         SystemParamItem,
     },
+    math::Mat3A,
+    pbr::MeshUniform,
     prelude::*,
     reflect::TypeUuid,
     render::{
-        mesh::{GpuMesh, VertexAttributeValues},
+        mesh::{
+            GpuBufferInfo::{Indexed, NonIndexed},
+            GpuMesh, VertexAttributeValues,
+        },
         primitives::Aabb,
-        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin},
+        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
+        render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
         render_resource::{PrimitiveTopology, ShaderType, StorageBuffer},
         renderer::{RenderDevice, RenderQueue},
         view::{NoFrustumCulling, VisibilitySystems},
-        RenderApp,
+        Extract, RenderApp, RenderStage,
     },
 };
 use bvh::{aabb::Bounded, bounding_hierarchy::BHShape, bvh::BVH};
 use itertools::Itertools;
 
-pub struct BatchMeshPlugin;
+pub struct BoundedMeshPlugin;
 
-impl Plugin for BatchMeshPlugin {
+impl Plugin for BoundedMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.add_asset::<BatchMesh>()
-            .add_plugin(RenderAssetPlugin::<BatchMesh>::default())
+        app.add_asset::<BoundedMesh>()
+            .add_plugin(RenderAssetPlugin::<BoundedMesh>::default())
             .add_system_to_stage(
                 CoreStage::PostUpdate,
                 calculate_bounds.before(VisibilitySystems::CheckVisibility),
             );
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<BatchMeshMeta>();
+            render_app
+                .init_resource::<BoundedMeshMeta>()
+                .add_system_to_stage(RenderStage::Extract, extract_batch_meshes);
         }
     }
 }
@@ -100,16 +108,16 @@ pub struct GpuNodeBuffer {
 }
 
 #[derive(Default)]
-pub struct BatchMeshMeta {
+pub struct BoundedMeshMeta {
     pub vertex_buffer: StorageBuffer<GpuVertexBuffer>,
     pub face_buffer: StorageBuffer<GpuFaceBuffer>,
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
 }
 
 #[derive(Debug, Clone)]
-pub struct GpuBatchMesh {
+pub struct GpuBoundedMesh {
     pub mesh: GpuMesh,
-    /// Offset to the global buffers in [`BatchMeshMeta`].
+    /// Offset to the global buffers in [`BoundedMeshMeta`].
     pub vertex_offset: u32,
     pub face_offset: u32,
     pub node_offset: u32,
@@ -117,41 +125,41 @@ pub struct GpuBatchMesh {
 
 #[derive(Debug, TypeUuid, Clone, Deref, DerefMut)]
 #[uuid = "d5cd37e2-e015-4415-bc67-cfb7ceba0b26"]
-pub struct BatchMesh(Mesh);
+pub struct BoundedMesh(Mesh);
 
-impl<T: Into<Mesh>> From<T> for BatchMesh {
+impl<T: Into<Mesh>> From<T> for BoundedMesh {
     fn from(t: T) -> Self {
         Self(t.into())
     }
 }
 
 #[derive(Debug)]
-pub enum BatchMeshPrepareError {
+pub enum BoundedMeshPrepareError {
     MissAttributePosition,
     MissAttributeNormal,
     MissAttributeUV,
     IncompatiblePrimitiveTopology,
 }
 
-impl BatchMesh {
+impl BoundedMesh {
     pub fn prepare_resources(
         &self,
-    ) -> Result<(Vec<GpuVertex>, Vec<GpuFace>), BatchMeshPrepareError> {
+    ) -> Result<(Vec<GpuVertex>, Vec<GpuFace>), BoundedMeshPrepareError> {
         let positions = self
             .attribute(Mesh::ATTRIBUTE_POSITION)
             .and_then(VertexAttributeValues::as_float3)
-            .ok_or(BatchMeshPrepareError::MissAttributePosition)?;
+            .ok_or(BoundedMeshPrepareError::MissAttributePosition)?;
         let normals = self
             .attribute(Mesh::ATTRIBUTE_NORMAL)
             .and_then(VertexAttributeValues::as_float3)
-            .ok_or(BatchMeshPrepareError::MissAttributeNormal)?;
+            .ok_or(BoundedMeshPrepareError::MissAttributeNormal)?;
         let uvs = self
             .attribute(Mesh::ATTRIBUTE_UV_0)
             .and_then(|attribute| match attribute {
                 VertexAttributeValues::Float32x2(value) => Some(value),
                 _ => None,
             })
-            .ok_or(BatchMeshPrepareError::MissAttributeUV)?;
+            .ok_or(BoundedMeshPrepareError::MissAttributeUV)?;
 
         let mut vertices = vec![];
         for (position, normal, uv) in itertools::multizip((positions, normals, uvs)) {
@@ -174,7 +182,7 @@ impl BatchMesh {
                     let (v0, v1, v2) = chunk
                         .cloned()
                         .next_tuple()
-                        .ok_or(BatchMeshPrepareError::IncompatiblePrimitiveTopology)?;
+                        .ok_or(BoundedMeshPrepareError::IncompatiblePrimitiveTopology)?;
                     let vertices = [v0, v1, v2]
                         .map(|id| vertices[id])
                         .map(|vertex| vertex.position);
@@ -205,20 +213,20 @@ impl BatchMesh {
                 }
                 Ok(faces)
             }
-            _ => Err(BatchMeshPrepareError::IncompatiblePrimitiveTopology),
+            _ => Err(BoundedMeshPrepareError::IncompatiblePrimitiveTopology),
         }?;
 
         Ok((vertices, faces))
     }
 }
 
-impl RenderAsset for BatchMesh {
+impl RenderAsset for BoundedMesh {
     type ExtractedAsset = Self;
-    type PreparedAsset = GpuBatchMesh;
+    type PreparedAsset = GpuBoundedMesh;
     type Param = (
         SRes<RenderDevice>,
         SRes<RenderQueue>,
-        SResMut<BatchMeshMeta>,
+        SResMut<BoundedMeshMeta>,
     );
 
     fn extract_asset(&self) -> Self::ExtractedAsset {
@@ -264,7 +272,7 @@ impl RenderAsset for BatchMesh {
             .node_buffer
             .write_buffer(render_device, render_queue);
 
-        Ok(GpuBatchMesh {
+        Ok(GpuBoundedMesh {
             mesh,
             vertex_offset,
             face_offset,
@@ -273,11 +281,51 @@ impl RenderAsset for BatchMesh {
     }
 }
 
+pub struct DrawBoundedMesh;
+
+impl EntityRenderCommand for DrawBoundedMesh {
+    type Param = (
+        SRes<RenderAssets<BoundedMesh>>,
+        SQuery<Read<Handle<BoundedMesh>>>,
+    );
+
+    #[inline]
+    fn render<'w>(
+        _view: Entity,
+        item: Entity,
+        (meshes, mesh_query): SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let mesh_handle = mesh_query.get(item).unwrap();
+        if let Some(gpu_mesh) = meshes
+            .into_inner()
+            .get(mesh_handle)
+            .map(|gpu_bounded_mesh| &gpu_bounded_mesh.mesh)
+        {
+            pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+            match &gpu_mesh.buffer_info {
+                Indexed {
+                    buffer,
+                    count,
+                    index_format,
+                } => {
+                    pass.set_index_buffer(buffer.slice(..), 0, *index_format);
+                    pass.draw_indexed(0..*count, 0, 0..1);
+                }
+                NonIndexed { vertex_count } => pass.draw(0..*vertex_count, 0..1),
+            }
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub fn calculate_bounds(
     mut commands: Commands,
-    meshes: Res<Assets<BatchMesh>>,
-    without_aabb: Query<(Entity, &Handle<BatchMesh>), (Without<Aabb>, Without<NoFrustumCulling>)>,
+    meshes: Res<Assets<BoundedMesh>>,
+    without_aabb: Query<(Entity, &Handle<BoundedMesh>), (Without<Aabb>, Without<NoFrustumCulling>)>,
 ) {
     for (entity, mesh_handle) in &without_aabb {
         if let Some(mesh) = meshes.get(mesh_handle) {
@@ -286,4 +334,44 @@ pub fn calculate_bounds(
             }
         }
     }
+}
+
+// NOTE: These must match the bit flags in bevy_pbr2/src/render/mesh.wgsl!
+bitflags::bitflags! {
+    #[repr(transparent)]
+    struct MeshFlags: u32 {
+        const SHADOW_RECEIVER            = (1 << 0);
+        // Indicates the sign of the determinant of the 3x3 model matrix. If the sign is positive,
+        // then the flag should be set, else it should not be set.
+        const SIGN_DETERMINANT_MODEL_3X3 = (1 << 31);
+        const NONE                       = 0;
+        const UNINITIALIZED              = 0xFFFF;
+    }
+}
+pub fn extract_batch_meshes(
+    mut commands: Commands,
+    mut prev_mesh_commands_len: Local<usize>,
+    query: Extract<Query<(Entity, &GlobalTransform, &Handle<BoundedMesh>)>>,
+) {
+    let mut mesh_commands = Vec::with_capacity(*prev_mesh_commands_len);
+
+    for (entity, transform, handle) in query.iter() {
+        let transform = transform.compute_matrix();
+
+        let mut flags = MeshFlags::SHADOW_RECEIVER;
+        if Mat3A::from_mat4(transform).determinant().is_sign_positive() {
+            flags |= MeshFlags::SIGN_DETERMINANT_MODEL_3X3;
+        }
+
+        let uniform = MeshUniform {
+            transform,
+            inverse_transpose_model: transform.inverse().transpose(),
+            flags: flags.bits,
+        };
+
+        mesh_commands.push((entity, (handle.clone_weak(), uniform)));
+    }
+
+    *prev_mesh_commands_len = mesh_commands.len();
+    commands.insert_or_spawn_batch(mesh_commands);
 }
