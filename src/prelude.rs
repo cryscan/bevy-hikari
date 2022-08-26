@@ -1,1 +1,1 @@
-pub use crate::{mesh::BoundedMesh, HikariPlugin};
+pub use crate::HikariPlugin;

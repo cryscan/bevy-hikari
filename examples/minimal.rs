@@ -11,12 +11,12 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands, mut meshes: ResMut<Assets<BoundedMesh>>) {
+fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     // Plane
     commands
         .spawn_bundle(TransformBundle::default())
         .insert_bundle(VisibilityBundle::default())
-        .insert(meshes.add(BoundedMesh::from(shape::Plane { size: 5.0 })));
+        .insert(meshes.add(Mesh::from(shape::Plane { size: 5.0 })));
     // Cube
     commands
         .spawn_bundle(TransformBundle {
@@ -24,7 +24,7 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<BoundedMesh>>) {
             ..Default::default()
         })
         .insert_bundle(VisibilityBundle::default())
-        .insert(meshes.add(BoundedMesh::from(shape::Cube::default())));
+        .insert(meshes.add(Mesh::from(shape::Cube::default())));
 
     // Only directional light is supported
     const HALF_SIZE: f32 = 5.0;
