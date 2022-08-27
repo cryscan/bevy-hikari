@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{pbr::PbrPlugin, prelude::*};
 use bevy_hikari::prelude::*;
 use std::f32::consts::PI;
 
@@ -6,6 +6,7 @@ fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
+        .add_plugin(PbrPlugin)
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .run();
