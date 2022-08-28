@@ -5,20 +5,26 @@ use bevy::{
     render::{
         camera::ExtractedCamera,
         mesh::MeshVertexBufferLayout,
-        render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, EntityPhaseItem, PhaseItem},
+        render_graph::{Node, NodeRunError, RenderGraphContext},
+        render_phase::{
+            CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, EntityPhaseItem,
+            PhaseItem, RenderPhase, TrackedRenderPass,
+        },
         render_resource::{
             BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
             BufferBindingType, CachedRenderPipelineId, ColorTargetState, ColorWrites,
             CompareFunction, DepthBiasState, DepthStencilState, Extent3d, FragmentState, FrontFace,
-            MultisampleState, PolygonMode, PrimitiveState, RenderPipelineDescriptor, ShaderStages,
-            ShaderType, SpecializedMeshPipeline, SpecializedMeshPipelineError,
-            SpecializedMeshPipelines, StencilFaceState, StencilState, TextureDescriptor,
-            TextureDimension, TextureFormat, TextureUsages, TextureView, VertexState,
+            LoadOp, MultisampleState, Operations, PolygonMode, PrimitiveState,
+            RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
+            RenderPipelineDescriptor, ShaderStages, ShaderType, SpecializedMeshPipeline,
+            SpecializedMeshPipelineError, SpecializedMeshPipelines, StencilFaceState, StencilState,
+            TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+            VertexState,
         },
-        renderer::RenderDevice,
+        renderer::{RenderContext, RenderDevice},
         texture::TextureCache,
-        view::ViewUniform,
-        RenderApp, RenderStage,
+        view::{ExtractedView, ViewUniform},
+        Extract, RenderApp, RenderStage,
     },
     utils::FloatOrd,
 };
@@ -28,8 +34,10 @@ impl Plugin for PrepassPlugin {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                .init_resource::<DrawFunctions<Prepass>>()
                 .init_resource::<PrepassPipeline>()
                 .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
+                .add_system_to_stage(RenderStage::Extract, extract_prepass_camera_phases)
                 .add_system_to_stage(RenderStage::Prepare, prepare_prepass_targets)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_meshes);
         }
@@ -140,11 +148,24 @@ pub struct PrepassTarget {
     pub depth_view: TextureView,
 }
 
+fn extract_prepass_camera_phases(
+    mut commands: Commands,
+    cameras_3d: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
+) {
+    for (entity, camera) in cameras_3d.iter() {
+        if camera.is_active {
+            commands
+                .get_or_spawn(entity)
+                .insert(RenderPhase::<Prepass>::default());
+        }
+    }
+}
+
 fn prepare_prepass_targets(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     mut texture_cache: ResMut<TextureCache>,
-    cameras: Query<(Entity, &ExtractedCamera)>,
+    cameras: Query<(Entity, &ExtractedCamera), With<RenderPhase<Prepass>>>,
 ) {
     for (entity, camera) in &cameras {
         if let Some(target_size) = camera.physical_target_size {
@@ -229,8 +250,81 @@ impl CachedRenderPipelinePhaseItem for Prepass {
     }
 }
 
-pub struct PrepassNode;
+pub struct PrepassNode {
+    query: QueryState<
+        (
+            &'static ExtractedCamera,
+            &'static RenderPhase<Prepass>,
+            &'static Camera3d,
+            &'static PrepassTarget,
+        ),
+        With<ExtractedView>,
+    >,
+}
 
 impl PrepassNode {
     pub const IN_VIEW: &'static str = "view";
+
+    pub fn new(world: &mut World) -> Self {
+        Self {
+            query: world.query_filtered(),
+        }
+    }
+}
+
+impl Node for PrepassNode {
+    fn run(
+        &self,
+        graph: &mut RenderGraphContext,
+        render_context: &mut RenderContext,
+        world: &World,
+    ) -> Result<(), NodeRunError> {
+        let entity = graph.get_input_entity(Self::IN_VIEW)?;
+        let (camera, prepass_phase, camera_3d, target) = match self.query.get_manual(world, entity)
+        {
+            Ok(query) => query,
+            Err(_) => return Ok(()),
+        };
+
+        {
+            #[cfg(feature = "trace")]
+            let _main_prepass_span = info_span!("main_prepass").entered();
+            let pass_descriptor = RenderPassDescriptor {
+                label: Some("main_prepass"),
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &target.color_view,
+                    resolve_target: None,
+                    ops: Operations {
+                        load: LoadOp::Clear(Color::NONE.into()),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: &target.depth_view,
+                    depth_ops: Some(Operations {
+                        load: camera_3d.depth_load_op.clone().into(),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
+            };
+
+            let draw_functions = world.resource::<DrawFunctions<Prepass>>();
+
+            let render_pass = render_context
+                .command_encoder
+                .begin_render_pass(&pass_descriptor);
+            let mut draw_functions = draw_functions.write();
+            let mut tracked_pass = TrackedRenderPass::new(render_pass);
+            if let Some(viewport) = camera.viewport.as_ref() {
+                tracked_pass.set_camera_viewport(viewport);
+            }
+            for item in &prepass_phase.items {
+                let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
+                draw_function.draw(world, &mut tracked_pass, entity, item);
+            }
+        }
+
+        Ok(())
+    }
 }
