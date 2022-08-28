@@ -1,9 +1,7 @@
 use bevy::{asset::load_internal_asset, prelude::*, reflect::TypeUuid};
-use image::ImagePlugin;
 use mesh::BindlessMeshPlugin;
 use prepass::PrepassPlugin;
 
-pub mod image;
 pub mod mesh;
 pub mod prelude;
 pub mod prepass;
@@ -21,8 +19,6 @@ impl Plugin for HikariPlugin {
             Shader::from_wgsl
         );
 
-        app.add_plugin(BindlessMeshPlugin)
-            .add_plugin(ImagePlugin)
-            .add_plugin(PrepassPlugin);
+        app.add_plugin(BindlessMeshPlugin).add_plugin(PrepassPlugin);
     }
 }

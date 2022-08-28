@@ -1,89 +1,38 @@
+use crate::PREPASS_SHADER_HANDLE;
 use bevy::{
     pbr::{MeshPipeline, ShadowPipelineKey, SHADOW_FORMAT},
     prelude::*,
     render::{
+        camera::ExtractedCamera,
         mesh::MeshVertexBufferLayout,
+        render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, EntityPhaseItem, PhaseItem},
         render_resource::{
             BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
-            BufferBindingType, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
-            DepthStencilState, Extent3d, FragmentState, FrontFace, MultisampleState, PolygonMode,
-            PrimitiveState, RenderPipelineDescriptor, ShaderStages, ShaderType,
-            SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
-            StencilFaceState, StencilState, TextureDescriptor, TextureDimension, TextureFormat,
-            TextureUsages, VertexState,
+            BufferBindingType, CachedRenderPipelineId, ColorTargetState, ColorWrites,
+            CompareFunction, DepthBiasState, DepthStencilState, Extent3d, FragmentState, FrontFace,
+            MultisampleState, PolygonMode, PrimitiveState, RenderPipelineDescriptor, ShaderStages,
+            ShaderType, SpecializedMeshPipeline, SpecializedMeshPipelineError,
+            SpecializedMeshPipelines, StencilFaceState, StencilState, TextureDescriptor,
+            TextureDimension, TextureFormat, TextureUsages, TextureView, VertexState,
         },
         renderer::RenderDevice,
+        texture::TextureCache,
         view::ViewUniform,
-        RenderApp,
+        RenderApp, RenderStage,
     },
-    window::WindowResized,
+    utils::FloatOrd,
 };
-
-use crate::{image::DepthImage, PREPASS_SHADER_HANDLE};
 
 pub struct PrepassPlugin;
 impl Plugin for PrepassPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PrepassTextures>()
-            .add_system(resize_prepass_textures);
-
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<PrepassPipeline>()
-                .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>();
+                .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
+                .add_system_to_stage(RenderStage::Prepare, prepare_prepass_targets)
+                .add_system_to_stage(RenderStage::Queue, queue_prepass_meshes);
         }
-    }
-}
-
-pub struct PrepassTextures {
-    pub depth: Handle<DepthImage>,
-    pub normal: Handle<Image>,
-}
-
-impl FromWorld for PrepassTextures {
-    fn from_world(world: &mut World) -> Self {
-        let window = world.resource::<Windows>().primary();
-        let size = Extent3d {
-            width: window.width() as u32,
-            height: window.height() as u32,
-            depth_or_array_layers: 1,
-        };
-
-        let mut images = world.resource_mut::<Assets<DepthImage>>();
-        let mut image = Image {
-            texture_descriptor: TextureDescriptor {
-                label: None,
-                size,
-                dimension: TextureDimension::D2,
-                format: SHADOW_FORMAT,
-                mip_level_count: 1,
-                sample_count: 1,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
-            },
-            ..Default::default()
-        };
-        image.resize(size);
-        let depth = images.add(image.into());
-
-        let mut images = world.resource_mut::<Assets<Image>>();
-        let mut image = Image {
-            texture_descriptor: TextureDescriptor {
-                label: None,
-                size,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rg16Float,
-                mip_level_count: 1,
-                sample_count: 1,
-                usage: TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::COPY_DST
-                    | TextureUsages::RENDER_ATTACHMENT,
-            },
-            ..Default::default()
-        };
-        image.resize(size);
-        let normal = images.add(image);
-
-        Self { depth, normal }
     }
 }
 
@@ -185,26 +134,103 @@ impl SpecializedMeshPipeline for PrepassPipeline {
     }
 }
 
-fn resize_prepass_textures(
-    mut window_resized_events: EventReader<WindowResized>,
-    windows: Res<Windows>,
-    mut depth_images: ResMut<Assets<DepthImage>>,
-    mut images: ResMut<Assets<Image>>,
-    prepass_textures: Res<PrepassTextures>,
+#[derive(Component)]
+pub struct PrepassTarget {
+    pub color_view: TextureView,
+    pub depth_view: TextureView,
+}
+
+fn prepare_prepass_targets(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    mut texture_cache: ResMut<TextureCache>,
+    cameras: Query<(Entity, &ExtractedCamera)>,
 ) {
-    for event in window_resized_events.iter() {
-        if event.id == windows.primary().id() {
+    for (entity, camera) in &cameras {
+        if let Some(target_size) = camera.physical_target_size {
             let size = Extent3d {
-                width: event.width as u32,
-                height: event.height as u32,
+                width: target_size.x,
+                height: target_size.y,
                 depth_or_array_layers: 1,
             };
-            if let Some(image) = depth_images.get_mut(&prepass_textures.depth) {
-                image.resize(size);
-            }
-            if let Some(image) = images.get_mut(&prepass_textures.normal) {
-                image.resize(size);
-            }
+
+            let color_view = texture_cache
+                .get(
+                    &render_device,
+                    TextureDescriptor {
+                        label: Some("prepass_color_attachment_texture"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: TextureDimension::D2,
+                        format: TextureFormat::Rg16Float,
+                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+                    },
+                )
+                .default_view;
+
+            let depth_view = texture_cache
+                .get(
+                    &render_device,
+                    TextureDescriptor {
+                        label: Some("prepass_depth_stencil_attachment_texture"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: TextureDimension::D2,
+                        format: SHADOW_FORMAT,
+                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+                    },
+                )
+                .default_view;
+
+            commands.entity(entity).insert(PrepassTarget {
+                color_view,
+                depth_view,
+            });
         }
     }
+}
+
+fn queue_prepass_meshes() {}
+
+pub struct Prepass {
+    pub distance: f32,
+    pub entity: Entity,
+    pub pipeline: CachedRenderPipelineId,
+    pub draw_function: DrawFunctionId,
+}
+
+impl PhaseItem for Prepass {
+    type SortKey = FloatOrd;
+
+    #[inline]
+    fn sort_key(&self) -> Self::SortKey {
+        FloatOrd(self.distance)
+    }
+
+    #[inline]
+    fn draw_function(&self) -> DrawFunctionId {
+        self.draw_function
+    }
+}
+
+impl EntityPhaseItem for Prepass {
+    #[inline]
+    fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
+impl CachedRenderPipelinePhaseItem for Prepass {
+    #[inline]
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
+        self.pipeline
+    }
+}
+
+pub struct PrepassNode;
+
+impl PrepassNode {
+    pub const IN_VIEW: &'static str = "view";
 }
