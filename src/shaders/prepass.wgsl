@@ -1,8 +1,5 @@
-#import bevy_pbr::mesh_view_types
+#import bevy_pbr::mesh_view_bindings
 #import bevy_pbr::mesh_types
-
-@group(0) @binding(0)
-var<uniform> view: View;
 
 @group(1) @binding(0)
 var<uniform> mesh: Mesh;
@@ -16,7 +13,7 @@ struct Vertex {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    world_normal: vec3<f32>,
+    @location(0) world_normal: vec3<f32>,
 };
 
 @vertex
@@ -31,7 +28,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     return out;
 }
 
+struct FragmentOutput {
+    @location(0) world_normal: vec2<f32>,
+};
+
 @fragment
-fn fragment(in: VertexOutput) -> vec2<f32> {
-    return in.world_normal.xy;
+fn fragment(in: VertexOutput) -> FragmentOutput {
+    var out: FragmentOutput;
+    out.world_normal = in.world_normal.xy;
+    return out;
 }

@@ -1,4 +1,4 @@
-use bevy::{pbr::PbrPlugin, prelude::*};
+use bevy::{pbr::PbrPlugin, prelude::*, render::camera::CameraRenderGraph};
 use bevy_hikari::prelude::*;
 use std::f32::consts::PI;
 
@@ -54,6 +54,7 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
 
     // Camera
     commands.spawn_bundle(Camera3dBundle {
+        camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
         transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
