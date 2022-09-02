@@ -9,13 +9,15 @@ use bevy::{
     },
 };
 use mesh::BindlessMeshPlugin;
-use prepass::PrepassPlugin;
-
-use crate::prepass::PrepassNode;
+use prepass::{PrepassNode, PrepassPlugin};
+use transform::TransformPlugin;
+use view::ViewPlugin;
 
 pub mod mesh;
 pub mod prelude;
 pub mod prepass;
+pub mod transform;
+pub mod view;
 
 pub mod graph {
     pub const NAME: &str = "hikari";
@@ -40,7 +42,10 @@ impl Plugin for HikariPlugin {
             Shader::from_wgsl
         );
 
-        app.add_plugin(BindlessMeshPlugin).add_plugin(PrepassPlugin);
+        app.add_plugin(TransformPlugin)
+            .add_plugin(ViewPlugin)
+            .add_plugin(BindlessMeshPlugin)
+            .add_plugin(PrepassPlugin);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);

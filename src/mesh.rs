@@ -1,5 +1,4 @@
-use std::collections::BTreeMap;
-
+use crate::transform::PreviousGlobalTransform;
 use bevy::{
     prelude::*,
     render::{
@@ -13,11 +12,12 @@ use bevy::{
 };
 use bvh::{aabb::Bounded, bounding_hierarchy::BHShape, bvh::BVH};
 use itertools::Itertools;
+use std::collections::BTreeMap;
 
 pub struct BindlessMeshPlugin;
 impl Plugin for BindlessMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(UniformComponentPlugin::<BindlessMeshUniform>::default());
+        app.add_plugin(UniformComponentPlugin::<PreviousMeshUniform>::default());
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -119,9 +119,9 @@ pub struct BindlessMeshOffset {
 
 #[derive(Debug)]
 pub enum BindlessMeshError {
-    MissAttributePosition,
-    MissAttributeNormal,
-    MissAttributeUV,
+    MissingAttributePosition,
+    MissingAttributeNormal,
+    MissingAttributeUV,
     IncompatiblePrimitiveTopology,
 }
 
@@ -139,18 +139,18 @@ impl BindlessMesh {
         let positions = mesh
             .attribute(Mesh::ATTRIBUTE_POSITION)
             .and_then(VertexAttributeValues::as_float3)
-            .ok_or(BindlessMeshError::MissAttributePosition)?;
+            .ok_or(BindlessMeshError::MissingAttributePosition)?;
         let normals = mesh
             .attribute(Mesh::ATTRIBUTE_NORMAL)
             .and_then(VertexAttributeValues::as_float3)
-            .ok_or(BindlessMeshError::MissAttributeNormal)?;
+            .ok_or(BindlessMeshError::MissingAttributeNormal)?;
         let uvs = mesh
             .attribute(Mesh::ATTRIBUTE_UV_0)
             .and_then(|attribute| match attribute {
                 VertexAttributeValues::Float32x2(value) => Some(value),
                 _ => None,
             })
-            .ok_or(BindlessMeshError::MissAttributeUV)?;
+            .ok_or(BindlessMeshError::MissingAttributeUV)?;
 
         let mut vertices = vec![];
         for (position, normal, uv) in itertools::multizip((positions, normals, uvs)) {
@@ -328,32 +328,39 @@ fn prepare_mesh_assets(
     }
 }
 
+// #[derive(Default, Component, Clone, ShaderType)]
+// pub struct BindlessMeshUniform {
+//     pub id: u32,
+//     pub vertex_offset: u32,
+//     pub primitive_offset: u32,
+//     pub node_offset: u32,
+// }
+
 #[derive(Default, Component, Clone, ShaderType)]
-pub struct BindlessMeshUniform {
-    pub id: u32,
-    pub vertex_offset: u32,
-    pub primitive_offset: u32,
-    pub node_offset: u32,
+pub struct PreviousMeshUniform {
+    pub transform: Mat4,
+    pub inverse_transpose_model: Mat4,
 }
 
+#[allow(clippy::type_complexity)]
 fn extract_meshes(
     mut commands: Commands,
-    query: Extract<Query<(Entity, &Handle<Mesh>)>>,
-    meshes: Res<BindlessMeshes>,
+    query: Extract<Query<(Entity, &PreviousGlobalTransform), With<Handle<Mesh>>>>,
 ) {
-    let mut batch_commands = Vec::new();
-
-    for (entity, handle) in query.iter() {
-        if let Some(offset) = meshes.offsets.get(handle) {
-            let uniform = BindlessMeshUniform {
-                id: entity.id(),
-                vertex_offset: offset.vertex_offset as u32,
-                primitive_offset: offset.primitive_offset as u32,
-                node_offset: offset.node_offset as u32,
-            };
-            batch_commands.push((entity, (uniform,)));
-        }
+    for (entity, transform) in query.iter() {
+        // if let Some(offset) = meshes.offsets.get(handle) {
+        //     let uniform = BindlessMeshUniform {
+        //         id: entity.id(),
+        //         vertex_offset: offset.vertex_offset as u32,
+        //         primitive_offset: offset.primitive_offset as u32,
+        //         node_offset: offset.node_offset as u32,
+        //     };
+        // }
+        let transform = transform.compute_matrix();
+        let uniform = PreviousMeshUniform {
+            transform,
+            inverse_transpose_model: transform.inverse().transpose(),
+        };
+        commands.get_or_spawn(entity).insert(uniform);
     }
-
-    commands.insert_or_spawn_batch(batch_commands);
 }

@@ -9,6 +9,7 @@ fn main() {
         .add_plugin(PbrPlugin)
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
+        .add_system(rotate_camera)
         .run();
 }
 
@@ -18,14 +19,17 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
         .spawn_bundle(TransformBundle::default())
         .insert_bundle(VisibilityBundle::default())
         .insert(meshes.add(Mesh::from(shape::Plane { size: 5.0 })));
-    // Cube
+    // Sphere
     commands
         .spawn_bundle(TransformBundle {
             local: Transform::from_xyz(0.0, 0.5, 0.0),
             ..Default::default()
         })
         .insert_bundle(VisibilityBundle::default())
-        .insert(meshes.add(Mesh::from(shape::Cube::default())));
+        .insert(meshes.add(Mesh::from(shape::UVSphere {
+            radius: 0.5,
+            ..Default::default()
+        })));
 
     // Only directional light is supported
     const HALF_SIZE: f32 = 5.0;
@@ -58,4 +62,14 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
         transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
+}
+
+fn rotate_camera(time: Res<Time>, mut query: Query<&mut Transform, With<Camera3d>>) {
+    let radius = Vec2::new(-2.0, 5.0).length();
+    let sin = time.delta_seconds().sin();
+    let cos = time.delta_seconds().cos();
+    for mut transform in &mut query {
+        *transform =
+            Transform::from_xyz(radius * cos, 2.5, radius * sin).looking_at(Vec3::ZERO, Vec3::Y);
+    }
 }
