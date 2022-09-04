@@ -43,7 +43,7 @@ impl Plugin for BindlessMeshPlugin {
     }
 }
 
-#[derive(Default, Clone, Copy, ShaderType)]
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuVertex {
     pub position: Vec3,
     pub normal: Vec3,
@@ -83,9 +83,11 @@ impl BHShape for GpuPrimitive {
 pub struct GpuInstance {
     pub min: Vec3,
     pub max: Vec3,
-    pub vertex_offset: u32,
-    pub primitive_offset: u32,
-    pub node_offset: u32,
+    pub transform: Mat4,
+    pub inverse_transpose_model: Mat4,
+    /// Packed value of vertex, primitive, node offsets and node length.
+    pub data: UVec4,
+
     node_index: u32,
 }
 
@@ -108,13 +110,13 @@ impl BHShape for GpuInstance {
     }
 }
 
-#[derive(Default, Clone, ShaderType)]
+#[derive(Debug, Default, Clone, ShaderType)]
 pub struct GpuNode {
     pub min: Vec3,
     pub max: Vec3,
     pub entry_index: u32,
     pub exit_index: u32,
-    pub face_index: u32,
+    pub primitive_index: u32,
 }
 
 #[derive(Default, ShaderType)]
@@ -262,12 +264,12 @@ impl BindlessMesh {
         }?;
 
         let bvh = BVH::build(&mut primitives);
-        let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, face_index| GpuNode {
+        let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, primitive_index| GpuNode {
             min: aabb.min.to_array().into(),
             max: aabb.max.to_array().into(),
             entry_index,
             exit_index,
-            face_index,
+            primitive_index,
         });
 
         Ok(Self {
@@ -283,6 +285,7 @@ pub struct BindlessMeshOffset {
     pub vertex_offset: usize,
     pub primitive_offset: usize,
     pub node_offset: usize,
+    pub node_length: usize,
 }
 
 #[derive(Default)]
@@ -358,6 +361,7 @@ fn extract_mesh_assets(
                 .append(&mut mesh.primitives.clone());
 
             let node_offset = meta.node_buffer.get().data.len();
+            let node_length = mesh.nodes.len();
             meta.node_buffer
                 .get_mut()
                 .data
@@ -369,6 +373,7 @@ fn extract_mesh_assets(
                     vertex_offset,
                     primitive_offset,
                     node_offset,
+                    node_length,
                 },
             ));
         }
@@ -477,15 +482,15 @@ fn extract_mesh_instances(
         if let (Ok((aabb, transform)), Some(offset)) =
             (query.get(entity), meshes.offsets.get(&handle))
         {
-            let model = transform.compute_matrix();
-            let center = model.transform_point3a(aabb.center);
+            let transform = transform.compute_matrix();
+            let center = transform.transform_point3a(aabb.center);
             let vertices = (0..8i32)
                 .map(|index| {
                     let x = 2 * (index & 1) - 1;
                     let y = 2 * ((index >> 1) & 1) - 1;
                     let z = 2 * ((index >> 2) & 1) - 1;
                     let vertex = aabb.half_extents * Vec3A::new(x as f32, y as f32, z as f32);
-                    model.transform_vector3a(vertex)
+                    transform.transform_vector3a(vertex)
                 })
                 .collect_vec();
 
@@ -503,9 +508,14 @@ fn extract_mesh_instances(
                 GpuInstance {
                     min: min.into(),
                     max: max.into(),
-                    vertex_offset: offset.vertex_offset as u32,
-                    primitive_offset: offset.primitive_offset as u32,
-                    node_offset: offset.node_offset as u32,
+                    transform,
+                    inverse_transpose_model: transform.inverse().transpose(),
+                    data: UVec4::new(
+                        offset.vertex_offset as u32,
+                        offset.primitive_offset as u32,
+                        offset.node_offset as u32,
+                        offset.node_length as u32,
+                    ),
                     node_index: 0,
                 },
             );
@@ -525,12 +535,12 @@ fn prepare_mesh_instances(
     if state.instance_updated {
         let mut instances = instances.values().cloned().collect_vec();
         let bvh = BVH::build(&mut instances);
-        let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, face_index| GpuNode {
+        let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, primitive_index| GpuNode {
             min: aabb.min.to_array().into(),
             max: aabb.max.to_array().into(),
             entry_index,
             exit_index,
-            face_index,
+            primitive_index,
         });
 
         meta.instance_buffer.get_mut().data = instances;
