@@ -16,7 +16,10 @@ fn main() {
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     // Plane
     commands
-        .spawn_bundle(TransformBundle::default())
+        .spawn_bundle(TransformBundle {
+            local: Transform::from_rotation(Quat::from_rotation_y(PI / 4.0)),
+            ..Default::default()
+        })
         .insert_bundle(VisibilityBundle::default())
         .insert(meshes.add(Mesh::from(shape::Plane { size: 5.0 })));
     // Sphere
