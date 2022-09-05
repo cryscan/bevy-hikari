@@ -8,7 +8,7 @@ use bevy::{
         lifetimeless::{Read, SQuery, SRes},
         SystemParamItem,
     },
-    pbr::{DrawMesh, MeshUniform, ShadowPipelineKey, SHADOW_FORMAT},
+    pbr::{DrawMesh, MeshUniform, SHADOW_FORMAT},
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -116,8 +116,41 @@ impl FromWorld for PrepassPipeline {
     }
 }
 
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct PrepassPipelineKey: u32 {
+        const NONE               = 0;
+        const PRIMITIVE_TOPOLOGY_RESERVED_BITS = PrepassPipelineKey::PRIMITIVE_TOPOLOGY_MASK_BITS << PrepassPipelineKey::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
+    }
+}
+
+impl PrepassPipelineKey {
+    const PRIMITIVE_TOPOLOGY_MASK_BITS: u32 = 0b111;
+    const PRIMITIVE_TOPOLOGY_SHIFT_BITS: u32 = 32 - 3;
+
+    pub fn from_primitive_topology(primitive_topology: PrimitiveTopology) -> Self {
+        let primitive_topology_bits = ((primitive_topology as u32)
+            & Self::PRIMITIVE_TOPOLOGY_MASK_BITS)
+            << Self::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
+        Self::from_bits(primitive_topology_bits).unwrap()
+    }
+
+    pub fn primitive_topology(&self) -> PrimitiveTopology {
+        let primitive_topology_bits =
+            (self.bits >> Self::PRIMITIVE_TOPOLOGY_SHIFT_BITS) & Self::PRIMITIVE_TOPOLOGY_MASK_BITS;
+        match primitive_topology_bits {
+            x if x == PrimitiveTopology::PointList as u32 => PrimitiveTopology::PointList,
+            x if x == PrimitiveTopology::LineList as u32 => PrimitiveTopology::LineList,
+            x if x == PrimitiveTopology::LineStrip as u32 => PrimitiveTopology::LineStrip,
+            x if x == PrimitiveTopology::TriangleList as u32 => PrimitiveTopology::TriangleList,
+            x if x == PrimitiveTopology::TriangleStrip as u32 => PrimitiveTopology::TriangleStrip,
+            _ => PrimitiveTopology::default(),
+        }
+    }
+}
+
 impl SpecializedMeshPipeline for PrepassPipeline {
-    type Key = ShadowPipelineKey;
+    type Key = PrepassPipelineKey;
 
     fn specialize(
         &self,
@@ -128,9 +161,8 @@ impl SpecializedMeshPipeline for PrepassPipeline {
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
         ];
-        let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
-
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
+        let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
 
         Ok(RenderPipelineDescriptor {
             label: None,
@@ -271,7 +303,7 @@ fn queue_prepass_meshes(
         let add_render_phase =
             |(entity, mesh_handle, mesh_uniform): (Entity, &Handle<Mesh>, &MeshUniform)| {
                 if let Some(mesh) = render_meshes.get(mesh_handle) {
-                    let key = ShadowPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                    let key = PrepassPipelineKey::from_primitive_topology(mesh.primitive_topology);
                     let pipeline_id = pipelines.specialize(
                         &mut pipeline_cache,
                         &prepass_pipeline,

@@ -8,11 +8,13 @@ use bevy::{
         RenderApp,
     },
 };
+use direct::DirectPlugin;
 use mesh::BindlessMeshPlugin;
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
 
+pub mod direct;
 pub mod mesh;
 pub mod prelude;
 pub mod prepass;
@@ -26,6 +28,8 @@ pub mod graph {
     }
     pub mod node {
         pub const PREPASS: &str = "prepass";
+        pub const DIRECT_PASS: &str = "direct_pass";
+        pub const INDIRECT_PASS: &str = "indirect_pass";
     }
 }
 
@@ -45,7 +49,8 @@ impl Plugin for HikariPlugin {
         app.add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(BindlessMeshPlugin)
-            .add_plugin(PrepassPlugin);
+            .add_plugin(PrepassPlugin)
+            .add_plugin(DirectPlugin);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
