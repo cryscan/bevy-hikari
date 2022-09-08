@@ -9,7 +9,7 @@ use bevy::{
     },
 };
 use direct::DirectPlugin;
-use mesh::BindlessMeshPlugin;
+use mesh::MeshPlugin;
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
@@ -48,7 +48,7 @@ impl Plugin for HikariPlugin {
 
         app.add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
-            .add_plugin(BindlessMeshPlugin)
+            .add_plugin(MeshPlugin)
             .add_plugin(PrepassPlugin)
             .add_plugin(DirectPlugin);
 

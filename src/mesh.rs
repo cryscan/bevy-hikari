@@ -20,8 +20,8 @@ use bvh::{
 use itertools::Itertools;
 use std::collections::BTreeMap;
 
-pub struct BindlessMeshPlugin;
-impl Plugin for BindlessMeshPlugin {
+pub struct MeshPlugin;
+impl Plugin for MeshPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(UniformComponentPlugin::<PreviousMeshUniform>::default())
             .add_event::<MeshInstanceEvent>()
@@ -32,14 +32,29 @@ impl Plugin for BindlessMeshPlugin {
                 .init_resource::<GpuMeshes>()
                 .init_resource::<GpuMeshInstances>()
                 .init_resource::<MeshRenderAssets>()
-                .init_resource::<MeshStates>()
+                .init_resource::<MeshAssetState>()
+                .init_resource::<MeshInstanceState>()
                 .add_system_to_stage(RenderStage::Extract, extract_mesh_assets)
                 .add_system_to_stage(RenderStage::Extract, extract_mesh_instances)
                 .add_system_to_stage(RenderStage::Extract, extract_meshes)
-                .add_system_to_stage(RenderStage::Prepare, prepare_mesh_assets)
-                .add_system_to_stage(RenderStage::Prepare, prepare_mesh_instances);
+                .add_system_to_stage(
+                    RenderStage::Prepare,
+                    prepare_mesh_assets.label(MeshSystems::PrepareMeshAssets),
+                )
+                .add_system_to_stage(
+                    RenderStage::Prepare,
+                    prepare_mesh_instances
+                        .label(MeshSystems::PrepareMeshInstances)
+                        .after(MeshSystems::PrepareMeshAssets),
+                );
         }
     }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
+pub enum MeshSystems {
+    PrepareMeshAssets,
+    PrepareMeshInstances,
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
@@ -308,12 +323,6 @@ pub enum MeshInstanceState {
     Dirty,
 }
 
-#[derive(Debug, Default)]
-pub struct MeshStates {
-    pub asset: MeshAssetState,
-    pub instance: MeshInstanceState,
-}
-
 /// Holds all GPU representatives of mesh assets.
 #[derive(Default)]
 pub struct GpuMeshes {
@@ -330,7 +339,7 @@ pub struct ExtractedMeshes {
 fn extract_mesh_assets(
     mut commands: Commands,
     mut events: Extract<EventReader<AssetEvent<Mesh>>>,
-    mut states: ResMut<MeshStates>,
+    mut asset_state: ResMut<MeshAssetState>,
     meshes: Extract<Res<Assets<Mesh>>>,
 ) {
     let mut changed_assets = HashSet::default();
@@ -354,7 +363,7 @@ fn extract_mesh_assets(
         }
     }
 
-    states.asset = if !extracted_assets.is_empty() || !removed.is_empty() {
+    *asset_state = if !extracted_assets.is_empty() || !removed.is_empty() {
         MeshAssetState::Dirty
     } else {
         MeshAssetState::Clean
@@ -368,13 +377,13 @@ fn extract_mesh_assets(
 
 fn prepare_mesh_assets(
     mut extracted_assets: ResMut<ExtractedMeshes>,
-    mut states: ResMut<MeshStates>,
+    mut asset_state: ResMut<MeshAssetState>,
     mut meshes: ResMut<GpuMeshes>,
     mut render_assets: ResMut<MeshRenderAssets>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
-    if states.asset == MeshAssetState::Clean {
+    if *asset_state == MeshAssetState::Clean {
         return;
     }
 
@@ -428,7 +437,7 @@ fn prepare_mesh_assets(
         meshes.slices.insert(handle, slice);
     }
 
-    states.asset = MeshAssetState::Updated;
+    *asset_state = MeshAssetState::Updated;
 }
 
 #[derive(Default, Component, Clone, ShaderType)]
@@ -484,7 +493,7 @@ fn mesh_instance_system(
 fn extract_mesh_instances(
     mut events: Extract<EventReader<MeshInstanceEvent>>,
     mut instances: ResMut<GpuMeshInstances>,
-    mut states: ResMut<MeshStates>,
+    mut instance_state: ResMut<MeshInstanceState>,
     query: Extract<Query<(&Aabb, &GlobalTransform)>>,
 ) {
     let mut extracted_instances = vec![];
@@ -500,9 +509,14 @@ fn extract_mesh_instances(
         }
     }
 
+    *instance_state = if !removed.is_empty() || !extracted_instances.is_empty() {
+        MeshInstanceState::Dirty
+    } else {
+        MeshInstanceState::Clean
+    };
+
     for entity in removed {
         instances.remove(&entity);
-        states.instance = MeshInstanceState::Dirty;
     }
 
     for (entity, handle) in extracted_instances {
@@ -542,7 +556,6 @@ fn extract_mesh_instances(
                     },
                 ),
             );
-            states.instance = MeshInstanceState::Dirty;
         }
     }
 }
@@ -553,26 +566,28 @@ fn prepare_mesh_instances(
     mut render_assets: ResMut<MeshRenderAssets>,
     instances: Res<GpuMeshInstances>,
     meshes: Res<GpuMeshes>,
-    mut states: ResMut<MeshStates>,
+    asset_state: Res<MeshAssetState>,
+    instance_state: Res<MeshInstanceState>,
 ) {
-    if states.asset == MeshAssetState::Clean && states.instance == MeshInstanceState::Clean {
+    if *asset_state == MeshAssetState::Clean && *instance_state == MeshInstanceState::Clean {
         return;
     }
-    if states.asset == MeshAssetState::Dirty {
-        info!("Mesh assets not ready, retry preparing mesh instances next frame.");
-        return;
+    if *asset_state == MeshAssetState::Dirty {
+        panic!("Mesh assets must be prepared before instances!");
     }
 
-    let mut prepared_instances = vec![];
-    for (_entity, (handle, instance)) in instances.iter() {
-        let slice = meshes.slices.get(handle).unwrap();
-        let mut instance = *instance;
-        instance.slice = *slice;
-        prepared_instances.push(instance);
-    }
+    let mut instances = instances
+        .values()
+        .cloned()
+        .map(|(handle, mut instance)| {
+            let slice = meshes.slices.get(&handle).unwrap();
+            instance.slice = *slice;
+            instance
+        })
+        .collect_vec();
 
-    if !prepared_instances.is_empty() {
-        let bvh = BVH::build(&mut prepared_instances);
+    if !instances.is_empty() {
+        let bvh = BVH::build(&mut instances);
         let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, primitive_index| GpuNode {
             min: aabb.min.to_array().into(),
             max: aabb.max.to_array().into(),
@@ -580,10 +595,8 @@ fn prepare_mesh_instances(
             exit_index,
             primitive_index,
         });
-        render_assets.instance_buffer.get_mut().data = prepared_instances;
+        render_assets.instance_buffer.get_mut().data = instances;
         render_assets.instance_node_buffer.get_mut().data = nodes;
         render_assets.write_instances(&render_device, &render_queue);
-
-        states.instance = MeshInstanceState::Clean;
     }
 }
