@@ -48,3 +48,9 @@ struct Instances {
 struct Nodes {
     data: array<Node>;
 };
+
+struct Ray {
+    origin: vec3<f32>,
+    inv_direction: vec3<f32>,
+    signs: u32,
+};

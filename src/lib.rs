@@ -41,6 +41,8 @@ pub const RAY_TRACING_TYPES_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
 pub const RAY_TRACING_BINDINGS_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5025976374517268);
+pub const RAY_TRACING_FUNCTIONS_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 6789977396118176997);
 
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
@@ -67,6 +69,12 @@ impl Plugin for HikariPlugin {
             app,
             RAY_TRACING_BINDINGS_HANDLE,
             "shaders/ray_tracing_bindings.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            RAY_TRACING_FUNCTIONS_HANDLE,
+            "shaders/ray_tracing_functions.wgsl",
             Shader::from_wgsl
         );
 
