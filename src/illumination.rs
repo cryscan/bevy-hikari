@@ -9,21 +9,21 @@ use bevy::{
     },
 };
 
-pub struct DirectPlugin;
-impl Plugin for DirectPlugin {
+pub struct IlluminationPlugin;
+impl Plugin for IlluminationPlugin {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<DirectPipeline>();
+            render_app.init_resource::<IlluminationPipeline>();
         }
     }
 }
 
-pub struct DirectPipeline {
+pub struct IlluminationPipeline {
     view_layout: BindGroupLayout,
     mesh_layout: BindGroupLayout,
 }
 
-impl FromWorld for DirectPipeline {
+impl FromWorld for IlluminationPipeline {
     fn from_world(world: &mut World) -> Self {
         let mesh_pipeline = world.resource::<MeshPipeline>();
         let view_layout = mesh_pipeline.view_layout.clone();
@@ -54,20 +54,9 @@ impl FromWorld for DirectPipeline {
                     },
                     count: None,
                 },
-                // Instances
+                // Asset nodes
                 BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuInstanceBuffer::min_size()),
-                    },
-                    count: None,
-                },
-                // Bottom level nodes
-                BindGroupLayoutEntry {
-                    binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -76,7 +65,18 @@ impl FromWorld for DirectPipeline {
                     },
                     count: None,
                 },
-                // Top level nodes
+                // Instances
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuInstanceBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Instance nodes
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::COMPUTE,
@@ -97,10 +97,19 @@ impl FromWorld for DirectPipeline {
     }
 }
 
-impl SpecializedComputePipeline for DirectPipeline {
+impl SpecializedComputePipeline for IlluminationPipeline {
     type Key = ();
 
     fn specialize(&self, _key: Self::Key) -> ComputePipelineDescriptor {
-        todo!()
+        let layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
+        let shader_defs = vec![];
+
+        ComputePipelineDescriptor {
+            label: None,
+            layout: Some(layout),
+            shader: todo!(),
+            shader_defs,
+            entry_point: todo!(),
+        }
     }
 }

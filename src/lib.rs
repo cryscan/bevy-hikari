@@ -8,13 +8,13 @@ use bevy::{
         RenderApp,
     },
 };
-use direct::DirectPlugin;
+use illumination::IlluminationPlugin;
 use mesh::MeshPlugin;
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
 
-pub mod direct;
+pub mod illumination;
 pub mod mesh;
 pub mod prelude;
 pub mod prepass;
@@ -35,6 +35,12 @@ pub mod graph {
 
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
+pub const ILLUMINATION_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
+pub const RAY_TRACING_TYPES_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
+pub const RAY_TRACING_BINDINGS_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5025976374517268);
 
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
@@ -45,12 +51,30 @@ impl Plugin for HikariPlugin {
             "shaders/prepass.wgsl",
             Shader::from_wgsl
         );
+        load_internal_asset!(
+            app,
+            ILLUMINATION_SHADER_HANDLE,
+            "shaders/illumination.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            RAY_TRACING_TYPES_HANDLE,
+            "shaders/ray_tracing_types.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            RAY_TRACING_BINDINGS_HANDLE,
+            "shaders/ray_tracing_bindings.wgsl",
+            Shader::from_wgsl
+        );
 
         app.add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshPlugin)
             .add_plugin(PrepassPlugin)
-            .add_plugin(DirectPlugin);
+            .add_plugin(IlluminationPlugin);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);

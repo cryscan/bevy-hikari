@@ -14,14 +14,18 @@ fn main() {
 }
 
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
-    // Plane
+    // Ground
     commands
         .spawn_bundle(TransformBundle {
-            local: Transform::from_rotation(Quat::from_rotation_y(PI / 4.0)),
+            local: Transform {
+                translation: Vec3::new(0.0, -0.5, 0.0),
+                rotation: Default::default(),
+                scale: Vec3::new(5.0, 1.0, 5.0),
+            },
             ..Default::default()
         })
         .insert_bundle(VisibilityBundle::default())
-        .insert(meshes.add(Mesh::from(shape::Plane { size: 5.0 })));
+        .insert(meshes.add(Mesh::from(shape::Cube::default())));
     // Sphere
     commands
         .spawn_bundle(TransformBundle {
