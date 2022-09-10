@@ -146,6 +146,7 @@ pub struct GpuPrimitiveBuffer {
 
 #[derive(Default, ShaderType)]
 pub struct GpuNodeBuffer {
+    pub count: u32,
     #[size(runtime)]
     pub data: Vec<GpuNode>,
 }
@@ -171,11 +172,13 @@ impl MeshRenderAssets {
         self.vertex_buffer.get_mut().data.clear();
         self.primitive_buffer.get_mut().data.clear();
         self.asset_node_buffer.get_mut().data.clear();
+        self.asset_node_buffer.get_mut().count = 0;
     }
 
     pub fn clear_instances(&mut self) {
         self.instance_buffer.get_mut().data.clear();
         self.instance_node_buffer.get_mut().data.clear();
+        self.instance_node_buffer.get_mut().count = 0;
     }
 
     pub fn write_assets(&mut self, device: &RenderDevice, queue: &RenderQueue) {
@@ -596,6 +599,7 @@ fn prepare_mesh_instances(
             primitive_index,
         });
         render_assets.instance_buffer.get_mut().data = instances;
+        render_assets.instance_node_buffer.get_mut().count = nodes.len() as u32;
         render_assets.instance_node_buffer.get_mut().data = nodes;
         render_assets.write_instances(&render_device, &render_queue);
     }

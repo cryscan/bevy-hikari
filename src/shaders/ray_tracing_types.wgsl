@@ -37,20 +37,15 @@ struct Node {
 };
 
 struct Vertices {
-    data: array<Vertex>;
+    data: array<Vertex>,
 };
 struct Primitives {
-    data: array<Primitive>;
+    data: array<Primitive>,
 };
 struct Instances {
-    data: array<Instance>;
+    data: array<Instance>,
 };
 struct Nodes {
-    data: array<Node>;
-};
-
-struct Ray {
-    origin: vec3<f32>,
-    inv_direction: vec3<f32>,
-    signs: u32,
+    count: u32,
+    data: array<Node>,
 };
