@@ -215,8 +215,10 @@ impl SpecializedMeshPipeline for PrepassPipeline {
 
 #[derive(Component)]
 pub struct PrepassTarget {
-    pub color_view: TextureView,
+    pub normal_velocity_view: TextureView,
+    pub normal_velocity_sampler: Sampler,
     pub depth_view: TextureView,
+    pub depth_sampler: Sampler,
 }
 
 fn extract_prepass_camera_phases(
@@ -246,7 +248,7 @@ fn prepare_prepass_targets(
                 depth_or_array_layers: 1,
             };
 
-            let color_view = texture_cache
+            let normal_velocity_view = texture_cache
                 .get(
                     &render_device,
                     TextureDescriptor {
@@ -260,6 +262,8 @@ fn prepare_prepass_targets(
                     },
                 )
                 .default_view;
+            let normal_velocity_sampler =
+                render_device.create_sampler(&SamplerDescriptor::default());
 
             let depth_view = texture_cache
                 .get(
@@ -275,10 +279,13 @@ fn prepare_prepass_targets(
                     },
                 )
                 .default_view;
+            let depth_sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
             commands.entity(entity).insert(PrepassTarget {
-                color_view,
+                normal_velocity_view,
+                normal_velocity_sampler,
                 depth_view,
+                depth_sampler,
             });
         }
     }
@@ -534,7 +541,7 @@ impl Node for PrepassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("main_prepass"),
                 color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &target.color_view,
+                    view: &target.normal_velocity_view,
                     resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Clear(Color::NONE.into()),

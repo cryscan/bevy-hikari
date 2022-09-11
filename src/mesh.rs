@@ -6,7 +6,7 @@ use bevy::{
         extract_component::UniformComponentPlugin,
         mesh::VertexAttributeValues,
         primitives::Aabb,
-        render_resource::{PrimitiveTopology, ShaderType, StorageBuffer},
+        render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         Extract, RenderApp, RenderStage,
     },

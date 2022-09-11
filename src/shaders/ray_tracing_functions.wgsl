@@ -1,1 +1,0 @@
-#define_import_path bevy_hikari::ray_tracing_functions
