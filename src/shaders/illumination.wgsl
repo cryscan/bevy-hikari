@@ -13,6 +13,7 @@ var normal_velocity_sampler: sampler;
 @group(3) @binding(0)
 var render_texture: texture_storage_2d<rgba32float, write>;
 
+let FLOAT_EPSILON: f32 = 1.0e-5;
 let MAX_FLOAT: f32 = 3.402823466e+38;
 let MAX_U32: u32 = 4294967295u;
 
@@ -44,10 +45,10 @@ fn instance_position_world_to_local(instance: Instance, world_position: vec3<f32
     return position.xyz / position.w;
 }
 
-fn instance_vector_world_to_local(instance: Instance, world_vector: vec3<f32>) -> vec3<f32> {
+fn instance_direction_world_to_local(instance: Instance, world_direction: vec3<f32>) -> vec3<f32> {
     let inverse_model = transpose(instance.inverse_transpose_model);
-    let vector = inverse_model * vec4<f32>(world_vector, 0.0);
-    return vector.xyz;
+    let direction = inverse_model * vec4<f32>(world_direction, 0.0);
+    return direction.xyz;
 }
 
 fn intersects_aabb(ray: Ray, aabb: Aabb) -> bool {
@@ -70,21 +71,21 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     var result: Intersection;
     result.distance = MAX_FLOAT;
 
-    let a = &tri[0];
-    let b = &tri[1];
-    let c = &tri[2];
+    let a = tri[0];
+    let b = tri[1];
+    let c = tri[2];
 
-    let ab = *b - *a;
-    let ac = *c - *a;
+    let ab = b - a;
+    let ac = c - a;
 
     let u_vec = cross(ray.direction, ac);
     let det = dot(ab, u_vec);
-    if (det < 0.00001) {
+    if (det < FLOAT_EPSILON) {
         return result;
     }
 
     let inv_det = 1.0 / det;
-    let ao = ray.origin - *a;
+    let ao = ray.origin - a;
     let u = dot(ao, u_vec) * inv_det;
     if (u < 0.0 || u > 1.0) {
         result.uv = vec2<f32>(u, 0.0);
@@ -99,7 +100,7 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     }
 
     let distance = dot(ac, v_vec) * inv_det;
-    if (distance > 0.00001) {
+    if (distance > FLOAT_EPSILON) {
         result.distance = distance;
     }
 
@@ -141,10 +142,13 @@ fn traverse_bottom(ray: Ray, instance_index: u32) -> Hit {
             }
         }
     }
+
+    return hit;
 }
 
 fn traverse_top(ray: Ray) -> Hit {
     var hit: Hit;
+    hit.intersection.distance = MAX_FLOAT;
     var index = 0u;
 
     for (; index < instance_node_buffer.count;) {
@@ -160,7 +164,7 @@ fn traverse_top(ray: Ray) -> Hit {
             if (intersects_aabb(ray, aabb)) {
                 var r: Ray;
                 r.origin = instance_position_world_to_local(*instance, ray.origin);
-                r.direction = instance_vector_world_to_local(*instance, ray.direction);
+                r.direction = instance_direction_world_to_local(*instance, ray.direction);
                 r.inv_direction = 1.0 / r.direction;
 
                 let h = traverse_bottom(r, instance_index);
@@ -185,23 +189,23 @@ fn traverse_top(ray: Ray) -> Hit {
     return hit;
 }
 
-struct ComputeInput {
-    @builtin(global_invocation_id) invocation_id: vec3<u32>;
-    @builtin(num_workgroups) workgroups: vec3<u32>,
-};
-
 @compute @workgroup_size(8, 8, 1)
-fn direct(in: ComputeInput) {
-    let uv = vec2<f32>(in.invocation_id) / vec2<f32>(in.workgroups.xy * 8u);
-    let depth = textureSample(depth_texture, depth_sampler, uv);
-    let normal_velocity = textureSample(normal_velocity_texture, normal_velocity_sampler, uv);
+fn direct(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let size = textureDimensions(render_texture);
+    let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
+    let depth: f32 = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0);
+    let normal_velocity = textureSampleLevel(normal_velocity_texture, normal_velocity_sampler, uv, 0.0);
 
-    if (depth < 0.00001) {
+    let location = vec2<i32>(invocation_id.xy);
+    if (depth < FLOAT_EPSILON) {
+        textureStore(render_texture, location, vec4<f32>(0.0));
         return;
     }
 
-    let ndc = vec4<f32>(uv, depth, 1.0);
+    let ndc = vec4<f32>(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y, depth, 1.0);
     let position = view.inverse_view_proj * ndc;
+    // let color = vec4<f32>(position.xyz / position.w, 1.0);
+    // textureStore(render_texture, location, color);
 
     var ray: Ray;
     ray.origin = view.world_position;
@@ -211,6 +215,6 @@ fn direct(in: ComputeInput) {
     let hit = traverse_top(ray);
 
     let color = vec4<f32>(hit.intersection.uv, hit.intersection.distance, 1.0);
-    let location = vec2<i32>(in.invocation_id);
+    let location = vec2<i32>(invocation_id.xy);
     textureStore(render_texture, location, color);
 }

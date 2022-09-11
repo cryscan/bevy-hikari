@@ -60,7 +60,7 @@ struct FragmentOutput {
 };
 
 fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
-    return clip.xy / (2.0 * clip.w);
+    return (clip.xy / clip.w + 1.0) / 2.0;
 }
 
 @fragment

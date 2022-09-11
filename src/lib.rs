@@ -8,11 +8,13 @@ use bevy::{
         RenderApp,
     },
 };
-use illumination::IlluminationPlugin;
+use illumination::LightPlugin;
 use mesh::MeshPlugin;
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
+
+use crate::illumination::LightPassNode;
 
 pub mod illumination;
 pub mod mesh;
@@ -28,14 +30,14 @@ pub mod graph {
     }
     pub mod node {
         pub const PREPASS: &str = "prepass";
-        pub const DIRECT_PASS: &str = "direct_pass";
-        pub const INDIRECT_PASS: &str = "indirect_pass";
+        pub const LIGHT_DIRECT_PASS: &str = "light_direct_pass";
+        pub const LIGHT_INDIRECT_PASS: &str = "light_indirect_pass";
     }
 }
 
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
-pub const ILLUMINATION_SHADER_HANDLE: HandleUntyped =
+pub const LIGHT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
 pub const RAY_TRACING_TYPES_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
@@ -55,7 +57,7 @@ impl Plugin for HikariPlugin {
         );
         load_internal_asset!(
             app,
-            ILLUMINATION_SHADER_HANDLE,
+            LIGHT_SHADER_HANDLE,
             "shaders/illumination.wgsl",
             Shader::from_wgsl
         );
@@ -82,15 +84,18 @@ impl Plugin for HikariPlugin {
             .add_plugin(ViewPlugin)
             .add_plugin(MeshPlugin)
             .add_plugin(PrepassPlugin)
-            .add_plugin(IlluminationPlugin);
+            .add_plugin(LightPlugin);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
+            let light_pass_node = LightPassNode::new(&mut render_app.world);
             let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
+
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
 
             let mut hikari_graph = RenderGraph::default();
             hikari_graph.add_node(graph::node::PREPASS, prepass_node);
+            hikari_graph.add_node(graph::node::LIGHT_DIRECT_PASS, light_pass_node);
             hikari_graph.add_node(
                 bevy::core_pipeline::core_3d::graph::node::MAIN_PASS,
                 pass_node_3d,
@@ -106,6 +111,17 @@ impl Plugin for HikariPlugin {
                     graph::node::PREPASS,
                     PrepassNode::IN_VIEW,
                 )
+                .unwrap();
+            hikari_graph
+                .add_slot_edge(
+                    input_node_id,
+                    graph::input::VIEW_ENTITY,
+                    graph::node::LIGHT_DIRECT_PASS,
+                    LightPassNode::IN_VIEW,
+                )
+                .unwrap();
+            hikari_graph
+                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_DIRECT_PASS)
                 .unwrap();
             hikari_graph
                 .add_slot_edge(
