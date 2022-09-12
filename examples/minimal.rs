@@ -30,6 +30,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     // Ground
     commands.spawn_bundle(PbrBundle {
@@ -49,8 +50,14 @@ fn setup(
             ..Default::default()
         })),
         material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
+        transform: Transform::from_xyz(1.5, 0.5, 0.0),
         ..Default::default()
+    });
+    // Model
+    commands.spawn_bundle(SceneBundle {
+        scene: asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0"),
+        transform: Transform::from_scale(Vec3::splat(2.0)),
+        ..default()
     });
 
     // Only directional light is supported
