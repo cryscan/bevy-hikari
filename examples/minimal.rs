@@ -1,15 +1,28 @@
-use bevy::{pbr::PbrPlugin, prelude::*, render::camera::CameraRenderGraph};
+use bevy::{
+    input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
+    pbr::PbrPlugin,
+    prelude::*,
+    render::camera::CameraRenderGraph,
+};
 use bevy_hikari::prelude::*;
+use smooth_bevy_cameras::{
+    controllers::orbit::{
+        ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
+    },
+    LookTransformPlugin,
+};
 use std::f32::consts::PI;
 
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
+        .add_plugin(LookTransformPlugin)
+        .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(PbrPlugin)
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
-        .add_system(rotate_camera)
+        .add_system(camera_input_map)
         .run();
 }
 
@@ -66,19 +79,68 @@ fn setup(
     });
 
     // Camera
-    commands.spawn_bundle(Camera3dBundle {
-        camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..Default::default()
-    });
+    commands
+        .spawn_bundle(Camera3dBundle {
+            camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
+            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..Default::default()
+        })
+        .insert_bundle(OrbitCameraBundle::new(
+            OrbitCameraController::default(),
+            Vec3::new(-2.0, 5.0, 5.0),
+            Vec3::new(0., 0., 0.),
+        ));
 }
 
-fn rotate_camera(time: Res<Time>, mut query: Query<&mut Transform, With<Camera3d>>) {
-    let radius = Vec2::new(-2.0, 5.0).length();
-    let sin = (10.0 * time.delta_seconds()).sin();
-    let cos = (10.0 * time.delta_seconds()).cos();
-    for mut transform in &mut query {
-        *transform =
-            Transform::from_xyz(radius * cos, 2.5, radius * sin).looking_at(Vec3::ZERO, Vec3::Y);
+pub fn camera_input_map(
+    mut events: EventWriter<ControlEvent>,
+    mut mouse_wheel_reader: EventReader<MouseWheel>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mouse_buttons: Res<Input<MouseButton>>,
+    controllers: Query<&OrbitCameraController>,
+) {
+    // Can only control one camera at a time.
+    let controller = if let Some(controller) = controllers.iter().next() {
+        controller
+    } else {
+        return;
+    };
+    let OrbitCameraController {
+        enabled,
+        mouse_rotate_sensitivity,
+        mouse_translate_sensitivity,
+        mouse_wheel_zoom_sensitivity,
+        pixels_per_line,
+        ..
+    } = *controller;
+
+    if !enabled {
+        return;
     }
+
+    let mut cursor_delta = Vec2::ZERO;
+    for event in mouse_motion_events.iter() {
+        cursor_delta += event.delta;
+    }
+
+    if mouse_buttons.pressed(MouseButton::Left) {
+        events.send(ControlEvent::Orbit(mouse_rotate_sensitivity * cursor_delta));
+    }
+
+    if mouse_buttons.pressed(MouseButton::Right) {
+        events.send(ControlEvent::TranslateTarget(
+            mouse_translate_sensitivity * cursor_delta,
+        ));
+    }
+
+    let mut scalar = 1.0;
+    for event in mouse_wheel_reader.iter() {
+        // scale the event magnitude per pixel or per line
+        let scroll_amount = match event.unit {
+            MouseScrollUnit::Line => event.y,
+            MouseScrollUnit::Pixel => event.y / pixels_per_line,
+        };
+        scalar *= 1.0 - scroll_amount * mouse_wheel_zoom_sensitivity;
+    }
+    events.send(ControlEvent::Zoom(scalar));
 }

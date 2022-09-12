@@ -253,6 +253,7 @@ fn traverse_top(ray: Ray) -> Hit {
 fn direct(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
     let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
+    
     let depth: f32 = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0);
     let normal_velocity = textureSampleLevel(normal_velocity_texture, normal_velocity_sampler, uv, 0.0);
 
@@ -264,8 +265,6 @@ fn direct(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let ndc = vec4<f32>(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y, depth, 1.0);
     let position = view.inverse_view_proj * ndc;
-    // let color = vec4<f32>(position.xyz / position.w, 1.0);
-    // textureStore(render_texture, location, color);
 
     var ray: Ray;
     ray.origin = view.world_position;
