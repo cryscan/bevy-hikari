@@ -275,7 +275,7 @@ impl FromWorld for LightPipeline {
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::StorageTexture {
                     access: StorageTextureAccess::WriteOnly,
-                    format: TextureFormat::Rgba32Float,
+                    format: TextureFormat::Rgba16Float,
                     view_dimension: TextureViewDimension::D2,
                 },
                 count: None,
@@ -340,7 +340,7 @@ fn prepare_light_pass_targets(
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: TextureDimension::D2,
-                        format: TextureFormat::Rgba32Float,
+                        format: TextureFormat::Rgba16Float,
                         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
                     },
                 )

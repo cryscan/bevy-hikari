@@ -20,7 +20,7 @@ fn setup(
 ) {
     // Ground
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Torus::default())),
+        mesh: meshes.add(Mesh::from(shape::Cube::default())),
         material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
         transform: Transform {
             translation: Vec3::new(0.0, -0.5, 0.0),
@@ -75,8 +75,8 @@ fn setup(
 
 fn rotate_camera(time: Res<Time>, mut query: Query<&mut Transform, With<Camera3d>>) {
     let radius = Vec2::new(-2.0, 5.0).length();
-    let sin = time.delta_seconds().sin();
-    let cos = time.delta_seconds().cos();
+    let sin = (10.0 * time.delta_seconds()).sin();
+    let cos = (10.0 * time.delta_seconds()).cos();
     for mut transform in &mut query {
         *transform =
             Transform::from_xyz(radius * cos, 2.5, radius * sin).looking_at(Vec3::ZERO, Vec3::Y);

@@ -1,5 +1,65 @@
 #import bevy_pbr::mesh_view_bindings
-#import bevy_hikari::ray_tracing_bindings
+
+struct Vertex {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    uv: vec2<f32>,
+};
+
+struct Primitive {
+    vertices: array<vec3<f32>, 3>,
+    indices: array<u32, 3>,
+    node_index: u32,
+};
+
+struct Slice {
+    vertex: u32,
+    primitive: u32,
+    node_offset: u32,
+    node_len: u32,
+};
+
+struct Instance {
+    min: vec3<f32>,
+    max: vec3<f32>,
+    model: mat4x4<f32>,
+    inverse_transpose_model: mat4x4<f32>,
+    slice: Slice,
+    node_index: u32,
+};
+
+struct Node {
+    min: vec3<f32>,
+    max: vec3<f32>,
+    entry_index: u32,
+    exit_index: u32,
+    primitive_index: u32,
+};
+
+struct Vertices {
+    data: array<Vertex>,
+};
+struct Primitives {
+    data: array<Primitive>,
+};
+struct Instances {
+    data: array<Instance>,
+};
+struct Nodes {
+    count: u32,
+    data: array<Node>,
+};
+
+@group(1) @binding(0)
+var<storage> vertex_buffer: Vertices;
+@group(1) @binding(1)
+var<storage> primitive_buffer: Primitives;
+@group(1) @binding(2)
+var<storage> asset_node_buffer: Nodes;
+@group(1) @binding(3)
+var<storage> instance_buffer: Instances;
+@group(1) @binding(4)
+var<storage> instance_node_buffer: Nodes;
 
 @group(2) @binding(0)
 var depth_texture: texture_depth_2d;
@@ -11,7 +71,7 @@ var normal_velocity_texture: texture_2d<f32>;
 var normal_velocity_sampler: sampler;
 
 @group(3) @binding(0)
-var render_texture: texture_storage_2d<rgba32float, write>;
+var render_texture: texture_storage_2d<rgba16float, write>;
 
 let FLOAT_EPSILON: f32 = 1.0e-5;
 let MAX_FLOAT: f32 = 3.402823466e+38;
@@ -119,7 +179,7 @@ fn traverse_bottom(ray: Ray, instance_index: u32) -> Hit {
         let node = &asset_node_buffer.data[node_index];
 
         if ((*node).entry_index == MAX_U32) {
-            let primitive_index = (*instance).slice.node_offset + (*node).primitive_index;
+            let primitive_index = (*instance).slice.primitive + (*node).primitive_index;
             let primitive = &primitive_buffer.data[primitive_index];
             let intersection = intersects_triangle(ray, (*primitive).vertices);
 
@@ -209,7 +269,7 @@ fn direct(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var ray: Ray;
     ray.origin = view.world_position;
-    ray.direction = 100.0 * normalize(position.xyz / position.w - ray.origin);
+    ray.direction = normalize(position.xyz / position.w - ray.origin);
     ray.inv_direction = 1.0 / ray.direction;
 
     let hit = traverse_top(ray);
