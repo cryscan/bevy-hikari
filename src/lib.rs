@@ -8,13 +8,12 @@ use bevy::{
         RenderApp,
     },
 };
-use light::LightPlugin;
-use mesh::MeshPlugin;
+use light::{LightPassNode, LightPlugin};
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
 
-use crate::light::LightPassNode;
+use crate::mesh::MeshMaterialPlugin;
 
 pub mod light;
 pub mod mesh;
@@ -39,12 +38,6 @@ pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
-// pub const RAY_TRACING_TYPES_HANDLE: HandleUntyped =
-//     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
-// pub const RAY_TRACING_BINDINGS_HANDLE: HandleUntyped =
-//     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5025976374517268);
-// pub const RAY_TRACING_FUNCTIONS_HANDLE: HandleUntyped =
-//     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 6789977396118176997);
 
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
@@ -61,28 +54,10 @@ impl Plugin for HikariPlugin {
             "shaders/light.wgsl",
             Shader::from_wgsl
         );
-        // load_internal_asset!(
-        //     app,
-        //     RAY_TRACING_TYPES_HANDLE,
-        //     "shaders/ray_tracing_types.wgsl",
-        //     Shader::from_wgsl
-        // );
-        // load_internal_asset!(
-        //     app,
-        //     RAY_TRACING_BINDINGS_HANDLE,
-        //     "shaders/ray_tracing_bindings.wgsl",
-        //     Shader::from_wgsl
-        // );
-        // load_internal_asset!(
-        //     app,
-        //     RAY_TRACING_FUNCTIONS_HANDLE,
-        //     "shaders/ray_tracing_functions.wgsl",
-        //     Shader::from_wgsl
-        // );
 
         app.add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
-            .add_plugin(MeshPlugin)
+            .add_plugin(MeshMaterialPlugin)
             .add_plugin(PrepassPlugin)
             .add_plugin(LightPlugin);
 
@@ -140,4 +115,12 @@ impl Plugin for HikariPlugin {
             graph.add_sub_graph(graph::NAME, hikari_graph);
         }
     }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
+pub enum MeshMaterialSystems {
+    PrePrepareAssets,
+    PrepareAssets,
+    PrepareInstances,
+    PostPrepareInstances,
 }

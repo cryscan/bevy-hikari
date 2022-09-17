@@ -1,6 +1,7 @@
 use crate::{
     mesh::{
-        GpuInstanceBuffer, GpuNodeBuffer, GpuPrimitiveBuffer, GpuVertexBuffer, MeshRenderAssets,
+        GpuInstanceBuffer, GpuNodeBuffer, GpuPrimitiveBuffer, GpuVertexBuffer,
+        InstanceRenderAssets, MaterialRenderAssets, MeshRenderAssets,
     },
     prepass::PrepassTarget,
     LIGHT_SHADER_HANDLE,
@@ -447,7 +448,9 @@ fn queue_mesh_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
-    render_assets: Res<MeshRenderAssets>,
+    meshes: Res<MeshRenderAssets>,
+    _materials: Res<MaterialRenderAssets>,
+    instances: Res<InstanceRenderAssets>,
 ) {
     if let (
         Some(vertex_binding),
@@ -456,11 +459,11 @@ fn queue_mesh_bind_group(
         Some(instance_binding),
         Some(instance_node_binding),
     ) = (
-        render_assets.vertex_buffer.binding(),
-        render_assets.primitive_buffer.binding(),
-        render_assets.asset_node_buffer.binding(),
-        render_assets.instance_buffer.binding(),
-        render_assets.instance_node_buffer.binding(),
+        meshes.vertex_buffer.binding(),
+        meshes.primitive_buffer.binding(),
+        meshes.node_buffer.binding(),
+        instances.instance_buffer.binding(),
+        instances.node_buffer.binding(),
     ) {
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -600,7 +603,10 @@ impl Node for LightPassNode {
             Ok(query) => query,
             Err(_) => return Ok(()),
         };
-        let mesh_bind_group = world.resource::<MeshBindGroup>();
+        let mesh_bind_group = match world.get_resource::<MeshBindGroup>() {
+            Some(bind_group) => bind_group,
+            None => return Ok(()),
+        };
         let pipelines = world.resource::<CachedLightPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
 

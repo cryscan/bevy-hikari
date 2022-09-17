@@ -25,6 +25,7 @@ struct Instance {
     model: mat4x4<f32>,
     inverse_transpose_model: mat4x4<f32>,
     slice: Slice,
+    material: u32,
     node_index: u32,
 };
 
@@ -253,7 +254,7 @@ fn traverse_top(ray: Ray) -> Hit {
 fn direct(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
     let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
-    
+
     let depth: f32 = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0);
     let normal_velocity = textureSampleLevel(normal_velocity_texture, normal_velocity_sampler, uv, 0.0);
 
