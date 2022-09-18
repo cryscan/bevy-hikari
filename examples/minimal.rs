@@ -49,7 +49,10 @@ fn setup(
             radius: 0.5,
             ..Default::default()
         })),
-        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+        material: materials.add(StandardMaterial {
+            base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+            ..Default::default()
+        }),
         transform: Transform::from_xyz(1.5, 0.5, 0.0),
         ..Default::default()
     });

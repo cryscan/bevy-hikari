@@ -1,18 +1,21 @@
 use crate::{
     mesh::{
-        GpuInstanceBuffer, GpuNodeBuffer, GpuPrimitiveBuffer, GpuVertexBuffer, MeshRenderAssets,
+        GpuInstanceBuffer, GpuNodeBuffer, GpuPrimitiveBuffer, GpuStandardMaterialBuffer,
+        GpuVertexBuffer, InstanceRenderAssets, MaterialRenderAssets, MeshRenderAssets,
     },
     prepass::PrepassTarget,
-    LIGHT_SHADER_HANDLE,
+    LIGHT_SHADER_HANDLE, MAX_TEXTURE_COUNT,
 };
 use bevy::{
     pbr::{
-        GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, ShadowPipeline, ViewClusterBindings,
-        ViewLightsUniformOffset, ViewShadowBindings, CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT,
+        GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, MeshPipeline, ShadowPipeline,
+        ViewClusterBindings, ViewLightsUniformOffset, ViewShadowBindings,
+        CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT,
     },
     prelude::*,
     render::{
         camera::ExtractedCamera,
+        render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
@@ -21,6 +24,7 @@ use bevy::{
         RenderApp, RenderStage,
     },
 };
+use std::num::NonZeroU32;
 
 const WORKGROUP_SIZE: u32 = 8;
 
@@ -224,6 +228,34 @@ impl FromWorld for LightPipeline {
                         min_binding_size: Some(GpuNodeBuffer::min_size()),
                     },
                     count: None,
+                },
+                // Materials
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuStandardMaterialBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Textures
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: NonZeroU32::new(MAX_TEXTURE_COUNT as u32),
+                },
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: NonZeroU32::new(MAX_TEXTURE_COUNT as u32),
                 },
             ],
         });
@@ -446,8 +478,12 @@ pub struct MeshBindGroup(BindGroup);
 fn queue_mesh_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
+    mesh_pipeline: Res<MeshPipeline>,
     pipeline: Res<LightPipeline>,
-    render_assets: Res<MeshRenderAssets>,
+    meshes: Res<MeshRenderAssets>,
+    materials: Res<MaterialRenderAssets>,
+    instances: Res<InstanceRenderAssets>,
+    gpu_images: Res<RenderAssets<Image>>,
 ) {
     if let (
         Some(vertex_binding),
@@ -455,13 +491,34 @@ fn queue_mesh_bind_group(
         Some(asset_node_binding),
         Some(instance_binding),
         Some(instance_node_binding),
+        Some(material_binding),
     ) = (
-        render_assets.vertex_buffer.binding(),
-        render_assets.primitive_buffer.binding(),
-        render_assets.asset_node_buffer.binding(),
-        render_assets.instance_buffer.binding(),
-        render_assets.instance_node_buffer.binding(),
+        meshes.vertex_buffer.binding(),
+        meshes.primitive_buffer.binding(),
+        meshes.node_buffer.binding(),
+        instances.instance_buffer.binding(),
+        instances.node_buffer.binding(),
+        materials.buffer.binding(),
     ) {
+        let mut images = [(); MAX_TEXTURE_COUNT].map(|_| {
+            (
+                &*mesh_pipeline.dummy_white_gpu_image.texture_view,
+                &*mesh_pipeline.dummy_white_gpu_image.sampler,
+            )
+        });
+        for (id, handle) in materials
+            .textures
+            .iter()
+            .enumerate()
+            .take(MAX_TEXTURE_COUNT)
+        {
+            if let Some(image) = gpu_images.get(handle) {
+                images[id] = (&*image.texture_view, &*image.sampler);
+            }
+        }
+        let textures = images.map(|(texture, _)| texture);
+        let samplers = images.map(|(_, sampler)| sampler);
+
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.mesh_layout,
@@ -485,6 +542,18 @@ fn queue_mesh_bind_group(
                 BindGroupEntry {
                     binding: 4,
                     resource: instance_node_binding,
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: material_binding,
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureViewArray(textures.as_slice()),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: BindingResource::SamplerArray(samplers.as_slice()),
                 },
             ],
         });
@@ -600,7 +669,10 @@ impl Node for LightPassNode {
             Ok(query) => query,
             Err(_) => return Ok(()),
         };
-        let mesh_bind_group = world.resource::<MeshBindGroup>();
+        let mesh_bind_group = match world.get_resource::<MeshBindGroup>() {
+            Some(bind_group) => bind_group,
+            None => return Ok(()),
+        };
         let pipelines = world.resource::<CachedLightPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
