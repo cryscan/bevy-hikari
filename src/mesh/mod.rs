@@ -27,8 +27,8 @@ impl Plugin for MeshMaterialPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(MeshPlugin)
             .add_plugin(MaterialPlugin)
-            .add_plugin(GenericMaterialPlugin::<StandardMaterial>::default())
             .add_plugin(InstancePlugin)
+            .add_plugin(GenericMaterialPlugin::<StandardMaterial>::default())
             .add_plugin(GenericInstancePlugin::<StandardMaterial>::default());
     }
 }

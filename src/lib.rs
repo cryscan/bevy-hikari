@@ -9,11 +9,10 @@ use bevy::{
     },
 };
 use light::{LightPassNode, LightPlugin};
+use mesh::MeshMaterialPlugin;
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
-
-use crate::mesh::MeshMaterialPlugin;
 
 pub mod light;
 pub mod mesh;
@@ -34,6 +33,7 @@ pub mod graph {
     }
 }
 
+pub const MAX_TEXTURE_COUNT: usize = 32;
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =

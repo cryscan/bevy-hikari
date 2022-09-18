@@ -37,6 +37,11 @@ struct Node {
     primitive_index: u32,
 };
 
+struct Material {
+    base_color: vec4<f32>,
+    base_color_texture: u32,
+};
+
 struct Vertices {
     data: array<Vertex>,
 };
@@ -50,6 +55,9 @@ struct Nodes {
     count: u32,
     data: array<Node>,
 };
+struct Materials {
+    data: array<Material>,
+}
 
 @group(1) @binding(0)
 var<storage> vertex_buffer: Vertices;
@@ -61,6 +69,12 @@ var<storage> asset_node_buffer: Nodes;
 var<storage> instance_buffer: Instances;
 @group(1) @binding(4)
 var<storage> instance_node_buffer: Nodes;
+@group(1) @binding(5)
+var<storage> material_buffer: Materials;
+@group(1) @binding(6)
+var textures: binding_array<texture_2d<f32>>;
+@group(1) @binding(7)
+var samplers: binding_array<sampler>;
 
 @group(2) @binding(0)
 var depth_texture: texture_depth_2d;
@@ -273,8 +287,19 @@ fn direct(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     ray.inv_direction = 1.0 / ray.direction;
 
     let hit = traverse_top(ray);
+    let indices = primitive_buffer.data[hit.primitive_index].indices;
+    let instance = instance_buffer.data[hit.instance_index];
+    let material = material_buffer.data[instance.material];
 
-    let color = vec4<f32>(hit.intersection.uv, hit.intersection.distance, 1.0);
-    let location = vec2<i32>(invocation_id.xy);
+    var color = material.base_color;
+    if (material.base_color_texture != MAX_U32) {
+        let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
+        let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
+        let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
+        let uv = v0.uv + hit.intersection.uv.x * (v1.uv - v0.uv) + hit.intersection.uv.y * (v2.uv - v0.uv);
+
+        color = color * textureSampleLevel(textures[material.base_color_texture], samplers[material.base_color_texture], uv, 0.0);
+    }
+
     textureStore(render_texture, location, color);
 }
