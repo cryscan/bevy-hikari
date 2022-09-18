@@ -1,4 +1,4 @@
-use super::{GpuStandardMaterial, GpuStandardMaterialBuffer};
+use super::{GpuStandardMaterial, GpuStandardMaterialBuffer, IntoStandardMaterial};
 use crate::MeshMaterialSystems;
 use bevy::{
     asset::HandleId,
@@ -14,24 +14,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
 };
-
-pub trait StandardMaterial: Material {
-    /// Coverts a [`Material`] into a [`GpuStandardMaterial`].
-    /// Any new textures should be registered into [`MaterialRenderAssets`].
-    fn into_standard_material(
-        self,
-        render_assets: &mut MaterialRenderAssets,
-    ) -> bevy::pbr::StandardMaterial;
-}
-
-impl StandardMaterial for bevy::pbr::StandardMaterial {
-    fn into_standard_material(self, render_assets: &mut MaterialRenderAssets) -> Self {
-        if let Some(texture) = &self.base_color_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        self
-    }
-}
 
 pub struct MaterialPlugin;
 impl Plugin for MaterialPlugin {
@@ -53,8 +35,8 @@ impl Plugin for MaterialPlugin {
 }
 
 #[derive(Default)]
-pub struct GenericMaterialPlugin<M: StandardMaterial>(PhantomData<M>);
-impl<M: StandardMaterial> Plugin for GenericMaterialPlugin<M> {
+pub struct GenericMaterialPlugin<M: IntoStandardMaterial>(PhantomData<M>);
+impl<M: IntoStandardMaterial> Plugin for GenericMaterialPlugin<M> {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -84,12 +66,12 @@ pub struct GpuStandardMaterials(HashMap<HandleUntyped, GpuStandardMaterial>);
 pub struct GpuStandardMaterialOffsets(HashMap<HandleUntyped, u32>);
 
 #[derive(Default)]
-pub struct ExtractedMaterials<M: StandardMaterial> {
+pub struct ExtractedMaterials<M: IntoStandardMaterial> {
     extracted: Vec<(Handle<M>, M)>,
     removed: Vec<Handle<M>>,
 }
 
-fn extract_material_assets<M: StandardMaterial>(
+fn extract_material_assets<M: IntoStandardMaterial>(
     mut commands: Commands,
     mut events: Extract<EventReader<AssetEvent<M>>>,
     assets: Extract<Res<Assets<M>>>,
@@ -118,7 +100,7 @@ fn extract_material_assets<M: StandardMaterial>(
     commands.insert_resource(ExtractedMaterials { extracted, removed });
 }
 
-fn prepare_generic_material_assets<M: StandardMaterial>(
+fn prepare_generic_material_assets<M: IntoStandardMaterial>(
     mut extracted_assets: ResMut<ExtractedMaterials<M>>,
     mut materials: ResMut<StandardMaterials>,
     render_assets: ResMut<MaterialRenderAssets>,
@@ -151,21 +133,41 @@ fn prepare_material_assets(
 
     // TODO: remove unused textures.
     let textures: Vec<_> = render_assets.textures.iter().cloned().collect();
+    let texture_id = |handle: &Option<Handle<Image>>| {
+        if let Some(handle) = handle {
+            match textures.binary_search(handle) {
+                Ok(id) | Err(id) => id as u32,
+            }
+        } else {
+            u32::MAX
+        }
+    };
+
     let materials = materials
         .iter()
         .enumerate()
         .map(|(offset, (handle, material))| {
             let base_color = material.base_color.into();
-            let base_color_texture = if let Some(texture) = &material.base_color_texture {
-                match textures.as_slice().binary_search(texture) {
-                    Ok(id) | Err(id) => id as u32,
-                }
-            } else {
-                u32::MAX
-            };
+            let base_color_texture = texture_id(&material.base_color_texture);
+
+            let emissive = material.emissive.into();
+            let emissive_texture = texture_id(&material.emissive_texture);
+
+            let metallic_roughness_texture = texture_id(&material.metallic_roughness_texture);
+            let normal_map_texture = texture_id(&material.normal_map_texture);
+            let occlusion_texture = texture_id(&material.occlusion_texture);
+
             let material = GpuStandardMaterial {
                 base_color,
                 base_color_texture,
+                emissive,
+                emissive_texture,
+                perceptual_roughness: material.perceptual_roughness,
+                metallic: material.metallic,
+                metallic_roughness_texture,
+                reflectance: material.reflectance,
+                normal_map_texture,
+                occlusion_texture,
             };
 
             let handle = HandleUntyped::weak(*handle);

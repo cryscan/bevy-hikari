@@ -40,6 +40,17 @@ struct Node {
 struct Material {
     base_color: vec4<f32>,
     base_color_texture: u32,
+
+    emissive: vec4<f32>,
+    emissive_texture: u32,
+
+    perceptual_roughness: f32,
+    metallic: f32,
+    metallic_roughness_texture: u32,
+    reflectance: f32,
+
+    normal_map_texture: u32,
+    occlusion_texture: u32,
 };
 
 struct Vertices {

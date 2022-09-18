@@ -3,7 +3,7 @@ use super::{
     mesh::{GpuMeshSlices, MeshAssetState},
 };
 use crate::{
-    mesh::{material::StandardMaterial, GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer},
+    mesh::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
     transform::PreviousGlobalTransform,
     MeshMaterialSystems,
 };
@@ -44,8 +44,8 @@ impl Plugin for InstancePlugin {
 }
 
 #[derive(Default)]
-pub struct GenericInstancePlugin<M: StandardMaterial>(PhantomData<M>);
-impl<M: StandardMaterial> Plugin for GenericInstancePlugin<M> {
+pub struct GenericInstancePlugin<M: IntoStandardMaterial>(PhantomData<M>);
+impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
     fn build(&self, app: &mut App) {
         app.add_event::<InstanceEvent<M>>().add_system_to_stage(
             CoreStage::PostUpdate,
@@ -110,14 +110,14 @@ fn extract_mesh_transforms(
 #[derive(Default, Deref, DerefMut)]
 pub struct GpuInstances(BTreeMap<Entity, GpuInstance>);
 
-pub enum InstanceEvent<M: StandardMaterial> {
+pub enum InstanceEvent<M: IntoStandardMaterial> {
     Created(Entity, Handle<Mesh>, Handle<M>),
     Modified(Entity, Handle<Mesh>, Handle<M>),
     Removed(Entity),
 }
 
 #[allow(clippy::type_complexity)]
-fn instance_event_system<M: StandardMaterial>(
+fn instance_event_system<M: IntoStandardMaterial>(
     mut events: EventWriter<InstanceEvent<M>>,
     removed: RemovedComponents<Handle<Mesh>>,
     mut set: ParamSet<(
@@ -151,12 +151,12 @@ fn instance_event_system<M: StandardMaterial>(
     }
 }
 
-pub struct ExtractedInstances<M: StandardMaterial> {
+pub struct ExtractedInstances<M: IntoStandardMaterial> {
     extracted: Vec<(Entity, Aabb, GlobalTransform, Handle<Mesh>, Handle<M>)>,
     removed: Vec<Entity>,
 }
 
-fn extract_instances<M: StandardMaterial>(
+fn extract_instances<M: IntoStandardMaterial>(
     mut commands: Commands,
     mut events: Extract<EventReader<InstanceEvent<M>>>,
     query: Extract<Query<(&Aabb, &GlobalTransform)>>,
@@ -185,7 +185,7 @@ fn extract_instances<M: StandardMaterial>(
     commands.insert_resource(ExtractedInstances { extracted, removed });
 }
 
-fn prepare_generic_instances<M: StandardMaterial>(
+fn prepare_generic_instances<M: IntoStandardMaterial>(
     mut extracted_instances: ResMut<ExtractedInstances<M>>,
     mut instances: ResMut<GpuInstances>,
     meshes: Res<GpuMeshSlices>,
