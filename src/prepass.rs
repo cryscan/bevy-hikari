@@ -43,6 +43,7 @@ impl Plugin for PrepassPlugin {
                 .add_system_to_stage(RenderStage::Prepare, prepare_prepass_targets)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_meshes)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_bind_group)
+                .add_system_to_stage(RenderStage::Queue, queue_deferred_bind_groups)
                 .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Prepass>);
         }
     }
@@ -51,6 +52,7 @@ impl Plugin for PrepassPlugin {
 pub struct PrepassPipeline {
     pub view_layout: BindGroupLayout,
     pub mesh_layout: BindGroupLayout,
+    pub deferred_layout: BindGroupLayout,
 }
 
 impl FromWorld for PrepassPipeline {
@@ -109,9 +111,50 @@ impl FromWorld for PrepassPipeline {
             ],
         });
 
+        let prepass_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                // Depth buffer
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Depth,
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                // Normal-velocity buffer
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        });
+
         Self {
             view_layout,
             mesh_layout,
+            deferred_layout: prepass_layout,
         }
     }
 }
@@ -213,14 +256,6 @@ impl SpecializedMeshPipeline for PrepassPipeline {
     }
 }
 
-#[derive(Component)]
-pub struct PrepassTarget {
-    pub normal_velocity_view: TextureView,
-    pub normal_velocity_sampler: Sampler,
-    pub depth_view: TextureView,
-    pub depth_sampler: Sampler,
-}
-
 fn extract_prepass_camera_phases(
     mut commands: Commands,
     cameras_3d: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
@@ -232,6 +267,14 @@ fn extract_prepass_camera_phases(
                 .insert(RenderPhase::<Prepass>::default());
         }
     }
+}
+
+#[derive(Component)]
+pub struct PrepassTarget {
+    pub normal_velocity_view: TextureView,
+    pub normal_velocity_sampler: Sampler,
+    pub depth_view: TextureView,
+    pub depth_sampler: Sampler,
 }
 
 fn prepare_prepass_targets(
@@ -341,41 +384,6 @@ fn queue_prepass_meshes(
     }
 }
 
-pub struct Prepass {
-    pub distance: f32,
-    pub entity: Entity,
-    pub pipeline: CachedRenderPipelineId,
-    pub draw_function: DrawFunctionId,
-}
-
-impl PhaseItem for Prepass {
-    type SortKey = FloatOrd;
-
-    #[inline]
-    fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
-    }
-
-    #[inline]
-    fn draw_function(&self) -> DrawFunctionId {
-        self.draw_function
-    }
-}
-
-impl EntityPhaseItem for Prepass {
-    #[inline]
-    fn entity(&self) -> Entity {
-        self.entity
-    }
-}
-
-impl CachedRenderPipelinePhaseItem for Prepass {
-    #[inline]
-    fn cached_pipeline(&self) -> CachedRenderPipelineId {
-        self.pipeline
-    }
-}
-
 pub struct PrepassBindGroup {
     pub view: BindGroup,
     pub mesh: BindGroup,
@@ -430,6 +438,79 @@ fn queue_prepass_bind_group(
             ],
         });
         commands.insert_resource(PrepassBindGroup { view, mesh });
+    }
+}
+
+#[derive(Component)]
+pub struct DeferredBindGroup(pub BindGroup);
+
+fn queue_deferred_bind_groups(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    pipeline: Res<PrepassPipeline>,
+    query: Query<(Entity, &PrepassTarget)>,
+) {
+    for (entity, target) in &query {
+        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.deferred_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&target.depth_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&target.depth_sampler),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&target.normal_velocity_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&target.normal_velocity_sampler),
+                },
+            ],
+        });
+        commands
+            .entity(entity)
+            .insert(DeferredBindGroup(bind_group));
+    }
+}
+
+pub struct Prepass {
+    pub distance: f32,
+    pub entity: Entity,
+    pub pipeline: CachedRenderPipelineId,
+    pub draw_function: DrawFunctionId,
+}
+
+impl PhaseItem for Prepass {
+    type SortKey = FloatOrd;
+
+    #[inline]
+    fn sort_key(&self) -> Self::SortKey {
+        FloatOrd(self.distance)
+    }
+
+    #[inline]
+    fn draw_function(&self) -> DrawFunctionId {
+        self.draw_function
+    }
+}
+
+impl EntityPhaseItem for Prepass {
+    #[inline]
+    fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
+impl CachedRenderPipelinePhaseItem for Prepass {
+    #[inline]
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
+        self.pipeline
     }
 }
 

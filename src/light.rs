@@ -1,6 +1,6 @@
 use crate::{
     mesh::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout},
-    prepass::PrepassTarget,
+    prepass::{DeferredBindGroup, PrepassPipeline},
     LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
@@ -29,7 +29,6 @@ impl Plugin for LightPlugin {
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
                 .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
                 .add_system_to_stage(RenderStage::Queue, queue_view_bind_groups)
-                .add_system_to_stage(RenderStage::Queue, queue_deferred_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_render_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
         }
@@ -37,16 +36,18 @@ impl Plugin for LightPlugin {
 }
 
 pub struct LightPipeline {
-    view_layout: BindGroupLayout,
-    mesh_material_layout: Option<BindGroupLayout>,
-    deferred_layout: BindGroupLayout,
-    render_layout: BindGroupLayout,
+    pub view_layout: BindGroupLayout,
+    pub deferred_layout: BindGroupLayout,
+    pub mesh_material_layout: Option<BindGroupLayout>,
+    pub render_layout: BindGroupLayout,
 }
 
 impl FromWorld for LightPipeline {
     fn from_world(world: &mut World) -> Self {
+        let prepass_pipeline = world.resource::<PrepassPipeline>();
+
         let render_device = world.resource::<RenderDevice>();
-        let clustered_forward_buffer_binding_type = render_device
+        let buffer_binding_type = render_device
             .get_supported_read_only_binding_type(CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT);
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -120,11 +121,9 @@ impl FromWorld for LightPipeline {
                     binding: 6,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
-                        ty: clustered_forward_buffer_binding_type,
+                        ty: buffer_binding_type,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(GpuPointLights::min_size(
-                            clustered_forward_buffer_binding_type,
-                        )),
+                        min_binding_size: Some(GpuPointLights::min_size(buffer_binding_type)),
                     },
                     count: None,
                 },
@@ -133,11 +132,11 @@ impl FromWorld for LightPipeline {
                     binding: 7,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
-                        ty: clustered_forward_buffer_binding_type,
+                        ty: buffer_binding_type,
                         has_dynamic_offset: false,
                         min_binding_size: Some(
                             ViewClusterBindings::min_size_cluster_light_index_lists(
-                                clustered_forward_buffer_binding_type,
+                                buffer_binding_type,
                             ),
                         ),
                     },
@@ -148,11 +147,11 @@ impl FromWorld for LightPipeline {
                     binding: 8,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
-                        ty: clustered_forward_buffer_binding_type,
+                        ty: buffer_binding_type,
                         has_dynamic_offset: false,
                         min_binding_size: Some(
                             ViewClusterBindings::min_size_cluster_offsets_and_counts(
-                                clustered_forward_buffer_binding_type,
+                                buffer_binding_type,
                             ),
                         ),
                     },
@@ -160,46 +159,6 @@ impl FromWorld for LightPipeline {
                 },
             ],
             label: None,
-        });
-
-        let deferred_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Depth buffer
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Depth,
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-                // Normal-velocity buffer
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
         });
 
         let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -218,8 +177,8 @@ impl FromWorld for LightPipeline {
 
         Self {
             view_layout,
+            deferred_layout: prepass_pipeline.deferred_layout.clone(),
             mesh_material_layout: None,
-            deferred_layout,
             render_layout,
         }
     }
@@ -238,8 +197,8 @@ impl SpecializedComputePipeline for LightPipeline {
             label: None,
             layout: Some(vec![
                 self.view_layout.clone(),
-                self.mesh_material_layout.clone().unwrap(),
                 self.deferred_layout.clone(),
+                self.mesh_material_layout.clone().unwrap(),
                 self.render_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
@@ -385,44 +344,6 @@ pub fn queue_view_bind_groups(
 }
 
 #[derive(Component)]
-pub struct DeferredBindGroup(pub BindGroup);
-
-fn queue_deferred_bind_groups(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    pipeline: Res<LightPipeline>,
-    query: Query<(Entity, &PrepassTarget)>,
-) {
-    for (entity, prepass_target) in &query {
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.deferred_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&prepass_target.depth_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&prepass_target.depth_sampler),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(&prepass_target.normal_velocity_view),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::Sampler(&prepass_target.normal_velocity_sampler),
-                },
-            ],
-        });
-        commands
-            .entity(entity)
-            .insert(DeferredBindGroup(bind_group));
-    }
-}
-
-#[derive(Component)]
 pub struct RenderBindGroup(pub BindGroup);
 
 fn queue_render_bind_groups(
@@ -508,8 +429,8 @@ impl Node for LightPassNode {
             &view_bind_group.0,
             &[view_uniform.offset, view_lights.offset],
         );
-        pass.set_bind_group(1, &mesh_material_bind_group.0, &[]);
-        pass.set_bind_group(2, &deferred_bind_group.0, &[]);
+        pass.set_bind_group(1, &deferred_bind_group.0, &[]);
+        pass.set_bind_group(2, &mesh_material_bind_group.0, &[]);
         pass.set_bind_group(3, &render_bind_group.0, &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_cast) {

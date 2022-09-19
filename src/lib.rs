@@ -33,7 +33,12 @@ pub mod graph {
     }
 }
 
-const WORKGROUP_SIZE: u32 = 8;
+pub const WORKGROUP_SIZE: u32 = 8;
+
+pub const MESH_MATERIAL_TYPES_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
+pub const MESH_MATERIAL_BINDINGS_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5025976374517268);
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
@@ -42,6 +47,18 @@ pub const LIGHT_SHADER_HANDLE: HandleUntyped =
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            MESH_MATERIAL_TYPES_HANDLE,
+            "shaders/mesh_material_types.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            MESH_MATERIAL_BINDINGS_HANDLE,
+            "shaders/mesh_material_bindings.wgsl",
+            Shader::from_wgsl
+        );
         load_internal_asset!(
             app,
             PREPASS_SHADER_HANDLE,
