@@ -157,12 +157,12 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     var result: Intersection;
     result.distance = MAX_FLOAT;
 
-    let a = tri[0];
-    let b = tri[1];
-    let c = tri[2];
+    // let a = tri[0];
+    // let b = tri[1];
+    // let c = tri[2];
 
-    let ab = b - a;
-    let ac = c - a;
+    let ab = tri[1] - tri[0];
+    let ac = tri[2] - tri[0];
 
     let u_vec = cross(ray.direction, ac);
     let det = dot(ab, u_vec);
@@ -171,7 +171,7 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     }
 
     let inv_det = 1.0 / det;
-    let ao = ray.origin - a;
+    let ao = ray.origin - tri[0];
     let u = dot(ao, u_vec) * inv_det;
     if (u < 0.0 || u > 1.0) {
         result.uv = vec2<f32>(u, 0.0);
@@ -193,81 +193,77 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     return result;
 }
 
-fn traverse_bottom(ray: Ray, instance_index: u32) -> Hit {
-    let instance = &instance_buffer.data[instance_index];
-
-    var hit: Hit;
-    hit.intersection.distance = MAX_FLOAT;
-
+fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
+    var intersected = false;
     var index = 0u;
-    for (; index < (*instance).slice.node_len;) {
-        let node_index = (*instance).slice.node_offset + index;
-        let node = &asset_node_buffer.data[node_index];
-
-        if ((*node).entry_index == MAX_U32) {
-            let primitive_index = (*instance).slice.primitive + (*node).primitive_index;
+    for (; index < slice.node_len;) {
+        let node_index = slice.node_offset + index;
+        let node = asset_node_buffer.data[node_index];
+        if (node.entry_index == MAX_U32) {
+            let primitive_index = slice.primitive + node.primitive_index;
             let primitive = &primitive_buffer.data[primitive_index];
             let intersection = intersects_triangle(ray, (*primitive).vertices);
 
-            if (intersection.distance < hit.intersection.distance) {
-                hit.intersection = intersection;
-                hit.instance_index = instance_index;
-                hit.primitive_index = primitive_index;
+            if (intersection.distance < (*hit).intersection.distance) {
+                (*hit).intersection = intersection;
+                (*hit).primitive_index = primitive_index;
+                intersected = true;
             }
 
-            index = (*node).exit_index;
+            index = node.exit_index;
         } else {
             var aabb: Aabb;
-            aabb.min = (*node).min;
-            aabb.max = (*node).max;
+            aabb.min = node.min;
+            aabb.max = node.max;
 
             if (intersects_aabb(ray, aabb)) {
-                index = (*node).entry_index;
+                index = node.entry_index;
             } else {
-                index = (*node).exit_index;
+                index = node.exit_index;
             }
         }
     }
 
-    return hit;
+    return intersected;
 }
 
 fn traverse_top(ray: Ray) -> Hit {
     var hit: Hit;
     hit.intersection.distance = MAX_FLOAT;
-    var index = 0u;
+    hit.instance_index = MAX_U32;
+    hit.primitive_index = MAX_U32;
 
+    var index = 0u;
     for (; index < instance_node_buffer.count;) {
-        let node = &instance_node_buffer.data[index];
+        let node = instance_node_buffer.data[index];
         var aabb: Aabb;
 
-        if ((*node).entry_index == MAX_U32) {
-            let instance_index = (*node).primitive_index;
-            let instance = &instance_buffer.data[instance_index];
-            aabb.min = (*instance).min;
-            aabb.max = (*instance).max;
+        if (node.entry_index == MAX_U32) {
+            let instance_index = node.primitive_index;
+            let instance = instance_buffer.data[instance_index];
+            aabb.min = instance.min;
+            aabb.max = instance.max;
 
             if (intersects_aabb(ray, aabb)) {
                 var r: Ray;
-                r.origin = instance_position_world_to_local(*instance, ray.origin);
-                r.direction = instance_direction_world_to_local(*instance, ray.direction);
+                r.origin = instance_position_world_to_local(instance, ray.origin);
+                r.direction = instance_direction_world_to_local(instance, ray.direction);
                 r.inv_direction = 1.0 / r.direction;
 
-                let h = traverse_bottom(r, instance_index);
-                if (h.intersection.distance < hit.intersection.distance) {
-                    hit = h;
+                if (traverse_bottom(r, instance.slice, &hit)) {
+                    hit.instance_index = instance_index;
                 }
             }
 
-            index = (*node).exit_index;
+            index = node.exit_index;
         } else {
-            aabb.min = (*node).min;
-            aabb.max = (*node).max;
+            aabb.min = node.min;
+            aabb.max = node.max;
 
             if (intersects_aabb(ray, aabb)) {
-                index = (*node).entry_index;
+                index = node.entry_index;
             } else {
-                index = (*node).exit_index;
+                index = node.exit_index;
             }
         }
     }
@@ -298,12 +294,16 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     ray.inv_direction = 1.0 / ray.direction;
 
     let hit = traverse_top(ray);
-    let indices = primitive_buffer.data[hit.primitive_index].indices;
+    if (hit.instance_index == MAX_U32) {
+        return;
+    }
+
     let instance = instance_buffer.data[hit.instance_index];
     let material = material_buffer.data[instance.material];
 
     var color = material.base_color;
     if (material.base_color_texture != MAX_U32) {
+        let indices = primitive_buffer.data[hit.primitive_index].indices;
         let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
         let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
         let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
