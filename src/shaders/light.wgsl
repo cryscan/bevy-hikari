@@ -166,7 +166,7 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
 
     let u_vec = cross(ray.direction, ac);
     let det = dot(ab, u_vec);
-    if (det < FLOAT_EPSILON) {
+    if (abs(det) < FLOAT_EPSILON) {
         return result;
     }
 
