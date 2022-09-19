@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
-
-use super::{GpuMesh, GpuMeshSlice, GpuNodeBuffer, GpuPrimitiveBuffer, GpuVertexBuffer};
-use crate::MeshMaterialSystems;
+use super::{
+    GpuMesh, GpuMeshSlice, GpuNodeBuffer, GpuPrimitiveBuffer, GpuVertexBuffer, MeshMaterialSystems,
+};
 use bevy::{
     prelude::*,
     render::{
@@ -11,6 +10,7 @@ use bevy::{
     },
     utils::{HashMap, HashSet},
 };
+use std::collections::BTreeMap;
 
 pub struct MeshPlugin;
 impl Plugin for MeshPlugin {

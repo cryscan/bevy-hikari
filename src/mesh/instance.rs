@@ -1,11 +1,11 @@
 use super::{
     material::GpuStandardMaterialOffsets,
     mesh::{GpuMeshSlices, MeshAssetState},
+    MeshMaterialSystems,
 };
 use crate::{
     mesh::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
     transform::PreviousGlobalTransform,
-    MeshMaterialSystems,
 };
 use bevy::{
     math::Vec3A,

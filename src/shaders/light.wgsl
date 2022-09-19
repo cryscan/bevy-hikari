@@ -276,7 +276,7 @@ fn traverse_top(ray: Ray) -> Hit {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn direct(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
     let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
 

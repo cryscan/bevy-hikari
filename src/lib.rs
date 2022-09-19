@@ -33,7 +33,7 @@ pub mod graph {
     }
 }
 
-pub const MAX_TEXTURE_COUNT: usize = 32;
+const WORKGROUP_SIZE: u32 = 8;
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
@@ -115,12 +115,4 @@ impl Plugin for HikariPlugin {
             graph.add_sub_graph(graph::NAME, hikari_graph);
         }
     }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
-pub enum MeshMaterialSystems {
-    PrePrepareAssets,
-    PrepareAssets,
-    PrepareInstances,
-    PostPrepareInstances,
 }

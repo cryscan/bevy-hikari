@@ -1,5 +1,6 @@
-use super::{GpuStandardMaterial, GpuStandardMaterialBuffer, IntoStandardMaterial};
-use crate::MeshMaterialSystems;
+use super::{
+    GpuStandardMaterial, GpuStandardMaterialBuffer, IntoStandardMaterial, MeshMaterialSystems,
+};
 use bevy::{
     asset::HandleId,
     prelude::*,

@@ -4,8 +4,12 @@ use self::{
     mesh::MeshPlugin,
 };
 use bevy::{
+    pbr::MeshPipeline,
     prelude::*,
-    render::{mesh::VertexAttributeValues, render_resource::*},
+    render::{
+        mesh::VertexAttributeValues, render_asset::RenderAssets, render_resource::*,
+        renderer::RenderDevice, RenderApp, RenderStage,
+    },
 };
 use bvh::{
     aabb::{Bounded, AABB},
@@ -13,6 +17,7 @@ use bvh::{
     bvh::BVH,
 };
 use itertools::Itertools;
+use std::num::NonZeroU32;
 
 pub mod instance;
 pub mod material;
@@ -30,6 +35,16 @@ impl Plugin for MeshMaterialPlugin {
             .add_plugin(InstancePlugin)
             .add_plugin(GenericMaterialPlugin::<StandardMaterial>::default())
             .add_plugin(GenericInstancePlugin::<StandardMaterial>::default());
+
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app
+                .add_system_to_stage(
+                    RenderStage::Prepare,
+                    prepare_mesh_material_bind_group_layout
+                        .after(MeshMaterialSystems::PrepareAssets),
+                )
+                .add_system_to_stage(RenderStage::Queue, queue_mesh_material_bind_group);
+        }
     }
 }
 
@@ -283,5 +298,198 @@ impl IntoStandardMaterial for StandardMaterial {
             render_assets.textures.insert(texture.clone_weak());
         }
         self
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
+pub enum MeshMaterialSystems {
+    PrePrepareAssets,
+    PrepareAssets,
+    PrepareInstances,
+    PostPrepareInstances,
+}
+
+pub struct MeshMaterialBindGroupLayout {
+    pub layout: BindGroupLayout,
+    pub texture_count: usize,
+}
+
+fn prepare_mesh_material_bind_group_layout(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    materials: Res<MaterialRenderAssets>,
+) {
+    let texture_count = materials.textures.len();
+    let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: None,
+        entries: &[
+            // Vertices
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuVertexBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Primitives
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuPrimitiveBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Asset nodes
+            BindGroupLayoutEntry {
+                binding: 2,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuNodeBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Instances
+            BindGroupLayoutEntry {
+                binding: 3,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuInstanceBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Instance nodes
+            BindGroupLayoutEntry {
+                binding: 4,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuNodeBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Materials
+            BindGroupLayoutEntry {
+                binding: 5,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuStandardMaterialBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Textures
+            BindGroupLayoutEntry {
+                binding: 6,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Float { filterable: true },
+                    view_dimension: TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: NonZeroU32::new(texture_count as u32),
+            },
+            // Samplers
+            BindGroupLayoutEntry {
+                binding: 7,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                count: NonZeroU32::new(texture_count as u32),
+            },
+        ],
+    });
+    commands.insert_resource(MeshMaterialBindGroupLayout {
+        layout,
+        texture_count,
+    });
+}
+
+pub struct MeshMaterialBindGroup(pub BindGroup);
+
+fn queue_mesh_material_bind_group(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    mesh_pipeline: Res<MeshPipeline>,
+    meshes: Res<MeshRenderAssets>,
+    materials: Res<MaterialRenderAssets>,
+    instances: Res<InstanceRenderAssets>,
+    images: Res<RenderAssets<Image>>,
+    layout: Res<MeshMaterialBindGroupLayout>,
+) {
+    if let (
+        Some(vertex_binding),
+        Some(primitive_binding),
+        Some(asset_node_binding),
+        Some(instance_binding),
+        Some(instance_node_binding),
+        Some(material_binding),
+    ) = (
+        meshes.vertex_buffer.binding(),
+        meshes.primitive_buffer.binding(),
+        meshes.node_buffer.binding(),
+        instances.instance_buffer.binding(),
+        instances.node_buffer.binding(),
+        materials.buffer.binding(),
+    ) {
+        let images = materials.textures.iter().map(|handle| {
+            images
+                .get(handle)
+                .unwrap_or(&mesh_pipeline.dummy_white_gpu_image)
+        });
+        let textures: Vec<_> = images.clone().map(|image| &*image.texture_view).collect();
+        let samplers: Vec<_> = images.map(|image| &*image.sampler).collect();
+
+        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &layout.layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: vertex_binding,
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: primitive_binding,
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: asset_node_binding,
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: instance_binding,
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: instance_node_binding,
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: material_binding,
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureViewArray(textures.as_slice()),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: BindingResource::SamplerArray(samplers.as_slice()),
+                },
+            ],
+        });
+        commands.insert_resource(MeshMaterialBindGroup(bind_group));
+    } else {
+        commands.remove_resource::<MeshMaterialBindGroup>();
     }
 }
