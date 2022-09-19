@@ -18,7 +18,6 @@ impl Plugin for MeshPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<GpuMeshes>()
-                .init_resource::<GpuMeshSlices>()
                 .init_resource::<MeshRenderAssets>()
                 .init_resource::<MeshAssetState>()
                 .add_system_to_stage(RenderStage::Extract, extract_mesh_assets)
@@ -66,12 +65,9 @@ pub enum MeshAssetState {
     Updated,
 }
 
-#[derive(Default, Deref, DerefMut)]
-pub struct GpuMeshes(BTreeMap<Handle<Mesh>, GpuMesh>);
-
 /// Holds all GPU representatives of mesh assets.
 #[derive(Default, Deref, DerefMut)]
-pub struct GpuMeshSlices(HashMap<Handle<Mesh>, GpuMeshSlice>);
+pub struct GpuMeshes(HashMap<Handle<Mesh>, (GpuMesh, GpuMeshSlice)>);
 
 #[derive(Default)]
 pub struct ExtractedMeshes {
@@ -118,8 +114,8 @@ fn extract_mesh_assets(
 fn prepare_mesh_assets(
     mut extracted_assets: ResMut<ExtractedMeshes>,
     mut asset_state: ResMut<MeshAssetState>,
+    mut assets: Local<BTreeMap<Handle<Mesh>, GpuMesh>>,
     mut meshes: ResMut<GpuMeshes>,
-    mut slices: ResMut<GpuMeshSlices>,
     mut render_assets: ResMut<MeshRenderAssets>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
@@ -129,15 +125,15 @@ fn prepare_mesh_assets(
     }
 
     for handle in extracted_assets.removed.drain(..) {
+        assets.remove(&handle);
         meshes.remove(&handle);
-        slices.remove(&handle);
     }
     for (handle, mesh) in extracted_assets.extracted.drain(..) {
-        meshes.insert(handle, GpuMesh::from_mesh(mesh).unwrap());
+        assets.insert(handle, GpuMesh::from_mesh(mesh).unwrap());
     }
 
     render_assets.clear();
-    for (handle, mesh) in meshes.iter() {
+    for (handle, mesh) in assets.iter() {
         let vertex = render_assets.vertex_buffer.get().data.len() as u32;
         let primitive = render_assets.primitive_buffer.get().data.len() as u32;
         let node_offset = render_assets.node_buffer.get().data.len() as u32;
@@ -159,14 +155,17 @@ fn prepare_mesh_assets(
             .data
             .append(&mut mesh.nodes.clone());
 
-        slices.insert(
+        meshes.insert(
             handle.clone_weak(),
-            GpuMeshSlice {
-                vertex,
-                primitive,
-                node_offset,
-                node_len,
-            },
+            (
+                mesh.clone(),
+                GpuMeshSlice {
+                    vertex,
+                    primitive,
+                    node_offset,
+                    node_len,
+                },
+            ),
         );
     }
     render_assets.write_buffer(&render_device, &render_queue);

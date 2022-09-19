@@ -91,7 +91,7 @@ pub struct GpuInstance {
     pub transform: Mat4,
     pub inverse_transpose_model: Mat4,
     pub slice: GpuMeshSlice,
-    pub material: u32,
+    pub material: GpuStandardMaterialOffset,
     node_index: u32,
 }
 
@@ -138,6 +138,11 @@ pub struct GpuStandardMaterial {
 
     pub normal_map_texture: u32,
     pub occlusion_texture: u32,
+}
+
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuStandardMaterialOffset {
+    pub value: u32,
 }
 
 #[derive(Default, ShaderType)]

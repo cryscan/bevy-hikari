@@ -1,6 +1,6 @@
 use super::{
-    material::GpuStandardMaterialOffsets,
-    mesh::{GpuMeshSlices, MeshAssetState},
+    material::GpuStandardMaterials,
+    mesh::{GpuMeshes, MeshAssetState},
     MeshMaterialSystems,
 };
 use crate::{
@@ -188,8 +188,8 @@ fn extract_instances<M: IntoStandardMaterial>(
 fn prepare_generic_instances<M: IntoStandardMaterial>(
     mut extracted_instances: ResMut<ExtractedInstances<M>>,
     mut instances: ResMut<GpuInstances>,
-    meshes: Res<GpuMeshSlices>,
-    materials: Res<GpuStandardMaterialOffsets>,
+    meshes: Res<GpuMeshes>,
+    materials: Res<GpuStandardMaterials>,
     asset_state: Res<MeshAssetState>,
 ) {
     if *asset_state == MeshAssetState::Dirty {
@@ -222,11 +222,11 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
         min += center;
         max += center;
 
-        if let (Some(slice), Some(material)) = (meshes.get(&mesh), materials.get(&material)) {
+        if let (Some(mesh), Some(material)) = (meshes.get(&mesh), materials.get(&material)) {
             let min = Vec3::from(min);
             let max = Vec3::from(max);
-            let slice = *slice;
-            let material = *material;
+            let slice = mesh.1;
+            let material = material.1;
             instances.insert(
                 entity,
                 GpuInstance {
