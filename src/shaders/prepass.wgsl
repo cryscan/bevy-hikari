@@ -56,7 +56,9 @@ struct FragmentInput {
 };
 
 struct FragmentOutput {
-    @location(0) color: vec4<f32>,
+    @location(0) normal_velocity: vec4<f32>,
+    @location(1) base_color: vec4<f32>,
+    @location(2) emissive_metallic: vec4<f32>,
 };
 
 fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
@@ -73,6 +75,6 @@ fn fragment(in: FragmentInput) -> FragmentOutput {
     let velocity = clip_to_uv(clip_position) - clip_to_uv(previous_clip_position);
 
     var out: FragmentOutput;
-    out.color = vec4<f32>(in.world_normal.xy, velocity);
+    out.normal_velocity = vec4<f32>(in.world_normal.xy, velocity);
     return out;
 }

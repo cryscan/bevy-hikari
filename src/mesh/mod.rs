@@ -4,11 +4,16 @@ use self::{
     mesh::MeshPlugin,
 };
 use bevy::{
+    ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::MeshPipeline,
     prelude::*,
     render::{
-        mesh::VertexAttributeValues, render_asset::RenderAssets, render_resource::*,
-        renderer::RenderDevice, RenderApp, RenderStage,
+        mesh::VertexAttributeValues,
+        render_asset::RenderAssets,
+        render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
+        render_resource::*,
+        renderer::RenderDevice,
+        RenderApp, RenderStage,
     },
 };
 use bvh::{
@@ -496,5 +501,21 @@ fn queue_mesh_material_bind_group(
         commands.insert_resource(MeshMaterialBindGroup(bind_group));
     } else {
         commands.remove_resource::<MeshMaterialBindGroup>();
+    }
+}
+
+pub struct SetMeshMaterialBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetMeshMaterialBindGroup<I> {
+    type Param = SRes<MeshMaterialBindGroup>;
+
+    fn render<'w>(
+        _view: Entity,
+        _item: Entity,
+        param: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        pass.set_bind_group(I, &param.into_inner().0, &[]);
+
+        RenderCommandResult::Success
     }
 }

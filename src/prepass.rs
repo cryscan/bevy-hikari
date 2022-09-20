@@ -23,7 +23,7 @@ use bevy::{
         },
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
-        texture::TextureCache,
+        texture::{GpuImage, TextureCache},
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms, VisibleEntities},
         Extract, RenderApp, RenderStage,
     },
@@ -111,7 +111,7 @@ impl FromWorld for PrepassPipeline {
             ],
         });
 
-        let prepass_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        let deferred_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
                 // Depth buffer
@@ -148,13 +148,47 @@ impl FromWorld for PrepassPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
+                // Base color buffer
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                // Emissive-metallic buffer
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    count: None,
+                },
             ],
         });
 
         Self {
             view_layout,
             mesh_layout,
-            deferred_layout: prepass_layout,
+            deferred_layout,
         }
     }
 }
@@ -220,11 +254,23 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 shader: PREPASS_SHADER_HANDLE.typed::<Shader>(),
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
-                targets: vec![Some(ColorTargetState {
-                    format: TextureFormat::Rgba16Float,
-                    blend: None,
-                    write_mask: ColorWrites::ALL,
-                })],
+                targets: vec![
+                    Some(ColorTargetState {
+                        format: TextureFormat::Rgba16Float,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: TextureFormat::Rgba16Float,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                ],
             }),
             primitive: PrimitiveState {
                 topology: key.primitive_topology(),
@@ -271,10 +317,10 @@ fn extract_prepass_camera_phases(
 
 #[derive(Component)]
 pub struct PrepassTarget {
-    pub normal_velocity_view: TextureView,
-    pub normal_velocity_sampler: Sampler,
-    pub depth_view: TextureView,
-    pub depth_sampler: Sampler,
+    pub normal_velocity: GpuImage,
+    pub base_color: GpuImage,
+    pub emissive_metallic: GpuImage,
+    pub depth: GpuImage,
 }
 
 fn prepare_prepass_targets(
@@ -284,51 +330,57 @@ fn prepare_prepass_targets(
     cameras: Query<(Entity, &ExtractedCamera), With<RenderPhase<Prepass>>>,
 ) {
     for (entity, camera) in &cameras {
-        if let Some(target_size) = camera.physical_target_size {
-            let size = Extent3d {
-                width: target_size.x,
-                height: target_size.y,
+        if let Some(size) = camera.physical_target_size {
+            let extent = Extent3d {
+                width: size.x,
+                height: size.y,
                 depth_or_array_layers: 1,
             };
+            let size = size.as_vec2();
+            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
 
-            let normal_velocity_view = texture_cache
-                .get(
+            let mut create_texture = |texture_format| -> GpuImage {
+                let sampler = render_device.create_sampler(&SamplerDescriptor {
+                    label: None,
+                    address_mode_u: AddressMode::ClampToEdge,
+                    address_mode_v: AddressMode::ClampToEdge,
+                    address_mode_w: AddressMode::ClampToEdge,
+                    mag_filter: FilterMode::Nearest,
+                    min_filter: FilterMode::Nearest,
+                    mipmap_filter: FilterMode::Nearest,
+                    ..Default::default()
+                });
+                let texture = texture_cache.get(
                     &render_device,
                     TextureDescriptor {
-                        label: Some("prepass_color_attachment_texture"),
-                        size,
+                        label: None,
+                        size: extent,
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: TextureDimension::D2,
-                        format: TextureFormat::Rgba16Float,
-                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+                        format: texture_format,
+                        usage: texture_usage,
                     },
-                )
-                .default_view;
-            let normal_velocity_sampler =
-                render_device.create_sampler(&SamplerDescriptor::default());
+                );
+                GpuImage {
+                    texture: texture.texture,
+                    texture_view: texture.default_view,
+                    texture_format,
+                    sampler: sampler,
+                    size,
+                }
+            };
 
-            let depth_view = texture_cache
-                .get(
-                    &render_device,
-                    TextureDescriptor {
-                        label: Some("prepass_depth_stencil_attachment_texture"),
-                        size,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: SHADOW_FORMAT,
-                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
-                    },
-                )
-                .default_view;
-            let depth_sampler = render_device.create_sampler(&SamplerDescriptor::default());
+            let normal_velocity = create_texture(TextureFormat::Rgba16Float);
+            let base_color = create_texture(TextureFormat::Rgba8Unorm);
+            let emissive_metallic = create_texture(TextureFormat::Rgba16Float);
+            let depth = create_texture(SHADOW_FORMAT);
 
             commands.entity(entity).insert(PrepassTarget {
-                normal_velocity_view,
-                normal_velocity_sampler,
-                depth_view,
-                depth_sampler,
+                normal_velocity,
+                base_color,
+                emissive_metallic,
+                depth,
             });
         }
     }
@@ -457,19 +509,35 @@ fn queue_deferred_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&target.depth_view),
+                    resource: BindingResource::TextureView(&target.depth.texture_view),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&target.depth_sampler),
+                    resource: BindingResource::Sampler(&target.depth.sampler),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(&target.normal_velocity_view),
+                    resource: BindingResource::TextureView(&target.normal_velocity.texture_view),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&target.normal_velocity_sampler),
+                    resource: BindingResource::Sampler(&target.normal_velocity.sampler),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(&target.base_color.texture_view),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::Sampler(&target.base_color.sampler),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(&target.emissive_metallic.texture_view),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: BindingResource::Sampler(&target.emissive_metallic.sampler),
                 },
             ],
         });
@@ -619,18 +687,31 @@ impl Node for PrepassNode {
         {
             #[cfg(feature = "trace")]
             let _main_prepass_span = info_span!("main_prepass").entered();
+            let ops = Operations {
+                load: LoadOp::Clear(Color::NONE.into()),
+                store: true,
+            };
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("main_prepass"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &target.normal_velocity_view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::NONE.into()),
-                        store: true,
-                    },
-                })],
+                color_attachments: &[
+                    Some(RenderPassColorAttachment {
+                        view: &target.normal_velocity.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                    Some(RenderPassColorAttachment {
+                        view: &target.base_color.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                    Some(RenderPassColorAttachment {
+                        view: &target.emissive_metallic.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                ],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &target.depth_view,
+                    view: &target.depth.texture_view,
                     depth_ops: Some(Operations {
                         load: camera_3d.depth_load_op.clone().into(),
                         store: true,

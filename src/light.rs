@@ -161,6 +161,8 @@ impl FromWorld for LightPipeline {
             label: None,
         });
 
+        let deferred_layout = prepass_pipeline.deferred_layout.clone();
+
         let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[BindGroupLayoutEntry {
@@ -177,7 +179,7 @@ impl FromWorld for LightPipeline {
 
         Self {
             view_layout,
-            deferred_layout: prepass_pipeline.deferred_layout.clone(),
+            deferred_layout,
             mesh_material_layout: None,
             render_layout,
         }
