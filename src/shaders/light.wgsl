@@ -18,7 +18,7 @@ var emissive_metallic_texture: texture_2d<f32>;
 @group(1) @binding(7)
 var emissive_metallic_sampler: sampler;
 
-@group(3) @binding(0)
+@group(4) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
 
 let FLOAT_EPSILON: f32 = 1.0e-5;

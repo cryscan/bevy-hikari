@@ -1,12 +1,12 @@
 use crate::{
-    mesh::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout},
+    mesh::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::{DeferredBindGroup, PrepassPipeline},
     LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
     pbr::{
         GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, ShadowPipeline, ViewClusterBindings,
-        ViewLightsUniformOffset, ViewShadowBindings, CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT,
+        ViewLightsUniformOffset, ViewShadowBindings,
     },
     prelude::*,
     render::{
@@ -38,17 +38,18 @@ impl Plugin for LightPlugin {
 pub struct LightPipeline {
     pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
-    pub mesh_material_layout: Option<BindGroupLayout>,
+    pub mesh_material_layout: BindGroupLayout,
+    pub texture_layout: Option<BindGroupLayout>,
     pub render_layout: BindGroupLayout,
 }
 
 impl FromWorld for LightPipeline {
     fn from_world(world: &mut World) -> Self {
-        let prepass_pipeline = world.resource::<PrepassPipeline>();
+        let buffer_binding_type = BufferBindingType::Storage { read_only: true };
 
         let render_device = world.resource::<RenderDevice>();
-        let buffer_binding_type = render_device
-            .get_supported_read_only_binding_type(CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT);
+        let prepass_pipeline = world.resource::<PrepassPipeline>();
+        let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
@@ -180,19 +181,15 @@ impl FromWorld for LightPipeline {
         Self {
             view_layout,
             deferred_layout,
-            mesh_material_layout: None,
+            mesh_material_layout,
+            texture_layout: None,
             render_layout,
         }
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct LightPipelineKey {
-    texture_count: usize,
-}
-
 impl SpecializedComputePipeline for LightPipeline {
-    type Key = LightPipelineKey;
+    type Key = usize;
 
     fn specialize(&self, _key: Self::Key) -> ComputePipelineDescriptor {
         ComputePipelineDescriptor {
@@ -200,7 +197,8 @@ impl SpecializedComputePipeline for LightPipeline {
             layout: Some(vec![
                 self.view_layout.clone(),
                 self.deferred_layout.clone(),
-                self.mesh_material_layout.clone().unwrap(),
+                self.mesh_material_layout.clone(),
+                self.texture_layout.clone().unwrap(),
                 self.render_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
@@ -257,17 +255,13 @@ pub struct CachedLightPipelines {
 
 fn queue_light_pipelines(
     mut commands: Commands,
-    layout: Res<MeshMaterialBindGroupLayout>,
+    layout: Res<TextureBindGroupLayout>,
     mut pipeline: ResMut<LightPipeline>,
     mut pipelines: ResMut<SpecializedComputePipelines<LightPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
-    let key = LightPipelineKey {
-        texture_count: layout.texture_count,
-    };
-    pipeline.mesh_material_layout = Some(layout.layout.clone());
-
-    let direct_cast = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+    pipeline.texture_layout = Some(layout.layout.clone());
+    let direct_cast = pipelines.specialize(&mut pipeline_cache, &pipeline, layout.count);
     commands.insert_resource(CachedLightPipelines { direct_cast })
 }
 
@@ -432,8 +426,9 @@ impl Node for LightPassNode {
             &[view_uniform.offset, view_lights.offset],
         );
         pass.set_bind_group(1, &deferred_bind_group.0, &[]);
-        pass.set_bind_group(2, &mesh_material_bind_group.0, &[]);
-        pass.set_bind_group(3, &render_bind_group.0, &[]);
+        pass.set_bind_group(2, &mesh_material_bind_group.mesh_material, &[]);
+        pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
+        pass.set_bind_group(4, &render_bind_group.0, &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_cast) {
             pass.set_pipeline(pipeline);

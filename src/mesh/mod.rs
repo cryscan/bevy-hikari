@@ -43,10 +43,10 @@ impl Plugin for MeshMaterialPlugin {
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                .init_resource::<MeshMaterialBindGroupLayout>()
                 .add_system_to_stage(
                     RenderStage::Prepare,
-                    prepare_mesh_material_bind_group_layout
-                        .after(MeshMaterialSystems::PrepareAssets),
+                    prepare_texture_bind_group_layout.after(MeshMaterialSystems::PrepareAssets),
                 )
                 .add_system_to_stage(RenderStage::Queue, queue_mesh_material_bind_group);
         }
@@ -319,113 +319,127 @@ pub enum MeshMaterialSystems {
     PostPrepareInstances,
 }
 
-pub struct MeshMaterialBindGroupLayout {
-    pub layout: BindGroupLayout,
-    pub texture_count: usize,
+pub struct MeshMaterialBindGroupLayout(pub BindGroupLayout);
+impl FromWorld for MeshMaterialBindGroupLayout {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+        let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                // Vertices
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuVertexBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Primitives
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuPrimitiveBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Asset nodes
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuNodeBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Instances
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuInstanceBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Instance nodes
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuNodeBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Materials
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuStandardMaterialBuffer::min_size()),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        Self(layout)
+    }
 }
 
-fn prepare_mesh_material_bind_group_layout(
+pub struct TextureBindGroupLayout {
+    pub layout: BindGroupLayout,
+    pub count: usize,
+}
+
+fn prepare_texture_bind_group_layout(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     materials: Res<MaterialRenderAssets>,
 ) {
-    let texture_count = materials.textures.len();
+    let count = materials.textures.len();
     let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
-            // Vertices
-            BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: Some(GpuVertexBuffer::min_size()),
-                },
-                count: None,
-            },
-            // Primitives
-            BindGroupLayoutEntry {
-                binding: 1,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: Some(GpuPrimitiveBuffer::min_size()),
-                },
-                count: None,
-            },
-            // Asset nodes
-            BindGroupLayoutEntry {
-                binding: 2,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: Some(GpuNodeBuffer::min_size()),
-                },
-                count: None,
-            },
-            // Instances
-            BindGroupLayoutEntry {
-                binding: 3,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: Some(GpuInstanceBuffer::min_size()),
-                },
-                count: None,
-            },
-            // Instance nodes
-            BindGroupLayoutEntry {
-                binding: 4,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: Some(GpuNodeBuffer::min_size()),
-                },
-                count: None,
-            },
-            // Materials
-            BindGroupLayoutEntry {
-                binding: 5,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: Some(GpuStandardMaterialBuffer::min_size()),
-                },
-                count: None,
-            },
             // Textures
             BindGroupLayoutEntry {
-                binding: 6,
+                binding: 0,
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::Texture {
                     sample_type: TextureSampleType::Float { filterable: true },
                     view_dimension: TextureViewDimension::D2,
                     multisampled: false,
                 },
-                count: NonZeroU32::new(texture_count as u32),
+                count: NonZeroU32::new(count as u32),
             },
             // Samplers
             BindGroupLayoutEntry {
-                binding: 7,
+                binding: 1,
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                count: NonZeroU32::new(texture_count as u32),
+                count: NonZeroU32::new(count as u32),
             },
         ],
     });
-    commands.insert_resource(MeshMaterialBindGroupLayout {
-        layout,
-        texture_count,
-    });
+    commands.insert_resource(TextureBindGroupLayout { layout, count });
 }
 
-pub struct MeshMaterialBindGroup(pub BindGroup);
+pub struct MeshMaterialBindGroup {
+    pub mesh_material: BindGroup,
+    pub texture: BindGroup,
+}
 
 fn queue_mesh_material_bind_group(
     mut commands: Commands,
@@ -435,7 +449,8 @@ fn queue_mesh_material_bind_group(
     materials: Res<MaterialRenderAssets>,
     instances: Res<InstanceRenderAssets>,
     images: Res<RenderAssets<Image>>,
-    layout: Res<MeshMaterialBindGroupLayout>,
+    mesh_material_layout: Res<MeshMaterialBindGroupLayout>,
+    texture_layout: Res<TextureBindGroupLayout>,
 ) {
     if let (
         Some(vertex_binding),
@@ -452,17 +467,9 @@ fn queue_mesh_material_bind_group(
         instances.node_buffer.binding(),
         materials.buffer.binding(),
     ) {
-        let images = materials.textures.iter().map(|handle| {
-            images
-                .get(handle)
-                .unwrap_or(&mesh_pipeline.dummy_white_gpu_image)
-        });
-        let textures: Vec<_> = images.clone().map(|image| &*image.texture_view).collect();
-        let samplers: Vec<_> = images.map(|image| &*image.sampler).collect();
-
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+        let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
-            layout: &layout.layout,
+            layout: &mesh_material_layout.0,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
@@ -488,17 +495,36 @@ fn queue_mesh_material_bind_group(
                     binding: 5,
                     resource: material_binding,
                 },
+            ],
+        });
+
+        let images = materials.textures.iter().map(|handle| {
+            images
+                .get(handle)
+                .unwrap_or(&mesh_pipeline.dummy_white_gpu_image)
+        });
+        let textures: Vec<_> = images.clone().map(|image| &*image.texture_view).collect();
+        let samplers: Vec<_> = images.map(|image| &*image.sampler).collect();
+
+        let texture = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &texture_layout.layout,
+            entries: &[
                 BindGroupEntry {
-                    binding: 6,
+                    binding: 0,
                     resource: BindingResource::TextureViewArray(textures.as_slice()),
                 },
                 BindGroupEntry {
-                    binding: 7,
+                    binding: 1,
                     resource: BindingResource::SamplerArray(samplers.as_slice()),
                 },
             ],
         });
-        commands.insert_resource(MeshMaterialBindGroup(bind_group));
+
+        commands.insert_resource(MeshMaterialBindGroup {
+            mesh_material,
+            texture,
+        });
     } else {
         commands.remove_resource::<MeshMaterialBindGroup>();
     }
@@ -514,7 +540,7 @@ impl<const I: usize> EntityRenderCommand for SetMeshMaterialBindGroup<I> {
         param: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        pass.set_bind_group(I, &param.into_inner().0, &[]);
+        pass.set_bind_group(I, &param.into_inner().mesh_material, &[]);
 
         RenderCommandResult::Success
     }

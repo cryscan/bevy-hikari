@@ -14,7 +14,8 @@ var<storage> instance_buffer: Instances;
 var<storage> instance_node_buffer: Nodes;
 @group(2) @binding(5)
 var<storage> material_buffer: Materials;
-@group(2) @binding(6)
+
+@group(3) @binding(0)
 var textures: binding_array<texture_2d<f32>>;
-@group(2) @binding(7)
+@group(3) @binding(1)
 var samplers: binding_array<sampler>;
