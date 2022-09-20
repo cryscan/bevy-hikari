@@ -28,7 +28,9 @@ pub mod instance;
 pub mod material;
 pub mod mesh;
 
-pub use instance::{InstanceRenderAssets, PreviousMeshUniform};
+pub use instance::{
+    DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
+};
 pub use material::MaterialRenderAssets;
 pub use mesh::MeshRenderAssets;
 
@@ -329,7 +331,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 // Vertices
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -340,7 +342,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 // Primitives
                 BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -351,7 +353,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 // Asset nodes
                 BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -362,10 +364,10 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 // Instances
                 BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: true,
+                        has_dynamic_offset: false,
                         min_binding_size: Some(GpuInstanceBuffer::min_size()),
                     },
                     count: None,
@@ -373,7 +375,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 // Instance nodes
                 BindGroupLayoutEntry {
                     binding: 4,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -384,10 +386,10 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 // Materials
                 BindGroupLayoutEntry {
                     binding: 5,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: true,
+                        has_dynamic_offset: false,
                         min_binding_size: Some(GpuStandardMaterialBuffer::min_size()),
                     },
                     count: None,
@@ -416,7 +418,7 @@ fn prepare_texture_bind_group_layout(
             // Textures
             BindGroupLayoutEntry {
                 binding: 0,
-                visibility: ShaderStages::COMPUTE,
+                visibility: ShaderStages::all(),
                 ty: BindingType::Texture {
                     sample_type: TextureSampleType::Float { filterable: true },
                     view_dimension: TextureViewDimension::D2,
@@ -427,7 +429,7 @@ fn prepare_texture_bind_group_layout(
             // Samplers
             BindGroupLayoutEntry {
                 binding: 1,
-                visibility: ShaderStages::COMPUTE,
+                visibility: ShaderStages::all(),
                 ty: BindingType::Sampler(SamplerBindingType::Filtering),
                 count: NonZeroU32::new(count as u32),
             },
@@ -537,10 +539,10 @@ impl<const I: usize> EntityRenderCommand for SetMeshMaterialBindGroup<I> {
     fn render<'w>(
         _view: Entity,
         _item: Entity,
-        param: SystemParamItem<'w, '_, Self::Param>,
+        bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        pass.set_bind_group(I, &param.into_inner().mesh_material, &[]);
+        pass.set_bind_group(I, &bind_group.into_inner().mesh_material, &[]);
 
         RenderCommandResult::Success
     }

@@ -18,6 +18,11 @@ var uv_texture: texture_2d<f32>;
 @group(1) @binding(7)
 var uv_sampler: sampler;
 
+@group(3) @binding(0)
+var textures: binding_array<texture_2d<f32>>;
+@group(3) @binding(1)
+var samplers: binding_array<sampler>;
+
 @group(4) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
 

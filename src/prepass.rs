@@ -1,5 +1,8 @@
 use crate::{
-    mesh::PreviousMeshUniform,
+    mesh::{
+        DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, MeshMaterialBindGroupLayout,
+        PreviousMeshUniform, SetMeshMaterialBindGroup,
+    },
     view::{PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
     PREPASS_SHADER_HANDLE,
 };
@@ -32,7 +35,7 @@ use bevy::{
 
 pub const NORMAL_VELOCITY_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
-pub const UV_FORMAT: TextureFormat = TextureFormat::Rg8Unorm;
+pub const UV_FORMAT: TextureFormat = TextureFormat::Rg16Unorm;
 
 pub struct PrepassPlugin;
 impl Plugin for PrepassPlugin {
@@ -56,12 +59,14 @@ impl Plugin for PrepassPlugin {
 pub struct PrepassPipeline {
     pub view_layout: BindGroupLayout,
     pub mesh_layout: BindGroupLayout,
+    pub mesh_material_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
 }
 
 impl FromWorld for PrepassPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
+        let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -109,6 +114,16 @@ impl FromWorld for PrepassPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
                         min_binding_size: Some(PreviousMeshUniform::min_size()),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: Some(InstanceIndex::min_size()),
                     },
                     count: None,
                 },
@@ -192,6 +207,7 @@ impl FromWorld for PrepassPipeline {
         Self {
             view_layout,
             mesh_layout,
+            mesh_material_layout,
             deferred_layout,
         }
     }
@@ -241,9 +257,14 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         let vertex_attributes = vec![
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
         ];
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
-        let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
+        let bind_group_layout = vec![
+            self.view_layout.clone(),
+            self.mesh_layout.clone(),
+            self.mesh_material_layout.clone(),
+        ];
 
         Ok(RenderPipelineDescriptor {
             label: None,
@@ -396,7 +417,7 @@ fn queue_prepass_meshes(
     prepass_pipeline: Res<PrepassPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
-    meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform)>,
+    meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform, &DynamicInstanceIndex)>,
     mut views: Query<(&ExtractedView, &VisibleEntities, &mut RenderPhase<Prepass>)>,
 ) {
     let draw_function = prepass_draw_functions
@@ -406,31 +427,31 @@ fn queue_prepass_meshes(
     for (view, visible_entities, mut prepass_phase) in &mut views {
         let rangefinder = view.rangefinder3d();
 
-        let add_render_phase =
-            |(entity, mesh_handle, mesh_uniform): (Entity, &Handle<Mesh>, &MeshUniform)| {
-                if let Some(mesh) = render_meshes.get(mesh_handle) {
-                    let key = PrepassPipelineKey::from_primitive_topology(mesh.primitive_topology);
-                    let pipeline_id = pipelines.specialize(
-                        &mut pipeline_cache,
-                        &prepass_pipeline,
-                        key,
-                        &mesh.layout,
-                    );
-                    let pipeline_id = match pipeline_id {
-                        Ok(id) => id,
-                        Err(err) => {
-                            error!("{}", err);
-                            return;
-                        }
-                    };
-                    prepass_phase.add(Prepass {
-                        distance: rangefinder.distance(&mesh_uniform.transform),
-                        entity,
-                        pipeline: pipeline_id,
-                        draw_function,
-                    });
-                }
-            };
+        let add_render_phase = |(entity, mesh_handle, mesh_uniform, _): (
+            Entity,
+            &Handle<Mesh>,
+            &MeshUniform,
+            &DynamicInstanceIndex,
+        )| {
+            if let Some(mesh) = render_meshes.get(mesh_handle) {
+                let key = PrepassPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                let pipeline_id =
+                    pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);
+                let pipeline_id = match pipeline_id {
+                    Ok(id) => id,
+                    Err(err) => {
+                        error!("{}", err);
+                        return;
+                    }
+                };
+                prepass_phase.add(Prepass {
+                    distance: rangefinder.distance(&mesh_uniform.transform),
+                    entity,
+                    pipeline: pipeline_id,
+                    draw_function,
+                });
+            }
+        };
 
         visible_entities
             .entities
@@ -451,6 +472,7 @@ fn queue_prepass_bind_group(
     render_device: Res<RenderDevice>,
     mesh_uniforms: Res<ComponentUniforms<MeshUniform>>,
     previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
+    instance_render_assets: Res<InstanceRenderAssets>,
     view_uniforms: Res<ViewUniforms>,
     previous_view_uniforms: Res<PreviousViewUniforms>,
 ) {
@@ -459,11 +481,13 @@ fn queue_prepass_bind_group(
         Some(previous_view_binding),
         Some(mesh_binding),
         Some(previous_mesh_binding),
+        Some(instance_indices_binding),
     ) = (
         view_uniforms.uniforms.binding(),
         previous_view_uniforms.uniforms.binding(),
         mesh_uniforms.binding(),
         previous_mesh_uniforms.binding(),
+        instance_render_assets.instance_indices.binding(),
     ) {
         let view = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -490,6 +514,10 @@ fn queue_prepass_bind_group(
                 BindGroupEntry {
                     binding: 1,
                     resource: previous_mesh_binding,
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: instance_indices_binding,
                 },
             ],
         });
@@ -590,6 +618,7 @@ type DrawPrepass = (
     SetItemPipeline,
     SetPrepassViewBindGroup<0>,
     SetPrepassMeshBindGroup<1>,
+    SetMeshMaterialBindGroup<2>,
     DrawMesh,
 );
 
@@ -624,6 +653,7 @@ impl<const I: usize> EntityRenderCommand for SetPrepassMeshBindGroup<I> {
         SQuery<(
             Read<DynamicUniformIndex<MeshUniform>>,
             Read<DynamicUniformIndex<PreviousMeshUniform>>,
+            Read<DynamicInstanceIndex>,
         )>,
     );
 
@@ -633,11 +663,16 @@ impl<const I: usize> EntityRenderCommand for SetPrepassMeshBindGroup<I> {
         (bind_group, mesh_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (mesh_uniform, previous_mesh_uniform) = mesh_query.get_inner(item).unwrap();
+        let (mesh_uniform, previous_mesh_uniform, instance_index) =
+            mesh_query.get_inner(item).unwrap();
         pass.set_bind_group(
             I,
             &bind_group.into_inner().mesh,
-            &[mesh_uniform.index(), previous_mesh_uniform.index()],
+            &[
+                mesh_uniform.index(),
+                previous_mesh_uniform.index(),
+                instance_index.0,
+            ],
         );
 
         RenderCommandResult::Success

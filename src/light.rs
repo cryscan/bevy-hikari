@@ -426,7 +426,7 @@ impl Node for LightPassNode {
             &[view_uniform.offset, view_lights.offset],
         );
         pass.set_bind_group(1, &deferred_bind_group.0, &[]);
-        pass.set_bind_group(2, &mesh_material_bind_group.mesh_material, &[0, 0]);
+        pass.set_bind_group(2, &mesh_material_bind_group.mesh_material, &[]);
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &render_bind_group.0, &[]);
 
