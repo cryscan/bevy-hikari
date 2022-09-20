@@ -30,6 +30,10 @@ use bevy::{
     utils::FloatOrd,
 };
 
+pub const NORMAL_VELOCITY_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
+pub const UV_FORMAT: TextureFormat = TextureFormat::Rg8Unorm;
+
 pub struct PrepassPlugin;
 impl Plugin for PrepassPlugin {
     fn build(&self, app: &mut App) {
@@ -148,12 +152,12 @@ impl FromWorld for PrepassPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
-                // Base color buffer
+                // Instance-material buffer
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
+                        sample_type: TextureSampleType::Uint,
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -165,7 +169,7 @@ impl FromWorld for PrepassPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
-                // Emissive-metallic buffer
+                // UV buffer
                 BindGroupLayoutEntry {
                     binding: 6,
                     visibility: ShaderStages::all(),
@@ -256,17 +260,17 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 entry_point: "fragment".into(),
                 targets: vec![
                     Some(ColorTargetState {
-                        format: TextureFormat::Rgba16Float,
+                        format: NORMAL_VELOCITY_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
                     Some(ColorTargetState {
-                        format: TextureFormat::Rgba8Unorm,
+                        format: INSTANCE_MATERIAL_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
                     Some(ColorTargetState {
-                        format: TextureFormat::Rgba16Float,
+                        format: UV_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
@@ -318,8 +322,8 @@ fn extract_prepass_camera_phases(
 #[derive(Component)]
 pub struct PrepassTarget {
     pub normal_velocity: GpuImage,
-    pub base_color: GpuImage,
-    pub emissive_metallic: GpuImage,
+    pub instance_material: GpuImage,
+    pub uv: GpuImage,
     pub depth: GpuImage,
 }
 
@@ -371,15 +375,15 @@ fn prepare_prepass_targets(
                 }
             };
 
-            let normal_velocity = create_texture(TextureFormat::Rgba16Float);
-            let base_color = create_texture(TextureFormat::Rgba8Unorm);
-            let emissive_metallic = create_texture(TextureFormat::Rgba16Float);
+            let normal_velocity = create_texture(NORMAL_VELOCITY_FORMAT);
+            let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
+            let uv = create_texture(UV_FORMAT);
             let depth = create_texture(SHADOW_FORMAT);
 
             commands.entity(entity).insert(PrepassTarget {
                 normal_velocity,
-                base_color,
-                emissive_metallic,
+                instance_material,
+                uv,
                 depth,
             });
         }
@@ -525,19 +529,19 @@ fn queue_deferred_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 4,
-                    resource: BindingResource::TextureView(&target.base_color.texture_view),
+                    resource: BindingResource::TextureView(&target.instance_material.texture_view),
                 },
                 BindGroupEntry {
                     binding: 5,
-                    resource: BindingResource::Sampler(&target.base_color.sampler),
+                    resource: BindingResource::Sampler(&target.instance_material.sampler),
                 },
                 BindGroupEntry {
                     binding: 6,
-                    resource: BindingResource::TextureView(&target.emissive_metallic.texture_view),
+                    resource: BindingResource::TextureView(&target.uv.texture_view),
                 },
                 BindGroupEntry {
                     binding: 7,
-                    resource: BindingResource::Sampler(&target.emissive_metallic.sampler),
+                    resource: BindingResource::Sampler(&target.uv.sampler),
                 },
             ],
         });
@@ -700,12 +704,12 @@ impl Node for PrepassNode {
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.base_color.texture_view,
+                        view: &target.instance_material.texture_view,
                         resolve_target: None,
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.emissive_metallic.texture_view,
+                        view: &target.uv.texture_view,
                         resolve_target: None,
                         ops,
                     }),

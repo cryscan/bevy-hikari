@@ -10,13 +10,13 @@ var normal_velocity_texture: texture_2d<f32>;
 @group(1) @binding(3)
 var normal_velocity_sampler: sampler;
 @group(1) @binding(4)
-var base_color_texture: texture_2d<f32>;
+var instance_material_texture: texture_2d<u32>;
 @group(1) @binding(5)
-var base_color_sampler: sampler;
+var instance_material_sampler: sampler;
 @group(1) @binding(6)
-var emissive_metallic_texture: texture_2d<f32>;
+var uv_texture: texture_2d<f32>;
 @group(1) @binding(7)
-var emissive_metallic_sampler: sampler;
+var uv_sampler: sampler;
 
 @group(4) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;

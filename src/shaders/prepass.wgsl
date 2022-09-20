@@ -57,8 +57,8 @@ struct FragmentInput {
 
 struct FragmentOutput {
     @location(0) normal_velocity: vec4<f32>,
-    @location(1) base_color: vec4<f32>,
-    @location(2) emissive_metallic: vec4<f32>,
+    @location(1) instance_material: vec2<u32>,
+    @location(2) uv: vec2<f32>,
 };
 
 fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {

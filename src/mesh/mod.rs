@@ -365,7 +365,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: Some(GpuInstanceBuffer::min_size()),
                     },
                     count: None,
@@ -387,7 +387,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: Some(GpuStandardMaterialBuffer::min_size()),
                     },
                     count: None,
