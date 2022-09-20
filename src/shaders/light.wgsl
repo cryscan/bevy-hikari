@@ -26,8 +26,8 @@ var samplers: binding_array<sampler>;
 @group(4) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
 
-let FLOAT_EPSILON: f32 = 1.0e-5;
-let MAX_FLOAT: f32 = 3.402823466e+38;
+let FLOAT_EPSILON: f32 = 1.1920929E-7;
+let MAX_FLOAT: f32 = 3.402823466E+38;
 let MAX_U32: u32 = 4294967295u;
 
 struct Ray {
