@@ -1,6 +1,13 @@
 #import bevy_pbr::mesh_view_bindings
 #import bevy_hikari::mesh_material_bindings
 
+#import bevy_pbr::utils
+#import bevy_pbr::lighting
+
+struct Frame {
+    number: u32,
+};
+
 @group(1) @binding(0)
 var position_texture: texture_2d<f32>;
 @group(1) @binding(1)
@@ -23,12 +30,13 @@ var samplers: binding_array<sampler>;
 
 @group(4) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(1)
+var<uniform> frame: Frame;
 
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 
-let PI: f32 = 3.1415926;
 let SOLAR_ANGLE: f32 = 0.5;
 
 fn hash(value: u32) -> u32 {
@@ -232,6 +240,23 @@ fn traverse_top(ray: Ray) -> Hit {
     return hit;
 }
 
+// NOTE: Correctly calculates the view vector depending on whether
+// the projection is orthographic or perspective.
+fn calculate_view(
+    world_position: vec4<f32>,
+    is_orthographic: bool,
+) -> vec3<f32> {
+    var V: vec3<f32>;
+    if (is_orthographic) {
+        // Orthographic view vector
+        V = normalize(vec3<f32>(view.view_proj[0].z, view.view_proj[1].z, view.view_proj[2].z));
+    } else {
+        // Only valid for a perpective projection
+        V = normalize(view.world_position.xyz - world_position.xyz);
+    }
+    return V;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
@@ -259,7 +284,7 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let instance = instance_buffer.data[hit.instance_index];
     let material = material_buffer.data[instance.material];
 
-    var color = material.base_color;
+    var output_color = material.base_color;
     if (material.base_color_texture != U32_MAX) {
         let indices = primitive_buffer.data[hit.primitive_index].indices;
         let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
@@ -267,20 +292,27 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
         let uv = v0.uv + hit.intersection.uv.x * (v1.uv - v0.uv) + hit.intersection.uv.y * (v2.uv - v0.uv);
 
-        color = color * textureSampleLevel(textures[material.base_color_texture], samplers[material.base_color_texture], uv, 0.0);
+        output_color = output_color * textureSampleLevel(textures[material.base_color_texture], samplers[material.base_color_texture], uv, 0.0);
     }
 
-    textureStore(render_texture, location, color);
+    textureStore(render_texture, location, output_color);
 }
 
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let hashed_frame_number = hash(frame.number);
     let rand = vec2<f32>(
-        random_float(invocation_id.x << 16u ^ invocation_id.y),
-        random_float(invocation_id.y << 16u ^ invocation_id.x)
+        random_float(invocation_id.x << 16u ^ invocation_id.y + hashed_frame_number),
+        random_float(invocation_id.y << 16u ^ invocation_id.x + hashed_frame_number)
     );
     let r = sqrt(rand.x);
     let theta = 2.0 * PI * rand.y;
+    var disturb = vec3<f32>(
+        r * SOLAR_ANGLE / PI * cos(theta),
+        r * SOLAR_ANGLE / PI * sin(theta),
+        0.0
+    );
+    disturb.z = sqrt(1.0 - dot(disturb.xy, disturb.xy));
 
     let size = textureDimensions(render_texture);
     let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
@@ -296,23 +328,46 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let instance_material = textureLoad(instance_material_texture, location, 0);
     let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
 
-    var intensity = vec3<f32>(0.0);
-
     let material = material_buffer.data[instance_material.y];
-    var color = material.base_color;
-    if (material.base_color_texture != U32_MAX) {
-        color = color * textureSampleLevel(textures[material.base_color_texture], samplers[material.base_color_texture], velocity_uv.zw, 0.0);
+    var output_color = material.base_color;
+    var texture_id = material.base_color_texture;
+    if (texture_id != U32_MAX) {
+        output_color *= textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0);
+    }
+    var emissive = material.emissive;
+    texture_id = material.emissive_texture;
+    if (texture_id != U32_MAX) {
+        emissive *= textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0);
+    }
+    var metallic = material.metallic;
+    texture_id = material.metallic_roughness_texture;
+    if (texture_id != U32_MAX) {
+        metallic *= textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0).r;
+    }
+    var occlusion = 1.0;
+    texture_id = material.occlusion_texture;
+    if (texture_id != U32_MAX) {
+        occlusion = textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0).r;
     }
 
+    let roughness = perceptualRoughnessToRoughness(material.perceptual_roughness);
+
+    // TODO: normal mapping
+    let N = normal;
+    let V = calculate_view(position, view.projection[3].w == 1.0);
+
+    let NdotV = max(dot(N, V), 0.0001);
+
+    let reflectance = material.reflectance;
+    let F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + output_color.rgb * metallic;
+
+    let diffuse_color = output_color.rgb * (1.0 - metallic);
+
+    let R = reflect(-V, N);
+
+    var intensity = vec3<f32>(0.0);
     for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
         let light = lights.directional_lights[i];
-
-        var disturb = vec3<f32>(
-            r * SOLAR_ANGLE / PI * cos(theta),
-            r * SOLAR_ANGLE / PI * sin(theta),
-            0.0
-        );
-        disturb.z = sqrt(1.0 - dot(disturb.xy, disturb.xy));
 
         var ray: Ray;
         ray.origin = position.xyz + light.direction_to_light * light.shadow_depth_bias + normal * light.shadow_normal_bias;
@@ -321,13 +376,19 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         ray.inv_direction = 1.0 / ray.direction;
 
         let hit = traverse_top(ray);
-        if (hit.intersection.distance > 1000.0) {
-            intensity += light.color.xyz * max(dot(normal, ray.direction), 0.0);
+        if (hit.instance_index == U32_MAX) {
+            intensity += directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
         }
     }
 
-    color = vec4<f32>(intensity, 1.0) * color;
-    textureStore(render_texture, location, color);
+    let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
+    let specular_ambient = EnvBRDFApprox(F0, material.perceptual_roughness, NdotV);
+
+    var color = intensity;
+    color += (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb * occlusion;
+    color += emissive.rgb * output_color.a;
+    output_color = vec4<f32>(color, output_color.a);
+    textureStore(render_texture, location, output_color);
 }
 
 @compute @workgroup_size(8, 8, 1)

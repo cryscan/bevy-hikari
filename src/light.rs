@@ -13,7 +13,7 @@ use bevy::{
         camera::ExtractedCamera,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
-        renderer::{RenderContext, RenderDevice},
+        renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{GpuImage, TextureCache},
         view::{ViewUniform, ViewUniformOffset, ViewUniforms},
         RenderApp, RenderStage,
@@ -27,7 +27,9 @@ impl Plugin for LightPlugin {
             render_app
                 .init_resource::<LightPipeline>()
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
+                .init_resource::<FrameUniform>()
                 .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
+                .add_system_to_stage(RenderStage::Prepare, prepare_frame_uniform)
                 .add_system_to_stage(RenderStage::Queue, queue_view_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_deferred_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_render_bind_groups)
@@ -232,16 +234,28 @@ impl FromWorld for LightPipeline {
 
         let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::StorageTexture {
-                    access: StorageTextureAccess::WriteOnly,
-                    format: TextureFormat::Rgba16Float,
-                    view_dimension: TextureViewDimension::D2,
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba16Float,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuFrame::min_size()),
+                    },
+                    count: None,
+                },
+            ],
         });
 
         Self {
@@ -340,6 +354,27 @@ fn prepare_light_pass_targets(
                 .insert(LightPassTarget { direct_cast });
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuFrame {
+    pub number: u32,
+}
+
+#[derive(Default)]
+pub struct FrameUniform {
+    pub buffer: UniformBuffer<GpuFrame>,
+}
+
+fn prepare_frame_uniform(
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    mut uniform: ResMut<FrameUniform>,
+    mut counter: Local<u32>,
+) {
+    uniform.buffer.set(GpuFrame { number: *counter });
+    uniform.buffer.write_buffer(&render_device, &render_queue);
+    *counter += 1;
 }
 
 #[allow(dead_code)]
@@ -505,18 +540,29 @@ fn queue_render_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
+    frame_uniform: Res<FrameUniform>,
     query: Query<(Entity, &LightPassTarget)>,
 ) {
     for (entity, light_pass_target) in &query {
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.render_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: BindingResource::TextureView(&light_pass_target.direct_cast.texture_view),
-            }],
-        });
-        commands.entity(entity).insert(RenderBindGroup(bind_group));
+        if let Some(frame_binding) = frame_uniform.buffer.binding() {
+            let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &pipeline.render_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureView(
+                            &light_pass_target.direct_cast.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: frame_binding,
+                    },
+                ],
+            });
+            commands.entity(entity).insert(RenderBindGroup(bind_group));
+        }
     }
 }
 
