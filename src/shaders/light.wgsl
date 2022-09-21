@@ -2,21 +2,19 @@
 #import bevy_hikari::mesh_material_bindings
 
 @group(1) @binding(0)
-var depth_texture: texture_depth_2d;
+var position_texture: texture_2d<f32>;
 @group(1) @binding(1)
-var depth_sampler: sampler;
+var position_sampler: sampler;
 @group(1) @binding(2)
 var normal_texture: texture_2d<f32>;
 @group(1) @binding(3)
 var normal_sampler: sampler;
 @group(1) @binding(4)
-var instance_material_texture: texture_2d<u32>;
-@group(1) @binding(5)
-var instance_material_sampler: sampler;
-@group(1) @binding(6)
 var velocity_uv_texture: texture_2d<f32>;
-@group(1) @binding(7)
+@group(1) @binding(5)
 var velocity_uv_sampler: sampler;
+@group(1) @binding(6)
+var instance_material_texture: texture_2d<u32>;
 
 @group(3) @binding(0)
 var textures: binding_array<texture_2d<f32>>;
@@ -31,7 +29,7 @@ let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 
 let PI: f32 = 3.1415926;
-let SOLAR_ANGLE: f32 = 0.1;
+let SOLAR_ANGLE: f32 = 0.5;
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -239,21 +237,18 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
     let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
 
-    let depth: f32 = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0);
+    let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
     let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
 
     let location = vec2<i32>(invocation_id.xy);
-    if (depth < F32_EPSILON) {
+    if (position.w < 1.0) {
         textureStore(render_texture, location, vec4<f32>(0.0));
         return;
     }
 
-    let ndc = vec4<f32>(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y, depth, 1.0);
-    let position = view.inverse_view_proj * ndc;
-
     var ray: Ray;
     ray.origin = view.world_position;
-    ray.direction = normalize(position.xyz / position.w - ray.origin);
+    ray.direction = normalize(position.xyz - ray.origin);
     ray.inv_direction = 1.0 / ray.direction;
 
     let hit = traverse_top(ray);
@@ -291,8 +286,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
     let location = vec2<i32>(invocation_id.xy);
 
-    let depth: f32 = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0);
-    if (depth < F32_EPSILON) {
+    let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
+    if (position.w < 0.5) {
         textureStore(render_texture, location, vec4<f32>(0.0));
         return;
     }
@@ -300,9 +295,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
     let instance_material = textureLoad(instance_material_texture, location, 0);
     let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
-
-    let ndc = vec4<f32>(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y, depth, 1.0);
-    let position = view.inverse_view_proj * ndc;
 
     var intensity = vec3<f32>(0.0);
 
@@ -323,7 +315,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         disturb.z = sqrt(1.0 - dot(disturb.xy, disturb.xy));
 
         var ray: Ray;
-        ray.origin = position.xyz / position.w + light.direction_to_light * light.shadow_depth_bias + normal * light.shadow_normal_bias;
+        ray.origin = position.xyz + light.direction_to_light * light.shadow_depth_bias + normal * light.shadow_normal_bias;
         ray.direction = light.direction_to_light;
         ray.direction = normalize(ray.direction + normal_basis(ray.direction) * disturb);
         ray.inv_direction = 1.0 / ray.direction;

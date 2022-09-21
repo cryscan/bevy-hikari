@@ -30,6 +30,7 @@ use bevy::{
     utils::FloatOrd,
 };
 
+pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
 pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
@@ -161,6 +162,11 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 entry_point: "fragment".into(),
                 targets: vec![
                     Some(ColorTargetState {
+                        format: POSITION_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
                         format: NORMAL_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
@@ -222,6 +228,7 @@ fn extract_prepass_camera_phases(
 
 #[derive(Component)]
 pub struct PrepassTarget {
+    pub position: GpuImage,
     pub normal: GpuImage,
     pub instance_material: GpuImage,
     pub velocity_uv: GpuImage,
@@ -276,12 +283,14 @@ fn prepare_prepass_targets(
                 }
             };
 
+            let position = create_texture(POSITION_FORMAT);
             let normal = create_texture(NORMAL_FORMAT);
             let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
             let velocity_uv = create_texture(VELOCITY_UV_FORMAT);
             let depth = create_texture(SHADOW_FORMAT);
 
             commands.entity(entity).insert(PrepassTarget {
+                position,
                 normal,
                 instance_material,
                 velocity_uv,
@@ -555,6 +564,11 @@ impl Node for PrepassNode {
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("main_prepass"),
                 color_attachments: &[
+                    Some(RenderPassColorAttachment {
+                        view: &target.position.texture_view,
+                        resolve_target: None,
+                        ops: ops,
+                    }),
                     Some(RenderPassColorAttachment {
                         view: &target.normal.texture_view,
                         resolve_target: None,

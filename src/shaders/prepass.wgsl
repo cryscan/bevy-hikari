@@ -60,9 +60,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 }
 
 struct FragmentOutput {
-    @location(0) normal: vec4<f32>,
-    @location(1) instance_material: vec2<u32>,
-    @location(2) velocity_uv: vec4<f32>,
+    @location(0) position: vec4<f32>,
+    @location(1) normal: vec4<f32>,
+    @location(2) instance_material: vec2<u32>,
+    @location(3) velocity_uv: vec4<f32>,
 };
 
 fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
@@ -79,6 +80,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let velocity = clip_to_uv(clip_position) - clip_to_uv(previous_clip_position);
 
     var out: FragmentOutput;
+    out.position = in.world_position;
     out.normal = vec4<f32>(in.world_normal, 1.0);
     out.instance_material = vec2<u32>(instance_index.instance, instance_index.material);
     out.velocity_uv = vec4<f32>(velocity, in.uv);

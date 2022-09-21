@@ -165,12 +165,12 @@ impl FromWorld for LightPipeline {
         let deferred_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
-                // Depth buffer
+                // Position buffer
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Depth,
+                        sample_type: TextureSampleType::Float { filterable: false },
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -199,12 +199,12 @@ impl FromWorld for LightPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
-                // Instance-material buffer
+                // UV buffer
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Uint,
+                        sample_type: TextureSampleType::Float { filterable: false },
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -216,21 +216,15 @@ impl FromWorld for LightPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
-                // UV buffer
+                // Instance-material buffer
                 BindGroupLayoutEntry {
                     binding: 6,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
+                        sample_type: TextureSampleType::Uint,
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
             ],
@@ -470,11 +464,11 @@ fn queue_deferred_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&target.depth.texture_view),
+                    resource: BindingResource::TextureView(&target.position.texture_view),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&target.depth.sampler),
+                    resource: BindingResource::Sampler(&target.position.sampler),
                 },
                 BindGroupEntry {
                     binding: 2,
@@ -486,19 +480,15 @@ fn queue_deferred_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 4,
-                    resource: BindingResource::TextureView(&target.instance_material.texture_view),
-                },
-                BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::Sampler(&target.instance_material.sampler),
-                },
-                BindGroupEntry {
-                    binding: 6,
                     resource: BindingResource::TextureView(&target.velocity_uv.texture_view),
                 },
                 BindGroupEntry {
-                    binding: 7,
+                    binding: 5,
                     resource: BindingResource::Sampler(&target.velocity_uv.sampler),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(&target.instance_material.texture_view),
                 },
             ],
         });
