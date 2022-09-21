@@ -1,6 +1,5 @@
 #import bevy_pbr::mesh_view_types
 #import bevy_pbr::mesh_types
-#import bevy_hikari::mesh_material_bindings
 
 struct PreviousView {
     view_proj: mat4x4<f32>,
@@ -14,7 +13,7 @@ struct PreviousMesh {
 
 struct InstanceIndex {
     instance: u32,
-    node: u32
+    material: u32
 };
 
 @group(0) @binding(0)
@@ -79,12 +78,9 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let previous_clip_position = previous_view.view_proj * in.previous_world_position;
     let velocity = clip_to_uv(clip_position) - clip_to_uv(previous_clip_position);
 
-    let instance = &instance_buffer.data[instance_index.instance];
-    let material = (*instance).material;
-
     var out: FragmentOutput;
     out.normal_velocity = vec4<f32>(in.world_normal.xy, velocity);
-    out.instance_material = vec2<u32>(instance_index.instance, material);
+    out.instance_material = vec2<u32>(instance_index.instance, instance_index.material);
     out.uv = in.uv;
     return out;
 }

@@ -1,8 +1,5 @@
 use crate::{
-    mesh::{
-        DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, MeshMaterialBindGroupLayout,
-        PreviousMeshUniform, SetMeshMaterialBindGroup,
-    },
+    mesh::{DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform},
     view::{PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
     PREPASS_SHADER_HANDLE,
 };
@@ -11,7 +8,7 @@ use bevy::{
         lifetimeless::{Read, SQuery, SRes},
         SystemParamItem,
     },
-    pbr::{DrawMesh, MeshUniform, SHADOW_FORMAT},
+    pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SHADOW_FORMAT},
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -50,7 +47,6 @@ impl Plugin for PrepassPlugin {
                 .add_system_to_stage(RenderStage::Prepare, prepare_prepass_targets)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_meshes)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_bind_group)
-                .add_system_to_stage(RenderStage::Queue, queue_deferred_bind_groups)
                 .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Prepass>);
         }
     }
@@ -59,14 +55,11 @@ impl Plugin for PrepassPlugin {
 pub struct PrepassPipeline {
     pub view_layout: BindGroupLayout,
     pub mesh_layout: BindGroupLayout,
-    pub mesh_material_layout: BindGroupLayout,
-    pub deferred_layout: BindGroupLayout,
 }
 
 impl FromWorld for PrepassPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
-        let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -130,124 +123,15 @@ impl FromWorld for PrepassPipeline {
             ],
         });
 
-        let deferred_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Depth buffer
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Depth,
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-                // Normal-velocity buffer
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-                // Instance-material buffer
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Uint,
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-                // UV buffer
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
-        });
-
         Self {
             view_layout,
             mesh_layout,
-            mesh_material_layout,
-            deferred_layout,
-        }
-    }
-}
-
-bitflags::bitflags! {
-    #[repr(transparent)]
-    pub struct PrepassPipelineKey: u32 {
-        const NONE               = 0;
-        const PRIMITIVE_TOPOLOGY_RESERVED_BITS = PrepassPipelineKey::PRIMITIVE_TOPOLOGY_MASK_BITS << PrepassPipelineKey::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
-    }
-}
-
-impl PrepassPipelineKey {
-    const PRIMITIVE_TOPOLOGY_MASK_BITS: u32 = 0b111;
-    const PRIMITIVE_TOPOLOGY_SHIFT_BITS: u32 = 32 - 3;
-
-    pub fn from_primitive_topology(primitive_topology: PrimitiveTopology) -> Self {
-        let primitive_topology_bits = ((primitive_topology as u32)
-            & Self::PRIMITIVE_TOPOLOGY_MASK_BITS)
-            << Self::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
-        Self::from_bits(primitive_topology_bits).unwrap()
-    }
-
-    pub fn primitive_topology(&self) -> PrimitiveTopology {
-        let primitive_topology_bits =
-            (self.bits >> Self::PRIMITIVE_TOPOLOGY_SHIFT_BITS) & Self::PRIMITIVE_TOPOLOGY_MASK_BITS;
-        match primitive_topology_bits {
-            x if x == PrimitiveTopology::PointList as u32 => PrimitiveTopology::PointList,
-            x if x == PrimitiveTopology::LineList as u32 => PrimitiveTopology::LineList,
-            x if x == PrimitiveTopology::LineStrip as u32 => PrimitiveTopology::LineStrip,
-            x if x == PrimitiveTopology::TriangleList as u32 => PrimitiveTopology::TriangleList,
-            x if x == PrimitiveTopology::TriangleStrip as u32 => PrimitiveTopology::TriangleStrip,
-            _ => PrimitiveTopology::default(),
         }
     }
 }
 
 impl SpecializedMeshPipeline for PrepassPipeline {
-    type Key = PrepassPipelineKey;
+    type Key = MeshPipelineKey;
 
     fn specialize(
         &self,
@@ -260,11 +144,7 @@ impl SpecializedMeshPipeline for PrepassPipeline {
             Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
         ];
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
-        let bind_group_layout = vec![
-            self.view_layout.clone(),
-            self.mesh_layout.clone(),
-            self.mesh_material_layout.clone(),
-        ];
+        let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
 
         Ok(RenderPipelineDescriptor {
             label: None,
@@ -412,7 +292,7 @@ fn prepare_prepass_targets(
 }
 
 fn queue_prepass_meshes(
-    prepass_draw_functions: Res<DrawFunctions<Prepass>>,
+    draw_functions: Res<DrawFunctions<Prepass>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     prepass_pipeline: Res<PrepassPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline>>,
@@ -420,10 +300,7 @@ fn queue_prepass_meshes(
     meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform, &DynamicInstanceIndex)>,
     mut views: Query<(&ExtractedView, &VisibleEntities, &mut RenderPhase<Prepass>)>,
 ) {
-    let draw_function = prepass_draw_functions
-        .read()
-        .get_id::<DrawPrepass>()
-        .unwrap();
+    let draw_function = draw_functions.read().get_id::<DrawPrepass>().unwrap();
     for (view, visible_entities, mut prepass_phase) in &mut views {
         let rangefinder = view.rangefinder3d();
 
@@ -434,7 +311,7 @@ fn queue_prepass_meshes(
             &DynamicInstanceIndex,
         )| {
             if let Some(mesh) = render_meshes.get(mesh_handle) {
-                let key = PrepassPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);
                 let pipeline_id = match pipeline_id {
@@ -525,60 +402,6 @@ fn queue_prepass_bind_group(
     }
 }
 
-#[derive(Component)]
-pub struct DeferredBindGroup(pub BindGroup);
-
-fn queue_deferred_bind_groups(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    pipeline: Res<PrepassPipeline>,
-    query: Query<(Entity, &PrepassTarget)>,
-) {
-    for (entity, target) in &query {
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.deferred_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&target.depth.texture_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&target.depth.sampler),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(&target.normal_velocity.texture_view),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::Sampler(&target.normal_velocity.sampler),
-                },
-                BindGroupEntry {
-                    binding: 4,
-                    resource: BindingResource::TextureView(&target.instance_material.texture_view),
-                },
-                BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::Sampler(&target.instance_material.sampler),
-                },
-                BindGroupEntry {
-                    binding: 6,
-                    resource: BindingResource::TextureView(&target.uv.texture_view),
-                },
-                BindGroupEntry {
-                    binding: 7,
-                    resource: BindingResource::Sampler(&target.uv.sampler),
-                },
-            ],
-        });
-        commands
-            .entity(entity)
-            .insert(DeferredBindGroup(bind_group));
-    }
-}
-
 pub struct Prepass {
     pub distance: f32,
     pub entity: Entity,
@@ -618,7 +441,6 @@ type DrawPrepass = (
     SetItemPipeline,
     SetPrepassViewBindGroup<0>,
     SetPrepassMeshBindGroup<1>,
-    SetMeshMaterialBindGroup<2>,
     DrawMesh,
 );
 

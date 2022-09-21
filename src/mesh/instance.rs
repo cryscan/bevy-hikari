@@ -249,7 +249,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct InstanceIndex {
     pub instance: u32,
-    pub node: u32,
+    pub material: u32,
 }
 
 #[derive(Component, Default, Clone, Copy)]
@@ -279,7 +279,7 @@ fn prepare_instances(
             .map(|(id, (entity, instance))| {
                 let component = InstanceIndex {
                     instance: id as u32,
-                    node: instance.node_index,
+                    material: instance.material.value,
                 };
                 let index = render_assets.instance_indices.push(component);
                 (*entity, (DynamicInstanceIndex(index),))

@@ -10,12 +10,14 @@ use bevy::{
 };
 use light::{LightPassNode, LightPlugin};
 use mesh::MeshMaterialPlugin;
+use overlay::{OverlayPassNode, OverlayPlugin};
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
 
 pub mod light;
 pub mod mesh;
+pub mod overlay;
 pub mod prelude;
 pub mod prepass;
 pub mod transform;
@@ -30,6 +32,7 @@ pub mod graph {
         pub const PREPASS: &str = "prepass";
         pub const LIGHT_DIRECT_PASS: &str = "light_direct_pass";
         pub const LIGHT_INDIRECT_PASS: &str = "light_indirect_pass";
+        pub const OVERLAY_PASS: &str = "overlay_pass";
     }
 }
 
@@ -43,6 +46,10 @@ pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
+pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10969344919103020615);
+pub const QUAD_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
@@ -71,27 +78,32 @@ impl Plugin for HikariPlugin {
             "shaders/light.wgsl",
             Shader::from_wgsl
         );
+        load_internal_asset!(
+            app,
+            OVERLAY_SHADER_HANDLE,
+            "shaders/overlay.wgsl",
+            Shader::from_wgsl
+        );
 
         app.add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshMaterialPlugin)
             .add_plugin(PrepassPlugin)
-            .add_plugin(LightPlugin);
+            .add_plugin(LightPlugin)
+            .add_plugin(OverlayPlugin);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
             let light_pass_node = LightPassNode::new(&mut render_app.world);
-            let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
+            let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
+            // let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
 
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
 
             let mut hikari_graph = RenderGraph::default();
             hikari_graph.add_node(graph::node::PREPASS, prepass_node);
             hikari_graph.add_node(graph::node::LIGHT_DIRECT_PASS, light_pass_node);
-            hikari_graph.add_node(
-                bevy::core_pipeline::core_3d::graph::node::MAIN_PASS,
-                pass_node_3d,
-            );
+            hikari_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
             let input_node_id = hikari_graph.set_input(vec![SlotInfo::new(
                 graph::input::VIEW_ENTITY,
                 SlotType::Entity,
@@ -119,15 +131,12 @@ impl Plugin for HikariPlugin {
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
-                    bevy::core_pipeline::core_3d::graph::node::MAIN_PASS,
+                    graph::node::OVERLAY_PASS,
                     MainPass3dNode::IN_VIEW,
                 )
                 .unwrap();
             hikari_graph
-                .add_node_edge(
-                    graph::node::LIGHT_DIRECT_PASS,
-                    bevy::core_pipeline::core_3d::graph::node::MAIN_PASS,
-                )
+                .add_node_edge(graph::node::LIGHT_DIRECT_PASS, graph::node::OVERLAY_PASS)
                 .unwrap();
             graph.add_sub_graph(graph::NAME, hikari_graph);
         }
