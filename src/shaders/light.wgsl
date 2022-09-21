@@ -26,9 +26,24 @@ var samplers: binding_array<sampler>;
 @group(4) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
 
-let FLOAT_EPSILON: f32 = 1.1920929E-7;
-let MAX_FLOAT: f32 = 3.402823466E+38;
-let MAX_U32: u32 = 4294967295u;
+let F32_EPSILON: f32 = 1.1920929E-7;
+let F32_MAX: f32 = 3.402823466E+38;
+let U32_MAX: u32 = 4294967295u;
+
+fn hash(value: u32) -> u32 {
+    var state = value;
+    state = state ^ 2747636419u;
+    state = state * 2654435769u;
+    state = state ^ state >> 16u;
+    state = state * 2654435769u;
+    state = state ^ state >> 16u;
+    state = state * 2654435769u;
+    return state;
+}
+
+fn random_float(value: u32) -> f32 {
+    return f32(hash(value)) / 4294967295.0;
+}
 
 struct Ray {
     origin: vec3<f32>,
@@ -64,7 +79,7 @@ fn instance_direction_world_to_local(instance: Instance, world_direction: vec3<f
     return direction.xyz;
 }
 
-fn intersects_aabb(ray: Ray, aabb: Aabb) -> bool {
+fn intersects_aabb(ray: Ray, aabb: Aabb) -> f32 {
     let t1 = (aabb.min - ray.origin) * ray.inv_direction;
     let t2 = (aabb.max - ray.origin) * ray.inv_direction;
 
@@ -77,12 +92,16 @@ fn intersects_aabb(ray: Ray, aabb: Aabb) -> bool {
     t_min = max(t_min, min(t1.z, t2.z));
     t_max = min(t_max, max(t1.z, t2.z));
 
-    return t_max >= t_min && t_max >= 0.0;
+    var t: f32 = F32_MAX;
+    if (t_max >= t_min && t_max >= 0.0) {
+        t = t_min;
+    }
+    return t;
 }
 
 fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     var result: Intersection;
-    result.distance = MAX_FLOAT;
+    result.distance = F32_MAX;
 
     // let a = tri[0];
     // let b = tri[1];
@@ -93,7 +112,7 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
 
     let u_vec = cross(ray.direction, ac);
     let det = dot(ab, u_vec);
-    if (abs(det) < FLOAT_EPSILON) {
+    if (abs(det) < F32_EPSILON) {
         return result;
     }
 
@@ -113,7 +132,7 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     }
 
     let distance = dot(ac, v_vec) * inv_det;
-    if (distance > FLOAT_EPSILON) {
+    if (distance > F32_EPSILON) {
         result.distance = distance;
     }
 
@@ -126,7 +145,7 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
     for (; index < slice.node_len;) {
         let node_index = slice.node_offset + index;
         let node = asset_node_buffer.data[node_index];
-        if (node.entry_index == MAX_U32) {
+        if (node.entry_index == U32_MAX) {
             let primitive_index = slice.primitive + node.primitive_index;
             let primitive = &primitive_buffer.data[primitive_index];
             let intersection = intersects_triangle(ray, (*primitive).vertices);
@@ -143,7 +162,7 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
             aabb.min = node.min;
             aabb.max = node.max;
 
-            if (intersects_aabb(ray, aabb)) {
+            if (intersects_aabb(ray, aabb) < (*hit).intersection.distance) {
                 index = node.entry_index;
             } else {
                 index = node.exit_index;
@@ -156,22 +175,22 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
 
 fn traverse_top(ray: Ray) -> Hit {
     var hit: Hit;
-    hit.intersection.distance = MAX_FLOAT;
-    hit.instance_index = MAX_U32;
-    hit.primitive_index = MAX_U32;
+    hit.intersection.distance = F32_MAX;
+    hit.instance_index = U32_MAX;
+    hit.primitive_index = U32_MAX;
 
     var index = 0u;
     for (; index < instance_node_buffer.count;) {
         let node = instance_node_buffer.data[index];
         var aabb: Aabb;
 
-        if (node.entry_index == MAX_U32) {
+        if (node.entry_index == U32_MAX) {
             let instance_index = node.primitive_index;
             let instance = instance_buffer.data[instance_index];
             aabb.min = instance.min;
             aabb.max = instance.max;
 
-            if (intersects_aabb(ray, aabb)) {
+            if (intersects_aabb(ray, aabb) < hit.intersection.distance) {
                 var r: Ray;
                 r.origin = instance_position_world_to_local(instance, ray.origin);
                 r.direction = instance_direction_world_to_local(instance, ray.direction);
@@ -187,7 +206,7 @@ fn traverse_top(ray: Ray) -> Hit {
             aabb.min = node.min;
             aabb.max = node.max;
 
-            if (intersects_aabb(ray, aabb)) {
+            if (intersects_aabb(ray, aabb) < hit.intersection.distance) {
                 index = node.entry_index;
             } else {
                 index = node.exit_index;
@@ -207,7 +226,7 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let normal_velocity = textureSampleLevel(normal_velocity_texture, normal_velocity_sampler, uv, 0.0);
 
     let location = vec2<i32>(invocation_id.xy);
-    if (depth < FLOAT_EPSILON) {
+    if (depth < F32_EPSILON) {
         textureStore(render_texture, location, vec4<f32>(0.0));
         return;
     }
@@ -221,7 +240,7 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     ray.inv_direction = 1.0 / ray.direction;
 
     let hit = traverse_top(ray);
-    if (hit.instance_index == MAX_U32) {
+    if (hit.instance_index == U32_MAX) {
         return;
     }
 
@@ -229,7 +248,7 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let material = material_buffer.data[instance.material];
 
     var color = material.base_color;
-    if (material.base_color_texture != MAX_U32) {
+    if (material.base_color_texture != U32_MAX) {
         let indices = primitive_buffer.data[hit.primitive_index].indices;
         let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
         let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
@@ -241,3 +260,9 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     textureStore(render_texture, location, color);
 }
+
+@compute @workgroup_size(8, 8, 1)
+fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {}
+
+@compute @workgroup_size(8, 8, 1)
+fn indirect_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {}

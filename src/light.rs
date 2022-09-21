@@ -188,10 +188,16 @@ impl FromWorld for LightPipeline {
     }
 }
 
-impl SpecializedComputePipeline for LightPipeline {
-    type Key = usize;
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct LightPipelineKey {
+    pub entry_point: String,
+    pub texture_count: usize,
+}
 
-    fn specialize(&self, _key: Self::Key) -> ComputePipelineDescriptor {
+impl SpecializedComputePipeline for LightPipeline {
+    type Key = LightPipelineKey;
+
+    fn specialize(&self, key: Self::Key) -> ComputePipelineDescriptor {
         ComputePipelineDescriptor {
             label: None,
             layout: Some(vec![
@@ -203,7 +209,7 @@ impl SpecializedComputePipeline for LightPipeline {
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs: vec![],
-            entry_point: "direct_cast".into(),
+            entry_point: key.entry_point.into(),
         }
     }
 }
@@ -249,8 +255,11 @@ fn prepare_light_pass_targets(
     }
 }
 
+#[allow(dead_code)]
 pub struct CachedLightPipelines {
     direct_cast: CachedComputePipelineId,
+    direct_lit: CachedComputePipelineId,
+    indirect_lit: CachedComputePipelineId,
 }
 
 fn queue_light_pipelines(
@@ -261,8 +270,21 @@ fn queue_light_pipelines(
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
     pipeline.texture_layout = Some(layout.layout.clone());
-    let direct_cast = pipelines.specialize(&mut pipeline_cache, &pipeline, layout.count);
-    commands.insert_resource(CachedLightPipelines { direct_cast })
+
+    let [direct_cast, direct_lit, indirect_lit] = ["direct_cast", "direct_lit", "indirect_lit"]
+        .map(|entry_point| {
+            let key = LightPipelineKey {
+                entry_point: entry_point.into(),
+                texture_count: layout.count,
+            };
+            pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+        });
+
+    commands.insert_resource(CachedLightPipelines {
+        direct_cast,
+        direct_lit,
+        indirect_lit,
+    })
 }
 
 #[derive(Component)]
