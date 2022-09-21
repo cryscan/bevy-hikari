@@ -39,7 +39,7 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(0.0, -0.5, 0.0),
             rotation: Default::default(),
-            scale: Vec3::new(5.0, 1.0, 5.0),
+            scale: Vec3::new(10.0, 1.0, 10.0),
         },
         ..Default::default()
     });

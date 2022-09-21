@@ -6,17 +6,17 @@ var depth_texture: texture_depth_2d;
 @group(1) @binding(1)
 var depth_sampler: sampler;
 @group(1) @binding(2)
-var normal_velocity_texture: texture_2d<f32>;
+var normal_texture: texture_2d<f32>;
 @group(1) @binding(3)
-var normal_velocity_sampler: sampler;
+var normal_sampler: sampler;
 @group(1) @binding(4)
 var instance_material_texture: texture_2d<u32>;
 @group(1) @binding(5)
 var instance_material_sampler: sampler;
 @group(1) @binding(6)
-var uv_texture: texture_2d<f32>;
+var velocity_uv_texture: texture_2d<f32>;
 @group(1) @binding(7)
-var uv_sampler: sampler;
+var velocity_uv_sampler: sampler;
 
 @group(3) @binding(0)
 var textures: binding_array<texture_2d<f32>>;
@@ -29,6 +29,9 @@ var render_texture: texture_storage_2d<rgba16float, write>;
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
+
+let PI: f32 = 3.1415926;
+let SOLAR_ANGLE: f32 = 0.1;
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -45,6 +48,20 @@ fn random_float(value: u32) -> f32 {
     return f32(hash(value)) / 4294967295.0;
 }
 
+fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
+    var b: vec3<f32>;
+    var t: vec3<f32>;
+
+    if (abs(n.y) > 0.999) {
+        b = vec3<f32>(1., 0., 0.);
+        t = vec3<f32>(0., 0., 1.);
+    } else {
+        b = normalize(cross(n, vec3<f32>(0., 1., 0.)));
+        t = normalize(cross(b, n));
+    }
+    return mat3x3<f32>(t, b, n);
+}
+
 struct Ray {
     origin: vec3<f32>,
     direction: vec3<f32>,
@@ -57,8 +74,8 @@ struct Aabb {
 };
 
 struct Intersection {
-    distance: f32,
     uv: vec2<f32>,
+    distance: f32,
 };
 
 struct Hit {
@@ -223,7 +240,7 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
 
     let depth: f32 = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0);
-    let normal_velocity = textureSampleLevel(normal_velocity_texture, normal_velocity_sampler, uv, 0.0);
+    let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
 
     let location = vec2<i32>(invocation_id.xy);
     if (depth < F32_EPSILON) {
@@ -262,7 +279,64 @@ fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {}
+fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let rand = vec2<f32>(
+        random_float(invocation_id.x << 16u ^ invocation_id.y),
+        random_float(invocation_id.y << 16u ^ invocation_id.x)
+    );
+    let r = sqrt(rand.x);
+    let theta = 2.0 * PI * rand.y;
+
+    let size = textureDimensions(render_texture);
+    let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
+    let location = vec2<i32>(invocation_id.xy);
+
+    let depth: f32 = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0);
+    if (depth < F32_EPSILON) {
+        textureStore(render_texture, location, vec4<f32>(0.0));
+        return;
+    }
+
+    let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
+    let instance_material = textureLoad(instance_material_texture, location, 0);
+    let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
+
+    let ndc = vec4<f32>(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y, depth, 1.0);
+    let position = view.inverse_view_proj * ndc;
+
+    var intensity = vec3<f32>(0.0);
+
+    let material = material_buffer.data[instance_material.y];
+    var color = material.base_color;
+    if (material.base_color_texture != U32_MAX) {
+        color = color * textureSampleLevel(textures[material.base_color_texture], samplers[material.base_color_texture], velocity_uv.zw, 0.0);
+    }
+
+    for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
+        let light = lights.directional_lights[i];
+
+        var disturb = vec3<f32>(
+            r * SOLAR_ANGLE / PI * cos(theta),
+            r * SOLAR_ANGLE / PI * sin(theta),
+            0.0
+        );
+        disturb.z = sqrt(1.0 - dot(disturb.xy, disturb.xy));
+
+        var ray: Ray;
+        ray.origin = position.xyz / position.w + light.direction_to_light * light.shadow_depth_bias + normal * light.shadow_normal_bias;
+        ray.direction = light.direction_to_light;
+        ray.direction = normalize(ray.direction + normal_basis(ray.direction) * disturb);
+        ray.inv_direction = 1.0 / ray.direction;
+
+        let hit = traverse_top(ray);
+        if (hit.intersection.distance > 1000.0) {
+            intensity += light.color.xyz * max(dot(normal, ray.direction), 0.0);
+        }
+    }
+
+    color = vec4<f32>(intensity, 1.0) * color;
+    textureStore(render_texture, location, color);
+}
 
 @compute @workgroup_size(8, 8, 1)
 fn indirect_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {}

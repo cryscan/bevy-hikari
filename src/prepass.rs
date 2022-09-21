@@ -30,9 +30,9 @@ use bevy::{
     utils::FloatOrd,
 };
 
-pub const NORMAL_VELOCITY_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
-pub const UV_FORMAT: TextureFormat = TextureFormat::Rg16Unorm;
+pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
 
 pub struct PrepassPlugin;
 impl Plugin for PrepassPlugin {
@@ -161,7 +161,7 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 entry_point: "fragment".into(),
                 targets: vec![
                     Some(ColorTargetState {
-                        format: NORMAL_VELOCITY_FORMAT,
+                        format: NORMAL_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
@@ -171,7 +171,7 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                         write_mask: ColorWrites::ALL,
                     }),
                     Some(ColorTargetState {
-                        format: UV_FORMAT,
+                        format: VELOCITY_UV_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
@@ -222,9 +222,9 @@ fn extract_prepass_camera_phases(
 
 #[derive(Component)]
 pub struct PrepassTarget {
-    pub normal_velocity: GpuImage,
+    pub normal: GpuImage,
     pub instance_material: GpuImage,
-    pub uv: GpuImage,
+    pub velocity_uv: GpuImage,
     pub depth: GpuImage,
 }
 
@@ -276,15 +276,15 @@ fn prepare_prepass_targets(
                 }
             };
 
-            let normal_velocity = create_texture(NORMAL_VELOCITY_FORMAT);
+            let normal = create_texture(NORMAL_FORMAT);
             let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
-            let uv = create_texture(UV_FORMAT);
+            let velocity_uv = create_texture(VELOCITY_UV_FORMAT);
             let depth = create_texture(SHADOW_FORMAT);
 
             commands.entity(entity).insert(PrepassTarget {
-                normal_velocity,
+                normal,
                 instance_material,
-                uv,
+                velocity_uv,
                 depth,
             });
         }
@@ -556,7 +556,7 @@ impl Node for PrepassNode {
                 label: Some("main_prepass"),
                 color_attachments: &[
                     Some(RenderPassColorAttachment {
-                        view: &target.normal_velocity.texture_view,
+                        view: &target.normal.texture_view,
                         resolve_target: None,
                         ops,
                     }),
@@ -566,7 +566,7 @@ impl Node for PrepassNode {
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.uv.texture_view,
+                        view: &target.velocity_uv.texture_view,
                         resolve_target: None,
                         ops,
                     }),

@@ -478,11 +478,11 @@ fn queue_deferred_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(&target.normal_velocity.texture_view),
+                    resource: BindingResource::TextureView(&target.normal.texture_view),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&target.normal_velocity.sampler),
+                    resource: BindingResource::Sampler(&target.normal.sampler),
                 },
                 BindGroupEntry {
                     binding: 4,
@@ -494,11 +494,11 @@ fn queue_deferred_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 6,
-                    resource: BindingResource::TextureView(&target.uv.texture_view),
+                    resource: BindingResource::TextureView(&target.velocity_uv.texture_view),
                 },
                 BindGroupEntry {
                     binding: 7,
-                    resource: BindingResource::Sampler(&target.uv.sampler),
+                    resource: BindingResource::Sampler(&target.velocity_uv.sampler),
                 },
             ],
         });
@@ -599,7 +599,7 @@ impl Node for LightPassNode {
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &render_bind_group.0, &[]);
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_cast) {
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
             pass.set_pipeline(pipeline);
 
             let size = camera.physical_target_size.unwrap();
