@@ -20,6 +20,8 @@ use bevy::{
     },
 };
 
+pub const LIGHT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
     fn build(&self, app: &mut App) {
@@ -235,8 +237,20 @@ impl FromWorld for LightPipeline {
         let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
+                // Frame uniform
                 BindGroupLayoutEntry {
                     binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuFrame::min_size()),
+                    },
+                    count: None,
+                },
+                // Render
+                BindGroupLayoutEntry {
+                    binding: 1,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
@@ -245,14 +259,32 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
+                // Shadow
                 BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 2,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuFrame::min_size()),
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadWrite,
+                        format: TextureFormat::Rgba16Float,
+                        view_dimension: TextureViewDimension::D2,
                     },
+                    count: None,
+                },
+                // Shadow cache
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -296,7 +328,10 @@ impl SpecializedComputePipeline for LightPipeline {
 
 #[derive(Component)]
 pub struct LightPassTarget {
-    pub direct_cast: GpuImage,
+    /// Double-buffered radiance.
+    pub direct_shadow: [GpuImage; 2],
+    /// Radiance modulated surface properties.
+    pub render: GpuImage,
 }
 
 fn prepare_light_pass_targets(
@@ -347,11 +382,13 @@ fn prepare_light_pass_targets(
                 }
             };
 
-            let direct_cast = create_texture(TextureFormat::Rgba16Float);
+            let direct_shadow = [(); 2].map(|_| create_texture(LIGHT_TEXTURE_FORMAT));
+            let render = create_texture(LIGHT_TEXTURE_FORMAT);
 
-            commands
-                .entity(entity)
-                .insert(LightPassTarget { direct_cast });
+            commands.entity(entity).insert(LightPassTarget {
+                direct_shadow,
+                render,
+            });
         }
     }
 }
@@ -543,21 +580,38 @@ fn queue_render_bind_groups(
     frame_uniform: Res<FrameUniform>,
     query: Query<(Entity, &LightPassTarget)>,
 ) {
-    for (entity, light_pass_target) in &query {
+    for (entity, target) in &query {
         if let Some(frame_binding) = frame_uniform.buffer.binding() {
+            let id = (frame_uniform.buffer.get().number % 2) as usize;
+            let (shadow_view, shadow_cache_view, shadow_cache_sampler) = (
+                &target.direct_shadow[id].texture_view,
+                &target.direct_shadow[1 - id].texture_view,
+                &target.direct_shadow[1 - id].sampler,
+            );
+
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &pipeline.render_layout,
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureView(
-                            &light_pass_target.direct_cast.texture_view,
-                        ),
+                        resource: frame_binding,
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: frame_binding,
+                        resource: BindingResource::TextureView(&target.render.texture_view),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: BindingResource::TextureView(&shadow_view),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: BindingResource::TextureView(&shadow_cache_view),
+                    },
+                    BindGroupEntry {
+                        binding: 4,
+                        resource: BindingResource::Sampler(&shadow_cache_sampler),
                     },
                 ],
             });

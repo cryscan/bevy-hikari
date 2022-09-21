@@ -1,43 +1,35 @@
 #import bevy_pbr::mesh_view_bindings
-#import bevy_hikari::mesh_material_bindings
-
 #import bevy_pbr::utils
 #import bevy_pbr::lighting
 
-struct Frame {
-    number: u32,
-};
-
-@group(1) @binding(0)
-var position_texture: texture_2d<f32>;
-@group(1) @binding(1)
-var position_sampler: sampler;
-@group(1) @binding(2)
-var normal_texture: texture_2d<f32>;
-@group(1) @binding(3)
-var normal_sampler: sampler;
-@group(1) @binding(4)
-var velocity_uv_texture: texture_2d<f32>;
-@group(1) @binding(5)
-var velocity_uv_sampler: sampler;
-@group(1) @binding(6)
-var instance_material_texture: texture_2d<u32>;
+#import bevy_hikari::mesh_material_bindings
+#import bevy_hikari::deferred_bindings
 
 @group(3) @binding(0)
 var textures: binding_array<texture_2d<f32>>;
 @group(3) @binding(1)
 var samplers: binding_array<sampler>;
 
+struct Frame {
+    number: u32,
+};
+
 @group(4) @binding(0)
-var render_texture: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(1)
 var<uniform> frame: Frame;
+@group(4) @binding(1)
+var render_texture: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(2)
+var shadow_texture: texture_storage_2d<rgba16float, read_write>;
+@group(4) @binding(3)
+var shadow_cache_texture: texture_2d<f32>;
+@group(4) @binding(4)
+var shadow_cache_sampler: sampler;
 
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 
-let SOLAR_ANGLE: f32 = 0.5;
+let SOLAR_ANGLE: f32 = 0.1;
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -260,7 +252,7 @@ fn calculate_view(
 @compute @workgroup_size(8, 8, 1)
 fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
 
     let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
     let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
@@ -315,7 +307,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     disturb.z = sqrt(1.0 - dot(disturb.xy, disturb.xy));
 
     let size = textureDimensions(render_texture);
-    let uv = vec2<f32>(invocation_id.xy) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
     let location = vec2<i32>(invocation_id.xy);
 
     let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
@@ -365,26 +357,40 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let R = reflect(-V, N);
 
-    var intensity = vec3<f32>(0.0);
-    for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
-        let light = lights.directional_lights[i];
+    var shadow = 0.0;
+    let light_id = hash(frame.number) % lights.n_directional_lights;
+    let light = lights.directional_lights[light_id];
+    let incident_light = light.direction_to_light.xyz;
 
-        var ray: Ray;
-        ray.origin = position.xyz + light.direction_to_light * light.shadow_depth_bias + normal * light.shadow_normal_bias;
-        ray.direction = light.direction_to_light;
-        ray.direction = normalize(ray.direction + normal_basis(ray.direction) * disturb);
-        ray.inv_direction = 1.0 / ray.direction;
+    var ray: Ray;
+    ray.origin = position.xyz + incident_light * light.shadow_depth_bias + N * light.shadow_normal_bias;
+    ray.direction = incident_light;
+    ray.direction = normalize(ray.direction + normal_basis(ray.direction) * disturb);
+    ray.inv_direction = 1.0 / ray.direction;
 
-        let hit = traverse_top(ray);
-        if (hit.instance_index == U32_MAX) {
-            intensity += directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
-        }
+    let hit = traverse_top(ray);
+    if (hit.instance_index == U32_MAX) {
+        shadow = 1.0;
     }
+
+    // Temporal accumulation
+    let cached_uv = uv - velocity_uv.xy;
+    let cached_shadow = textureSampleLevel(shadow_cache_texture, shadow_cache_sampler, cached_uv, 0.0);
+
+    var temporal_factor = 0.95;
+    if (instance_material.x != u32(cached_shadow.r) || any(abs(cached_uv - 0.5) > vec2<f32>(0.5))) {
+        temporal_factor = 0.05;
+    }
+
+    shadow = mix(shadow, cached_shadow.a, temporal_factor);
+    let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color) * shadow;
+
+    textureStore(shadow_texture, location, vec4<f32>(f32(instance_material.x) + 0.5, 0.0, 0.0, shadow));
 
     let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
     let specular_ambient = EnvBRDFApprox(F0, material.perceptual_roughness, NdotV);
 
-    var color = intensity;
+    var color = light_contrib;
     color += (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb * occlusion;
     color += emissive.rgb * output_color.a;
     output_color = vec4<f32>(color, output_color.a);

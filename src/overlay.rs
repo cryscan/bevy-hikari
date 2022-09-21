@@ -161,11 +161,11 @@ fn queue_overlay_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&target.direct_cast.texture_view),
+                    resource: BindingResource::TextureView(&target.render.texture_view),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&target.direct_cast.sampler),
+                    resource: BindingResource::Sampler(&target.render.sampler),
                 },
             ],
         });
@@ -262,8 +262,6 @@ impl<const I: usize> EntityRenderCommand for SetOverlayBindGroup<I> {
         RenderCommandResult::Success
     }
 }
-
-pub struct DrawQuad;
 
 pub struct OverlayPassNode {
     query: QueryState<

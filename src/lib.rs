@@ -42,6 +42,8 @@ pub const MESH_MATERIAL_TYPES_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
 pub const MESH_MATERIAL_BINDINGS_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5025976374517268);
+pub const DEFERRED_BINDINGS_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14467895678105108252);
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
@@ -64,6 +66,12 @@ impl Plugin for HikariPlugin {
             app,
             MESH_MATERIAL_BINDINGS_HANDLE,
             "shaders/mesh_material_bindings.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            DEFERRED_BINDINGS_HANDLE,
+            "shaders/deferred_bindings.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
