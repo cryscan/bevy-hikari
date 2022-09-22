@@ -30,7 +30,9 @@ let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 
-let SOLAR_ANGLE: f32 = 0.5;
+let SOLAR_ANGLE: f32 = 0.1;
+let BILATERAL_POSITION_SIGMA: f32 = 0.01;
+let TEMPORAL_FACTOR_MIN_MAX: vec2<f32> = vec2<f32>(0.05, 0.95);
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -446,9 +448,9 @@ fn direct_lit(
     //     temporal_factor = 0.05;
     // }
 
-    var w_sum = 1.0E-4;
+    var w_sum = 0.0001;
     var sum = 0.0;
-    var temporal_factor = 0.95;
+    var temporal_factor = TEMPORAL_FACTOR_MIN_MAX.y;
     let cache_miss = any(abs(cache_uv - 0.5) > vec2<f32>(0.5));
     if (!cache_miss) {
         for (var i = 0u; i < 25u; i += 1u) {
@@ -457,7 +459,7 @@ fn direct_lit(
 
             let dp = cache.xyz - position.xyz;
             var d2 = dot(dp, dp);
-            let wp = min(exp(-d2 / 0.01), 1.0);
+            let wp = min(exp(-d2 / BILATERAL_POSITION_SIGMA), 1.0);
 
             let w = wp * frame.kernel[i].z;
             w_sum += w;
@@ -466,7 +468,7 @@ fn direct_lit(
         sum /= w_sum;
     }
     if (cache_miss || w_sum < 2.0E-4) {
-        temporal_factor = 0.05;
+        temporal_factor = TEMPORAL_FACTOR_MIN_MAX.x;
         sum = 1.0;
     }
 
