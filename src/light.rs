@@ -26,7 +26,7 @@ pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const RADIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const POSITION_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
-pub const RANDOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
+pub const RANDOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -277,7 +277,7 @@ impl FromWorld for LightPipeline {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
+                        access: StorageTextureAccess::WriteOnly,
                         format: RESERVOIR_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -288,7 +288,7 @@ impl FromWorld for LightPipeline {
                     binding: 2,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
+                        access: StorageTextureAccess::WriteOnly,
                         format: RADIANCE_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -299,7 +299,7 @@ impl FromWorld for LightPipeline {
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
+                        access: StorageTextureAccess::WriteOnly,
                         format: RANDOM_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -310,7 +310,7 @@ impl FromWorld for LightPipeline {
                     binding: 4,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
+                        access: StorageTextureAccess::WriteOnly,
                         format: POSITION_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -321,7 +321,7 @@ impl FromWorld for LightPipeline {
                     binding: 5,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
+                        access: StorageTextureAccess::WriteOnly,
                         format: NORMAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -332,7 +332,7 @@ impl FromWorld for LightPipeline {
                     binding: 6,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
+                        access: StorageTextureAccess::WriteOnly,
                         format: POSITION_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -343,7 +343,7 @@ impl FromWorld for LightPipeline {
                     binding: 7,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
+                        access: StorageTextureAccess::WriteOnly,
                         format: NORMAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -473,10 +473,10 @@ fn prepare_light_pass_targets(
 
             let reservoir = [(); 2].map(|_| Reservoir {
                 reservoir: create_texture(RESERVOIR_TEXTURE_FORMAT, FilterMode::Nearest),
-                radiance: create_texture(RADIANCE_TEXTURE_FORMAT, FilterMode::Linear),
+                radiance: create_texture(RADIANCE_TEXTURE_FORMAT, FilterMode::Nearest),
                 random: create_texture(RANDOM_TEXTURE_FORMAT, FilterMode::Nearest),
-                visible_position: create_texture(POSITION_TEXTURE_FORMAT, FilterMode::Linear),
-                visible_normal: create_texture(NORMAL_TEXTURE_FORMAT, FilterMode::Linear),
+                visible_position: create_texture(POSITION_TEXTURE_FORMAT, FilterMode::Nearest),
+                visible_normal: create_texture(NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
                 sample_position: create_texture(POSITION_TEXTURE_FORMAT, FilterMode::Nearest),
                 sample_normal: create_texture(NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
             });

@@ -21,19 +21,19 @@ var<uniform> frame: Frame;
 @group(5) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
 @group(5) @binding(1)
-var reservoir_texture: texture_storage_2d<rgba16float, read_write>;
+var reservoir_texture: texture_storage_2d<rgba16float, write>;
 @group(5) @binding(2)
-var radiance_texture: texture_storage_2d<rgba16float, read_write>;
+var radiance_texture: texture_storage_2d<rgba16float, write>;
 @group(5) @binding(3)
-var random_texture: texture_storage_2d<rgba8unorm, read_write>;
+var random_texture: texture_storage_2d<rgba16float, write>;
 @group(5) @binding(4)
-var visible_position_texture: texture_storage_2d<rgba32float, read_write>;
+var visible_position_texture: texture_storage_2d<rgba32float, write>;
 @group(5) @binding(5)
-var visible_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
+var visible_normal_texture: texture_storage_2d<rgba8snorm, write>;
 @group(5) @binding(6)
-var sample_position_texture: texture_storage_2d<rgba32float, read_write>;
+var sample_position_texture: texture_storage_2d<rgba32float, write>;
 @group(5) @binding(7)
-var sample_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
+var sample_normal_texture: texture_storage_2d<rgba8snorm, write>;
 @group(5) @binding(8)
 var previous_reservoir_textures: binding_array<texture_2d<f32>>;
 @group(5) @binding(9)
@@ -43,8 +43,8 @@ let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 let DISTANCE_MAX: f32 = 65535.0;
-let VALIDATION_INTERVAL: u32 = 8u;
-let SECOND_BOUNCE_CHANCE: f32 = 0.5;
+let VALIDATION_INTERVAL: u32 = 16u;
+let SECOND_BOUNCE_CHANCE: f32 = 1.0;
 
 let SOLAR_ANGLE: f32 = 0.523598776;
 
@@ -547,11 +547,11 @@ fn direct_lit(
 
     // Second bounce
     var p2 = 1.0;
-    if (random_float(workgroup_id.x * hash(workgroup_id.y) ^ hashed_frame_number) < SECOND_BOUNCE_CHANCE && hit.instance_index != U32_MAX) {
+    if (hit.instance_index != U32_MAX) {
         ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
         ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(s.random.zw);
         ray.inv_direction = 1.0 / ray.direction;
-        p2 = SECOND_BOUNCE_CHANCE * dot(ray.direction, info.normal);
+        p2 = dot(ray.direction, info.normal);
 
         hit = traverse_top(ray);
         let info_2 = hit_info(ray, hit);
@@ -569,25 +569,28 @@ fn direct_lit(
     update_reservoir(invocation_id, &r, s, p);
     r.w = r.w_sum / (r.count * luminance(r.s.radiance) + 0.0001);
 
-    // Sample validation: is the path xv-xs still valid?
-    if (frame.number % VALIDATION_INTERVAL == 0u) {
-        ray.origin = r.s.visible_position.xyz + light.shadow_normal_bias * r.s.visible_normal;
-        ray.direction = cosine_sample_hemisphere(r.s.random.xy);
-        ray.direction = normal_basis(normal) * ray.direction;
+    textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
+
+    // Sample validation: is the temporally reused path xv-xs still valid?
+    if (frame.number % VALIDATION_INTERVAL == 0u && distance(s.sample_position, r.s.sample_position) > 0.1) {
+        ray.origin = position.xyz + light.shadow_normal_bias * normal;
+        ray.direction = normal_basis(normal) * cosine_sample_hemisphere(r.s.random.xy);
         ray.inv_direction = 1.0 / ray.direction;
-        let hit_validate = traverse_top(ray);
+        var valid_hit = traverse_top(ray);
+        let valid_info = hit_info(ray, valid_hit);
+        var valid_radiance = shading(position, normal, surface, ray, light, valid_info);
 
-        let sample_miss = (r.s.sample_position.w < 0.5);
-        let validation_miss = (hit_validate.instance_index == U32_MAX);
+        if (valid_hit.instance_index != U32_MAX) {
+            ray.origin = valid_info.position.xyz + valid_info.normal * light.shadow_normal_bias;
+            ray.direction = normal_basis(valid_info.normal) * cosine_sample_hemisphere(r.s.random.zw);
+            ray.inv_direction = 1.0 / ray.direction;
 
-        let old_distance = distance(ray.origin, r.s.sample_position.xyz);
-        let distance_miss = (distance(hit_validate.intersection.distance, old_distance) > 0.1);
+            valid_hit = traverse_top(ray);
+            let valid_info_2 = hit_info(ray, valid_hit);
+            valid_radiance += shading(valid_info.position, valid_info.normal, valid_info.surface, ray, light, valid_info_2);
+        }
 
-        // let old_radiance = r.s.radiance;
-        // shading(position, normal, surface, hit_validate, ray, light, &s);
-        // let radiance_miss = (distance(old_radiance, s.radiance) > 1.0);
-
-        if ((sample_miss && !validation_miss) || (!sample_miss && distance_miss)) {
+        if (abs(luminance(r.s.radiance) - luminance(valid_radiance)) / luminance(r.s.radiance) > 0.1) {
             r.count = 0.0;
             r.w = 0.0;
             r.w_sum = 0.0;
@@ -596,5 +599,4 @@ fn direct_lit(
     }
 
     store_reservoir(coords, r);
-    textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
 }
