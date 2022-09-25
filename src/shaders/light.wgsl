@@ -110,6 +110,11 @@ struct HitInfo {
     uv: vec2<f32>,
 };
 
+struct VirtualLight {
+    direction: vec3<f32>,
+    radiance: vec3<f32>,
+};
+
 struct Sample {
     radiance: vec3<f32>,
     random: vec4<f32>,
@@ -449,45 +454,75 @@ fn merge_reservoir(invocation_id: vec3<u32>, r: ptr<function, Reservoir>, other:
     (*r).count = count + other.count;
 }
 
-fn shading(
-    position: vec4<f32>,
+fn virtual_light(
+    light: VirtualLight,
+    roughness: f32,
+    NdotV: f32,
     normal: vec3<f32>,
-    surface: Surface,
+    view: vec3<f32>,
+    R: vec3<f32>,
+    F0: vec3<f32>,
+    diffuse_color: vec3<f32>
+) -> vec3<f32> {
+    let incident_light = light.direction;
+
+    let half_vector = normalize(incident_light + view);
+    let NoL = saturate(dot(normal, incident_light));
+    let NoH = saturate(dot(normal, half_vector));
+    let LoH = saturate(dot(incident_light, half_vector));
+
+    let diffuse = diffuse_color * Fd_Burley(roughness, NdotV, NoL, LoH);
+    let specular_intensity = 1.0;
+    let specular_light = specular(F0, roughness, half_vector, NdotV, NoL, NoH, LoH, specular_intensity);
+
+    return (specular_light + diffuse) * light.radiance * NoL;
+}
+
+fn shading(
+    V: vec3<f32>,
+    N: vec3<f32>,
     ray: Ray,
     light: DirectionalLight,
+    surface: Surface,
     info: HitInfo,
+    head_radiance: vec3<f32>,
 ) -> vec3<f32> {
-    var radiance = vec3<f32>(0.0);
+    var out_radiance = vec3<f32>(0.0);
+
+    // let N = normal;
+    // let V = calculate_view(position, view.projection[3].w == 1.0);
+
+    let NdotV = max(dot(N, V), 0.0001);
+
+    let reflectance = surface.reflectance;
+    let metallic = surface.metallic;
+    let F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + surface.base_color.rgb * metallic;
+
+    let R = reflect(-V, N);
+
+    let diffuse_color = surface.base_color.rgb * (1.0 - metallic);
+
+    var v: VirtualLight;
+    v.direction = ray.direction;
+    v.radiance = light.color.rgb;
+
     if (info.position.w < 0.5) {
         // Directional and enviromental lighing
-        var ray_light = light;
-        let N = normal;
-        let V = calculate_view(position, view.projection[3].w == 1.0);
-
-        let NdotV = max(dot(N, V), 0.0001);
-
-        let reflectance = surface.reflectance;
-        let metallic = surface.metallic;
-        let F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + surface.base_color.rgb * metallic;
-
-        let R = reflect(-V, N);
-
-        let diffuse_color = surface.base_color.rgb * (1.0 - metallic);
-
         if (dot(light.direction_to_light, ray.direction) > cos(SOLAR_ANGLE)) {
-            ray_light.direction_to_light = ray.direction;
-            radiance = directional_light(ray_light, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
+            out_radiance = virtual_light(v, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
         } else {
             let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
             let specular_ambient = EnvBRDFApprox(F0, surface.roughness, NdotV);
-            radiance = surface.occlusion * (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb;
+            out_radiance = surface.occlusion * (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb;
         }
     } else {
         // Emissive lighting
-        radiance = 255.0 * info.surface.emissive.a * info.surface.emissive.rgb;
+        v.radiance = 255.0 * info.surface.emissive.a * info.surface.emissive.rgb;
+        out_radiance = virtual_light(v, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
+        out_radiance += head_radiance;
     }
 
-    return radiance;
+    return out_radiance;
 }
 
 // var<workgroup> shared_reserviors: array<array<Reservoir, 12>, 12>;
@@ -515,6 +550,7 @@ fn direct_lit(
     }
     let ndc = view.view_proj * position;
     let depth = ndc.z / ndc.w;
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
     let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
     let instance_material = textureLoad(instance_material_texture, coords, 0);
@@ -534,29 +570,52 @@ fn direct_lit(
     let light = lights.directional_lights[0];
 
     var ray: Ray;
+    var bounce_ray: Ray;
+
+    var info: HitInfo;
+    var bounce_info: HitInfo;
+
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
     ray.direction = normal_basis(normal) * cosine_sample_hemisphere(s.random.xy);
     ray.inv_direction = 1.0 / ray.direction;
     let p1 = dot(ray.direction, normal);
 
     var hit = traverse_top(ray);
-    let info = hit_info(ray, hit);
+    info = hit_info(ray, hit);
     s.sample_position = info.position;
     s.sample_normal = info.normal;
-    s.radiance += shading(position, normal, surface, ray, light, info);
 
-    // Second bounce
+    // Second bounce: from sample position
     var p2 = 1.0;
+    var head_radiance = vec3<f32>(0.0);
     if (hit.instance_index != U32_MAX) {
-        ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
-        ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(s.random.zw);
-        ray.inv_direction = 1.0 / ray.direction;
-        p2 = dot(ray.direction, info.normal);
+        bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
+        bounce_ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(s.random.zw);
+        bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
+        p2 = dot(bounce_ray.direction, info.normal);
 
-        hit = traverse_top(ray);
-        let info_2 = hit_info(ray, hit);
-        s.radiance += shading(info.position, info.normal, info.surface, ray, light, info_2);
+        hit = traverse_top(bounce_ray);
+        bounce_info = hit_info(bounce_ray, hit);
+        head_radiance = shading(
+            ray.direction,
+            info.normal,
+            bounce_ray,
+            light,
+            info.surface,
+            bounce_info,
+            vec3<f32>(0.0)
+        );
     }
+
+    s.radiance += shading(
+        view_direction,
+        normal,
+        ray,
+        light,
+        surface,
+        info,
+        head_radiance
+    );
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
@@ -576,19 +635,37 @@ fn direct_lit(
         ray.origin = position.xyz + light.shadow_normal_bias * normal;
         ray.direction = normal_basis(normal) * cosine_sample_hemisphere(r.s.random.xy);
         ray.inv_direction = 1.0 / ray.direction;
-        var valid_hit = traverse_top(ray);
-        let valid_info = hit_info(ray, valid_hit);
-        var valid_radiance = shading(position, normal, surface, ray, light, valid_info);
+        hit = traverse_top(ray);
+        info = hit_info(ray, hit);
+        var valid_radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
 
-        if (valid_hit.instance_index != U32_MAX) {
-            ray.origin = valid_info.position.xyz + valid_info.normal * light.shadow_normal_bias;
-            ray.direction = normal_basis(valid_info.normal) * cosine_sample_hemisphere(r.s.random.zw);
-            ray.inv_direction = 1.0 / ray.direction;
+        if (hit.instance_index != U32_MAX) {
+            bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
+            bounce_ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(r.s.random.zw);
+            bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
 
-            valid_hit = traverse_top(ray);
-            let valid_info_2 = hit_info(ray, valid_hit);
-            valid_radiance += shading(valid_info.position, valid_info.normal, valid_info.surface, ray, light, valid_info_2);
+            hit = traverse_top(bounce_ray);
+            bounce_info = hit_info(bounce_ray, hit);
+            head_radiance = shading(
+                ray.direction,
+                info.normal,
+                bounce_ray,
+                light,
+                info.surface,
+                bounce_info,
+                vec3<f32>(0.0)
+            );
         }
+
+        valid_radiance += shading(
+            view_direction,
+            normal,
+            ray,
+            light,
+            surface,
+            info,
+            head_radiance
+        );
 
         if (abs(luminance(r.s.radiance) - luminance(valid_radiance)) / luminance(r.s.radiance) > 0.1) {
             r.count = 0.0;
