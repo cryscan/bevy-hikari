@@ -277,7 +277,7 @@ impl FromWorld for LightPipeline {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RESERVOIR_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -288,7 +288,7 @@ impl FromWorld for LightPipeline {
                     binding: 2,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RADIANCE_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -299,7 +299,7 @@ impl FromWorld for LightPipeline {
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RANDOM_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -310,7 +310,7 @@ impl FromWorld for LightPipeline {
                     binding: 4,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: POSITION_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -321,7 +321,7 @@ impl FromWorld for LightPipeline {
                     binding: 5,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: NORMAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -332,7 +332,7 @@ impl FromWorld for LightPipeline {
                     binding: 6,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: POSITION_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -343,7 +343,7 @@ impl FromWorld for LightPipeline {
                     binding: 7,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: NORMAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
