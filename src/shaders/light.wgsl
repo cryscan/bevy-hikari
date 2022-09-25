@@ -379,7 +379,7 @@ fn update_reservoir(
     s: Sample,
     r: ptr<function, Reservoir>,
 ) {
-    if (distance(s.visible_position, (*r).s.visible_position) > 0.1 || dot(s.visible_normal, (*r).s.visible_normal) < 0.866) {
+    if (distance(s.visible_position.w, (*r).s.visible_position.w) > 0.001 || dot(s.visible_normal, (*r).s.visible_normal) < 0.866) {
         (*r).count = 0.0;
         (*r).w = 0.0;
         (*r).w_sum = 0.0;
@@ -416,6 +416,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
+    let ndc = view.view_proj * position;
+    let depth = ndc.z / ndc.w;
 
     let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
     let instance_material = textureLoad(instance_material_texture, coords, 0);
@@ -425,7 +427,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     s.random = random_uniform_cone_vector(invocation_id, PI / 2.0);
     s.random = normal_basis(normal) * s.random;
     s.radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
-    s.visible_position = position;
+    s.visible_position = vec4<f32>(position.xyz, depth);
     s.visible_normal = normal;
 
     var light = lights.directional_lights[0];
@@ -480,6 +482,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // ReSTIR
     let previous_uv = uv - velocity_uv.xy;
     var reservoir = load_reservoir(previous_uv);
+    if (any(abs(previous_uv - 0.5) > vec2<f32>(0.5))) {
+        reservoir.s.visible_normal = vec3<f32>(0.0);
+    }
     update_reservoir(invocation_id, s, &reservoir);
     store_reservoir(coords, reservoir);
 

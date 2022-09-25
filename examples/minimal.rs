@@ -19,8 +19,8 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
-            width: 400.,
-            height: 300.,
+            width: 800.,
+            height: 600.,
             ..default()
         })
         .insert_resource(Msaa { samples: 4 })
@@ -87,7 +87,7 @@ fn setup(
         })),
         material: materials.add(StandardMaterial {
             base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-            emissive: Color::WHITE,
+            emissive: Color::rgba(1.0, 1.0, 1.0, 0.1),
             emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
             ..Default::default()
         }),
