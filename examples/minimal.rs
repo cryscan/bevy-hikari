@@ -58,7 +58,7 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(0.0, -0.5, 0.0),
             rotation: Default::default(),
-            scale: Vec3::new(5.0, 1.0, 5.0),
+            scale: Vec3::new(6.0, 1.0, 6.0),
         },
         ..Default::default()
     });
@@ -87,11 +87,11 @@ fn setup(
         })),
         material: materials.add(StandardMaterial {
             base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-            emissive: Color::rgba(1.0, 1.0, 1.0, 0.01),
+            emissive: Color::rgba(1.0, 1.0, 1.0, 0.1),
             emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
             ..Default::default()
         }),
-        transform: Transform::from_xyz(1.5, 0.5, 0.0),
+        transform: Transform::from_xyz(2.0, 0.5, 0.0),
         ..Default::default()
     });
     // Model
@@ -105,7 +105,7 @@ fn setup(
     const HALF_SIZE: f32 = 5.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 10000.0,
+            illuminance: 100000.0,
             shadow_projection: OrthographicProjection {
                 left: -HALF_SIZE,
                 right: HALF_SIZE,
