@@ -17,22 +17,33 @@ struct Frame {
 
 @group(4) @binding(0)
 var<uniform> frame: Frame;
-@group(4) @binding(1)
+
+@group(5) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(2)
-var shadow_texture: texture_storage_2d<rgba16float, read_write>;
-@group(4) @binding(3)
-var shadow_cache_texture: texture_2d<f32>;
-@group(4) @binding(4)
-var shadow_cache_sampler: sampler;
+@group(5) @binding(1)
+var reservoir_texture: texture_storage_2d<rgba16float, write>;
+@group(5) @binding(2)
+var radiance_texture: texture_storage_2d<rgba16float, write>;
+@group(5) @binding(3)
+var random_texture: texture_storage_2d<rgba8snorm, write>;
+@group(5) @binding(4)
+var visible_position_texture: texture_storage_2d<rgba32float, write>;
+@group(5) @binding(5)
+var visible_normal_texture: texture_storage_2d<rgba8snorm, write>;
+@group(5) @binding(6)
+var sample_position_texture: texture_storage_2d<rgba32float, write>;
+@group(5) @binding(7)
+var sample_normal_texture: texture_storage_2d<rgba8snorm, write>;
+@group(5) @binding(8)
+var previous_reservoir_textures: binding_array<texture_2d<f32>>;
+@group(5) @binding(9)
+var previous_reservoir_samplers: binding_array<sampler>;
 
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 
-let SOLAR_ANGLE: f32 = 0.1;
-let BILATERAL_POSITION_SIGMA: f32 = 0.01;
-let TEMPORAL_FACTOR_MIN_MAX: vec2<f32> = vec2<f32>(0.05, 0.95);
+let SOLAR_ANGLE: f32 = 0.523598776;
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -50,16 +61,11 @@ fn random_float(value: u32) -> f32 {
 }
 
 fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
-    var b: vec3<f32>;
-    var t: vec3<f32>;
-
-    if (abs(n.y) > 0.999) {
-        b = vec3<f32>(1., 0., 0.);
-        t = vec3<f32>(0., 0., 1.);
-    } else {
-        b = normalize(cross(n, vec3<f32>(0., 1., 0.)));
-        t = normalize(cross(b, n));
-    }
+    let s = min(sign(n.z) * 2.0 + 1.0, 1.0);
+    let u = -1.0 / (s + n.z);
+    let v = n.x * n.y * u;
+    let t = vec3<f32>(1.0 + s * n.x * n.x * u, s * v, -s * n.x);
+    let b = vec3<f32>(v, s + n.y * n.y * u, -n.y);
     return mat3x3<f32>(t, b, n);
 }
 
@@ -83,6 +89,31 @@ struct Hit {
     intersection: Intersection,
     instance_index: u32,
     primitive_index: u32,
+};
+
+struct Surface {
+    base_color: vec4<f32>,
+    emissive: vec4<f32>,
+    reflectance: f32,
+    metallic: f32,
+    roughness: f32,
+    occlusion: f32,
+};
+
+struct Sample {
+    radiance: vec3<f32>,
+    random: vec3<f32>,
+    visible_position: vec4<f32>,
+    visible_normal: vec3<f32>,
+    sample_position: vec4<f32>,
+    sample_normal: vec3<f32>,
+};
+
+struct Reservoir {
+    s: Sample,
+    w: f32,
+    w_sum: f32,
+    count: f32,
 };
 
 fn instance_position_world_to_local(instance: Instance, world_position: vec3<f32>) -> vec3<f32> {
@@ -252,105 +283,136 @@ fn calculate_view(
     return V;
 }
 
-@compute @workgroup_size(8, 8, 1)
-fn direct_cast(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
-
-    let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
-    let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
-
-    let coords = vec2<i32>(invocation_id.xy);
-    if (position.w < 1.0) {
-        textureStore(render_texture, coords, vec4<f32>(0.0));
-        return;
-    }
-
-    var ray: Ray;
-    ray.origin = view.world_position;
-    ray.direction = normalize(position.xyz - ray.origin);
-    ray.inv_direction = 1.0 / ray.direction;
-
-    let hit = traverse_top(ray);
-    if (hit.instance_index == U32_MAX) {
-        return;
-    }
-
-    let instance = instance_buffer.data[hit.instance_index];
-    let material = material_buffer.data[instance.material];
-
-    var output_color = material.base_color;
-    if (material.base_color_texture != U32_MAX) {
-        let indices = primitive_buffer.data[hit.primitive_index].indices;
-        let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
-        let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
-        let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
-        let uv = v0.uv + hit.intersection.uv.x * (v1.uv - v0.uv) + hit.intersection.uv.y * (v2.uv - v0.uv);
-
-        output_color = output_color * textureSampleLevel(textures[material.base_color_texture], samplers[material.base_color_texture], uv, 0.0);
-    }
-
-    textureStore(render_texture, coords, output_color);
-}
-
-// struct ShadowCache {
-//     instance: u32,
-//     normal: vec3<f32>,
-//     position: vec3<f32>,
-//     shadow: f32
-// }
-
-// var<workgroup> shared_shadow: array<array<vec4<f32>, 12>, 12>;
-
-// fn decompose_shadow_cache(packed: vec4<u32>) -> ShadowCache {
-//     var cache: ShadowCache;
-
-//     cache.shadow = f32(packed.x) / f32(U32_MAX);
-//     cache.normal = unpack4x8snorm(packed.y).xyz;
-
-//     let xy = unpack2x16float(packed.z);
-//     let z = unpack2x16float(packed.w);
-//     cache.position = vec3<f32>(xy, z.x);
-//     cache.instance = u32(z.y);
-
-//     return cache;
-// }
-
-// fn compose_shadow_cache(cache: ShadowCache) -> vec4<u32> {
-//     var packed: vec4<u32>;
-//     packed.x = u32(cache.shadow * f32(U32_MAX));
-//     packed.y = pack4x8snorm(vec4<f32>(cache.normal, 0.0));
-//     packed.z = pack2x16float(cache.position.xy);
-//     packed.w = pack2x16float(vec2<f32>(cache.position.z, f32(cache.instance) + 0.5));
-//     return packed;
-// }
-
-@compute @workgroup_size(8, 8, 1)
-fn direct_lit(
-    @builtin(global_invocation_id) invocation_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>,
-    @builtin(workgroup_id) workgroup_id: vec3<u32>,
-) {
+fn random_uniform_cone_vector(invocation_id: vec3<u32>, angle: f32) -> vec3<f32> {
     let hashed_frame_number = hash(frame.number);
-    let rand = vec2<f32>(
-        random_float(invocation_id.x << 16u ^ invocation_id.y + hashed_frame_number),
-        random_float(invocation_id.y << 16u ^ invocation_id.x + hashed_frame_number)
-    );
-    let r = sqrt(rand.x);
-    let theta = 2.0 * PI * rand.y;
-    var disturb = vec3<f32>(
-        r * SOLAR_ANGLE / PI * cos(theta),
-        r * SOLAR_ANGLE / PI * sin(theta),
+    let x = random_float(invocation_id.x << 16u ^ invocation_id.y + hashed_frame_number);
+    let y = random_float(invocation_id.y << 16u ^ invocation_id.x ^ hashed_frame_number);
+    let r = sqrt(x);
+    let a = sin(angle);
+    let theta = 2.0 * PI * y;
+    var rand = vec3<f32>(
+        r * cos(theta) * a,
+        r * sin(theta) * a,
         0.0
     );
-    disturb.z = sqrt(1.0 - dot(disturb.xy, disturb.xy));
+    rand.z = sqrt(1.0 - dot(rand.xy, rand.xy));
+    return rand;
+}
 
+fn retreive_surface(material_id: u32, uv: vec2<f32>) -> Surface {
+    var surface: Surface;
+    let material = material_buffer.data[material_id];
+
+    surface.base_color = material.base_color;
+    var id = material.base_color_texture;
+    if (id != U32_MAX) {
+        surface.base_color *= textureSampleLevel(textures[id], samplers[id], uv, 0.0);
+    }
+
+    surface.emissive = material.emissive;
+    id = material.emissive_texture;
+    if (id != U32_MAX) {
+        surface.emissive *= textureSampleLevel(textures[id], samplers[id], uv, 0.0);
+    }
+
+    surface.metallic = material.metallic;
+    id = material.metallic_roughness_texture;
+    if (id != U32_MAX) {
+        surface.metallic *= textureSampleLevel(textures[id], samplers[id], uv, 0.0).r;
+    }
+
+    surface.occlusion = 1.0;
+    id = material.occlusion_texture;
+    if (id != U32_MAX) {
+        surface.occlusion = textureSampleLevel(textures[id], samplers[id], uv, 0.0).r;
+    }
+
+    surface.roughness = perceptualRoughnessToRoughness(material.perceptual_roughness);
+    surface.reflectance = material.reflectance;
+
+    return surface;
+}
+
+fn new_sample() -> Sample {
+    var s: Sample;
+    s.radiance = vec3<f32>(0.0);
+    s.random = vec3<f32>(0.0);
+    s.visible_position = vec4<f32>(0.0);
+    s.visible_normal = vec3<f32>(0.0);
+    s.sample_position = vec4<f32>(0.0);
+    s.sample_normal = vec3<f32>(0.0);
+    return s;
+}
+
+fn load_reservoir(uv: vec2<f32>) -> Reservoir {
+    var r: Reservoir;
+
+    let reservoir = textureSampleLevel(previous_reservoir_textures[0], previous_reservoir_samplers[0], uv, 0.0);
+    r.w = reservoir.r;
+    r.w_sum = reservoir.g;
+    r.count = reservoir.b;
+
+    r.s.radiance = textureSampleLevel(previous_reservoir_textures[1], previous_reservoir_samplers[1], uv, 0.0).rgb;
+    r.s.random = textureSampleLevel(previous_reservoir_textures[2], previous_reservoir_samplers[2], uv, 0.0).rgb;
+    r.s.visible_position = textureSampleLevel(previous_reservoir_textures[3], previous_reservoir_samplers[3], uv, 0.0);
+    r.s.visible_normal = textureSampleLevel(previous_reservoir_textures[4], previous_reservoir_samplers[4], uv, 0.0).rgb;
+    r.s.sample_position = textureSampleLevel(previous_reservoir_textures[5], previous_reservoir_samplers[5], uv, 0.0);
+    r.s.sample_normal = textureSampleLevel(previous_reservoir_textures[6], previous_reservoir_samplers[6], uv, 0.0).rgb;
+
+    return r;
+}
+
+fn store_reservoir(coords: vec2<i32>, r: Reservoir) {
+    let reservoir = vec4<f32>(r.w, r.w_sum, r.count, 0.0);
+    textureStore(reservoir_texture, coords, reservoir);
+
+    textureStore(radiance_texture, coords, vec4<f32>(r.s.radiance, 0.0));
+    textureStore(random_texture, coords, vec4<f32>(r.s.random, 0.0));
+    textureStore(visible_position_texture, coords, r.s.visible_position);
+    textureStore(visible_normal_texture, coords, vec4<f32>(r.s.visible_normal, 0.0));
+    textureStore(sample_position_texture, coords, r.s.sample_position);
+    textureStore(sample_normal_texture, coords, vec4<f32>(r.s.sample_normal, 0.0));
+}
+
+fn update_reservoir(
+    invocation_id: vec3<u32>,
+    s: Sample,
+    r: ptr<function, Reservoir>,
+) {
+    if (distance(s.visible_position, (*r).s.visible_position) > 0.1 || dot(s.visible_normal, (*r).s.visible_normal) < 0.866) {
+        (*r).count = 0.0;
+        (*r).w = 0.0;
+        (*r).w_sum = 0.0;
+        (*r).s = s;
+        return;
+    }
+
+    let w_new = luminance(s.radiance);
+    (*r).w_sum += w_new;
+    (*r).count = (*r).count + 1.0;
+
+    let rand = random_float(invocation_id.x << 16u ^ invocation_id.y ^ hash(frame.number));
+    if (rand < w_new / (*r).w_sum) {
+        (*r).s = s;
+    }
+    (*r).w = (*r).w_sum / ((*r).count * luminance((*r).s.radiance));
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
     let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
+    var s = new_sample();
 
     let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
     if (position.w < 0.5) {
+        var reservoir: Reservoir;
+        reservoir.s = s;
+        reservoir.count = 0.0;
+        reservoir.w = 0.0;
+        reservoir.w_sum = 0.0;
+        store_reservoir(coords, reservoir);
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
@@ -358,148 +420,68 @@ fn direct_lit(
     let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
     let instance_material = textureLoad(instance_material_texture, coords, 0);
     let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
+    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
-    let material = material_buffer.data[instance_material.y];
-    var output_color = material.base_color;
-    var texture_id = material.base_color_texture;
-    if (texture_id != U32_MAX) {
-        output_color *= textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0);
-    }
-    var emissive = material.emissive;
-    texture_id = material.emissive_texture;
-    if (texture_id != U32_MAX) {
-        emissive *= textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0);
-    }
-    var metallic = material.metallic;
-    texture_id = material.metallic_roughness_texture;
-    if (texture_id != U32_MAX) {
-        metallic *= textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0).r;
-    }
-    var occlusion = 1.0;
-    texture_id = material.occlusion_texture;
-    if (texture_id != U32_MAX) {
-        occlusion = textureSampleLevel(textures[texture_id], samplers[texture_id], velocity_uv.zw, 0.0).r;
-    }
+    s.random = random_uniform_cone_vector(invocation_id, PI / 2.0);
+    s.random = normal_basis(normal) * s.random;
+    s.radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
+    s.visible_position = position;
+    s.visible_normal = normal;
 
-    let roughness = perceptualRoughnessToRoughness(material.perceptual_roughness);
-
-    let light = lights.directional_lights[0];
-    var shadow = 0.0;
+    var light = lights.directional_lights[0];
 
     var ray: Ray;
-    ray.origin = position.xyz + light.direction_to_light * light.shadow_depth_bias + normal * light.shadow_normal_bias;
-    ray.direction = light.direction_to_light;
-    ray.direction = normalize(ray.direction + normal_basis(ray.direction) * disturb);
+    ray.origin = position.xyz + s.random * light.shadow_depth_bias + s.random * light.shadow_normal_bias;
+    ray.direction = s.random;
     ray.inv_direction = 1.0 / ray.direction;
 
     let hit = traverse_top(ray);
     if (hit.instance_index == U32_MAX) {
-        shadow = 1.0;
-    }
+        // Direct and enviromental shading
+        let incident_light = light.direction_to_light;
+        let N = normal;
+        let V = calculate_view(position, view.projection[3].w == 1.0);
 
-    // Spatio filtering
-    // let shared_coords = vec2<i32>(local_id.xy) + 2;
-    // shared_shadow[shared_coords.x][shared_coords.y] = shadow;
-    // textureStore(shadow_texture, coords, shadow);
-    // storageBarrier();
+        let NdotV = max(dot(N, V), 0.0001);
 
-    // if (local_id.y < 4u) {
-    //     // Top and bottom rows
-    //     var dest_coords = vec2<i32>(local_id.xy);
-    //     dest_coords.y = (dest_coords.y + 10) % 12;
-    //     let src_coords = 8 * vec2<i32>(workgroup_id.xy) + dest_coords - 2;
-    //     shared_shadow[dest_coords.x][dest_coords.y] = textureLoad(shadow_texture, src_coords);
+        let reflectance = surface.reflectance;
+        let metallic = surface.metallic;
+        let F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + surface.base_color.rgb * metallic;
 
-    //     // Corners
-    //     if (local_id.x < 4u) {
-    //         dest_coords.x = (dest_coords.x + 10) % 12;
-    //         let src_coords = 8 * vec2<i32>(workgroup_id.xy) + dest_coords - 2;
-    //         shared_shadow[dest_coords.x][dest_coords.y] = textureLoad(shadow_texture, src_coords);
-    //     }
-    // } else {
-    //     // Left and right cols
-    //     let src_index = i32(local_id.y * 8u + local_id.x) - 32;
-    //     var dest_coords = vec2<i32>(src_index % 4, src_index / 4);  // 4 rows, 8 cols
-    //     dest_coords.x = (dest_coords.x + 10) % 12;
-    //     let src_coords = 8 * vec2<i32>(workgroup_id.xy) + dest_coords - 2;
-    //     shared_shadow[dest_coords.x][dest_coords.y] = textureLoad(shadow_texture, src_coords);
-    // }
-    // storageBarrier();
+        let R = reflect(-V, N);
 
-    // let kernel = compute_kernel();
-    // for (var i = 0u; i < 25u; i = i + 1u) {
-    //     let offset = vec2<i32>(kernel[i].xy);
-    //     let sample_coords = shared_coords + offset;
-    //     let shadow_sample = shared_shadow[sample_coords.x][sample_coords.y];
+        let diffuse_color = surface.base_color.rgb * (1.0 - metallic);
 
-    //     let instance_delta = shadow_sample.x - shadow.x;
-    //     var d2 = instance_delta * instance_delta;
-    //     let instance_weight = min(exp(-d2 / 0.1), 1.0);
-    // }
-
-    // Temporal accumulation
-    let cache_uv = uv - velocity_uv.xy;
-    // let cache_coords = vec2<i32>(cache_uv * vec2<f32>(size));
-    // var cache = decompose_shadow_cache(textureLoad(shadow_cache_texture, cache_coords));
-
-    // var temporal_factor = 0.95;
-    // let cache_miss = any(abs(cache_uv - 0.5) > vec2<f32>(0.5)) || (cache.instance != instance_material.x);
-    // if (cache_miss) {
-    //     temporal_factor = 0.05;
-    // }
-
-    var w_sum = 0.0001;
-    var sum = 0.0;
-    var temporal_factor = TEMPORAL_FACTOR_MIN_MAX.y;
-    let cache_miss = any(abs(cache_uv - 0.5) > vec2<f32>(0.5));
-    if (!cache_miss) {
-        for (var i = 0u; i < 25u; i += 1u) {
-            let offset = vec2<f32>(frame.kernel[i].xy) / vec2<f32>(size);
-            let cache = textureSampleLevel(shadow_cache_texture, shadow_cache_sampler, cache_uv + offset, 0.0);
-
-            let dp = cache.xyz - position.xyz;
-            var d2 = dot(dp, dp);
-            let wp = min(exp(-d2 / BILATERAL_POSITION_SIGMA), 1.0);
-
-            let w = wp * frame.kernel[i].z;
-            w_sum += w;
-            sum += cache.w * w;
+        if (dot(incident_light, ray.direction) > cos(SOLAR_ANGLE)) {
+            light.direction_to_light = ray.direction;
+            s.radiance += directional_light(light, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
+        } else {
+            let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
+            let specular_ambient = EnvBRDFApprox(F0, surface.roughness, NdotV);
+            s.radiance += surface.occlusion * (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb;
         }
-        sum /= w_sum;
+    } else {
+        // Emissive shading
+        let instance = instance_buffer.data[hit.instance_index];
+        let indices = primitive_buffer.data[hit.primitive_index].indices;
+
+        let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
+        let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
+        let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
+        let hit_uv = v0.uv + hit.intersection.uv.x * (v1.uv - v0.uv) + hit.intersection.uv.y * (v2.uv - v0.uv);
+        let hit_normal = v0.normal + hit.intersection.uv.x * (v1.normal - v0.normal) + hit.intersection.uv.y * (v2.normal - v0.normal);
+
+        let hit_surface = retreive_surface(instance.material, hit_uv);
+        s.radiance += 255.0 * hit_surface.emissive.a * hit_surface.emissive.rgb;
+        s.sample_position = vec4<f32>(hit.intersection.distance * ray.direction + ray.origin, 1.0);
+        s.sample_normal = hit_normal;
     }
-    if (cache_miss || w_sum < 2.0E-4) {
-        temporal_factor = TEMPORAL_FACTOR_MIN_MAX.x;
-        sum = 1.0;
-    }
 
-    shadow = mix(shadow, sum, temporal_factor);
-    textureStore(shadow_texture, coords, vec4<f32>(position.xyz, shadow));
+    // ReSTIR
+    let previous_uv = uv - velocity_uv.xy;
+    var reservoir = load_reservoir(previous_uv);
+    update_reservoir(invocation_id, s, &reservoir);
+    store_reservoir(coords, reservoir);
 
-    // Shading
-    // TODO: normal mapping
-    let N = normal;
-    let V = calculate_view(position, view.projection[3].w == 1.0);
-
-    let NdotV = max(dot(N, V), 0.0001);
-
-    let reflectance = material.reflectance;
-    let F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + output_color.rgb * metallic;
-
-    let diffuse_color = output_color.rgb * (1.0 - metallic);
-
-    let R = reflect(-V, N);
-
-    let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color) * shadow;
-
-    let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
-    let specular_ambient = EnvBRDFApprox(F0, material.perceptual_roughness, NdotV);
-
-    var color = light_contrib;
-    color += (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb * occlusion;
-    color += emissive.rgb * output_color.a;
-    output_color = vec4<f32>(color, output_color.a);
-    textureStore(render_texture, coords, output_color);
+    textureStore(render_texture, coords, vec4<f32>(reservoir.s.radiance * reservoir.w, 1.0));
 }
-
-@compute @workgroup_size(8, 8, 1)
-fn indirect_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {}

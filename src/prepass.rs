@@ -31,7 +31,7 @@ use bevy::{
 };
 
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
-pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
+pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
 pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
 
