@@ -283,16 +283,15 @@ fn calculate_view(
     return V;
 }
 
-fn random_uniform_cone_vector(invocation_id: vec3<u32>, angle: f32) -> vec3<f32> {
+fn cosine_sample_hemisphere(invocation_id: vec3<u32>) -> vec3<f32> {
     let hashed_frame_number = hash(frame.number);
     let x = random_float(invocation_id.x << 16u ^ invocation_id.y + hashed_frame_number);
     let y = random_float(invocation_id.y << 16u ^ invocation_id.x ^ hashed_frame_number);
     let r = sqrt(x);
-    let a = sin(angle);
     let theta = 2.0 * PI * y;
     var rand = vec3<f32>(
-        r * cos(theta) * a,
-        r * sin(theta) * a,
+        r * cos(theta),
+        r * sin(theta),
         0.0
     );
     rand.z = sqrt(1.0 - dot(rand.xy, rand.xy));
@@ -505,7 +504,7 @@ fn direct_lit(
     let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
-    s.random = random_uniform_cone_vector(invocation_id, PI / 2.0);
+    s.random = cosine_sample_hemisphere(invocation_id);
     s.random = normal_basis(normal) * s.random;
     s.radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
     s.visible_position = vec4<f32>(position.xyz, depth);
@@ -528,7 +527,8 @@ fn direct_lit(
         r.s.visible_normal = vec3<f32>(0.0);
     }
 
-    update_reservoir(invocation_id, &r, s, luminance(s.radiance));
+    let p = luminance(s.radiance) / dot(s.random, normal);
+    update_reservoir(invocation_id, &r, s, p);
     r.w = r.w_sum / (r.count * luminance(r.s.radiance) + 0.0001);
 
     // Sample validation: is the path xv-xs still valid?
