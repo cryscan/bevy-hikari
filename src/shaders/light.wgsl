@@ -25,7 +25,7 @@ var reservoir_texture: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(2)
 var radiance_texture: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(3)
-var random_texture: texture_storage_2d<rgba8snorm, read_write>;
+var random_texture: texture_storage_2d<rgba8unorm, read_write>;
 @group(5) @binding(4)
 var visible_position_texture: texture_storage_2d<rgba32float, read_write>;
 @group(5) @binding(5)
@@ -42,6 +42,9 @@ var previous_reservoir_samplers: binding_array<sampler>;
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
+let DISTANCE_MAX: f32 = 65535.0;
+let VALIDATION_INTERVAL: u32 = 8u;
+let SECOND_BOUNCE_CHANCE: f32 = 0.5;
 
 let SOLAR_ANGLE: f32 = 0.523598776;
 
@@ -100,9 +103,16 @@ struct Surface {
     occlusion: f32,
 };
 
+struct HitInfo {
+    surface: Surface,
+    position: vec4<f32>,
+    normal: vec3<f32>,
+    uv: vec2<f32>,
+};
+
 struct Sample {
     radiance: vec3<f32>,
-    random: vec3<f32>,
+    random: vec4<f32>,
     visible_position: vec4<f32>,
     visible_normal: vec3<f32>,
     sample_position: vec4<f32>,
@@ -266,6 +276,18 @@ fn traverse_top(ray: Ray) -> Hit {
     return hit;
 }
 
+fn cosine_sample_hemisphere(rand: vec2<f32>) -> vec3<f32> {
+    let r = sqrt(rand.x);
+    let theta = 2.0 * PI * rand.y;
+    var direction = vec3<f32>(
+        r * cos(theta),
+        r * sin(theta),
+        0.0
+    );
+    direction.z = sqrt(1.0 - dot(direction.xy, direction.xy));
+    return direction;
+}
+
 // NOTE: Correctly calculates the view vector depending on whether
 // the projection is orthographic or perspective.
 fn calculate_view(
@@ -281,21 +303,6 @@ fn calculate_view(
         V = normalize(view.world_position.xyz - world_position.xyz);
     }
     return V;
-}
-
-fn cosine_sample_hemisphere(invocation_id: vec3<u32>) -> vec3<f32> {
-    let hashed_frame_number = hash(frame.number);
-    let x = random_float(invocation_id.x << 16u ^ invocation_id.y + hashed_frame_number);
-    let y = random_float(invocation_id.y << 16u ^ invocation_id.x ^ hashed_frame_number);
-    let r = sqrt(x);
-    let theta = 2.0 * PI * y;
-    var rand = vec3<f32>(
-        r * cos(theta),
-        r * sin(theta),
-        0.0
-    );
-    rand.z = sqrt(1.0 - dot(rand.xy, rand.xy));
-    return rand;
 }
 
 fn retreive_surface(material_id: u32, uv: vec2<f32>) -> Surface {
@@ -332,10 +339,32 @@ fn retreive_surface(material_id: u32, uv: vec2<f32>) -> Surface {
     return surface;
 }
 
-fn new_sample() -> Sample {
+fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
+    var info: HitInfo;
+    if (hit.instance_index != U32_MAX) {
+        let instance = instance_buffer.data[hit.instance_index];
+        let indices = primitive_buffer.data[hit.primitive_index].indices;
+
+        let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
+        let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
+        let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
+        let uv = hit.intersection.uv;
+        info.uv = v0.uv + uv.x * (v1.uv - v0.uv) + uv.y * (v2.uv - v0.uv);
+        info.normal = v0.normal + uv.x * (v1.normal - v0.normal) + uv.y * (v2.normal - v0.normal);
+
+        info.surface = retreive_surface(instance.material, info.uv);
+        info.position = vec4<f32>(ray.origin + ray.direction * hit.intersection.distance, 1.0);
+    } else {
+        info.position = vec4<f32>(ray.origin + ray.direction * DISTANCE_MAX, 0.0);
+    }
+
+    return info;
+}
+
+fn empty_sample() -> Sample {
     var s: Sample;
     s.radiance = vec3<f32>(0.0);
-    s.random = vec3<f32>(0.0);
+    s.random = vec4<f32>(0.0);
     s.visible_position = vec4<f32>(0.0);
     s.visible_normal = vec3<f32>(0.0);
     s.sample_position = vec4<f32>(0.0);
@@ -352,7 +381,7 @@ fn sample_reservoir(uv: vec2<f32>) -> Reservoir {
     r.count = reservoir.b;
 
     r.s.radiance = textureSampleLevel(previous_reservoir_textures[1], previous_reservoir_samplers[1], uv, 0.0).rgb;
-    r.s.random = textureSampleLevel(previous_reservoir_textures[2], previous_reservoir_samplers[2], uv, 0.0).rgb;
+    r.s.random = textureSampleLevel(previous_reservoir_textures[2], previous_reservoir_samplers[2], uv, 0.0);
     r.s.visible_position = textureSampleLevel(previous_reservoir_textures[3], previous_reservoir_samplers[3], uv, 0.0);
     r.s.visible_normal = textureSampleLevel(previous_reservoir_textures[4], previous_reservoir_samplers[4], uv, 0.0).rgb;
     r.s.sample_position = textureSampleLevel(previous_reservoir_textures[5], previous_reservoir_samplers[5], uv, 0.0);
@@ -370,7 +399,7 @@ fn load_reservoir(coords: vec2<i32>) -> Reservoir {
     r.count = reservoir.b;
 
     r.s.radiance = textureLoad(radiance_texture, coords).rgb;
-    r.s.random = textureLoad(random_texture, coords).rgb;
+    r.s.random = textureLoad(random_texture, coords);
     r.s.visible_position = textureLoad(visible_position_texture, coords);
     r.s.visible_normal = textureLoad(visible_normal_texture, coords).rgb;
     r.s.sample_position = textureLoad(sample_position_texture, coords);
@@ -384,7 +413,7 @@ fn store_reservoir(coords: vec2<i32>, r: Reservoir) {
     textureStore(reservoir_texture, coords, reservoir);
 
     textureStore(radiance_texture, coords, vec4<f32>(r.s.radiance, 0.0));
-    textureStore(random_texture, coords, vec4<f32>(r.s.random, 0.0));
+    textureStore(random_texture, coords, r.s.random);
     textureStore(visible_position_texture, coords, r.s.visible_position);
     textureStore(visible_normal_texture, coords, vec4<f32>(r.s.visible_normal, 0.0));
     textureStore(sample_position_texture, coords, r.s.sample_position);
@@ -424,13 +453,13 @@ fn shading(
     position: vec4<f32>,
     normal: vec3<f32>,
     surface: Surface,
-    hit: Hit,
     ray: Ray,
     light: DirectionalLight,
-    s: ptr<function, Sample>
-) {
-    if (hit.instance_index == U32_MAX) {
-        // Direct and enviromental shading
+    info: HitInfo,
+) -> vec3<f32> {
+    var radiance = vec3<f32>(0.0);
+    if (info.position.w < 0.5) {
+        // Directional and enviromental lighing
         var ray_light = light;
         let N = normal;
         let V = calculate_view(position, view.projection[3].w == 1.0);
@@ -447,30 +476,18 @@ fn shading(
 
         if (dot(light.direction_to_light, ray.direction) > cos(SOLAR_ANGLE)) {
             ray_light.direction_to_light = ray.direction;
-            (*s).radiance += directional_light(ray_light, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
+            radiance = directional_light(ray_light, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
         } else {
             let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
             let specular_ambient = EnvBRDFApprox(F0, surface.roughness, NdotV);
-            (*s).radiance += surface.occlusion * (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb;
+            radiance = surface.occlusion * (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb;
         }
-        (*s).sample_position = vec4<f32>(32767.0 * ray.direction + ray.origin, 0.0);
-        (*s).sample_normal = -ray.direction;
     } else {
-        // Emissive shading
-        let instance = instance_buffer.data[hit.instance_index];
-        let indices = primitive_buffer.data[hit.primitive_index].indices;
-
-        let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
-        let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
-        let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
-        let hit_uv = v0.uv + hit.intersection.uv.x * (v1.uv - v0.uv) + hit.intersection.uv.y * (v2.uv - v0.uv);
-        let hit_normal = v0.normal + hit.intersection.uv.x * (v1.normal - v0.normal) + hit.intersection.uv.y * (v2.normal - v0.normal);
-
-        let hit_surface = retreive_surface(instance.material, hit_uv);
-        (*s).radiance += 255.0 * hit_surface.emissive.a * hit_surface.emissive.rgb;
-        (*s).sample_position = vec4<f32>(hit.intersection.distance * ray.direction + ray.origin, 1.0);
-        (*s).sample_normal = hit_normal;
+        // Emissive lighting
+        radiance = 255.0 * info.surface.emissive.a * info.surface.emissive.rgb;
     }
+
+    return radiance;
 }
 
 // var<workgroup> shared_reserviors: array<array<Reservoir, 12>, 12>;
@@ -483,7 +500,7 @@ fn direct_lit(
     let size = textureDimensions(render_texture);
     let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
-    var s = new_sample();
+    var s = empty_sample();
 
     let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
     if (position.w < 0.5) {
@@ -504,8 +521,12 @@ fn direct_lit(
     let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
-    s.random = cosine_sample_hemisphere(invocation_id);
-    s.random = normal_basis(normal) * s.random;
+    let hashed_frame_number = hash(frame.number);
+    s.random.x = random_float(invocation_id.x * hash(invocation_id.y) ^ hashed_frame_number);
+    s.random.y = random_float(invocation_id.y * hash(invocation_id.x) ^ ~hashed_frame_number);
+    s.random.z = random_float(invocation_id.x ^ hash(invocation_id.y) * hashed_frame_number);
+    s.random.w = random_float(invocation_id.x ^ ~hash(invocation_id.y) * hashed_frame_number);
+
     s.radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
     s.visible_position = vec4<f32>(position.xyz, depth);
     s.visible_normal = normal;
@@ -514,11 +535,28 @@ fn direct_lit(
 
     var ray: Ray;
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
-    ray.direction = s.random;
+    ray.direction = normal_basis(normal) * cosine_sample_hemisphere(s.random.xy);
     ray.inv_direction = 1.0 / ray.direction;
+    let p1 = dot(ray.direction, normal);
 
-    let hit = traverse_top(ray);
-    shading(position, normal, surface, hit, ray, light, &s);
+    var hit = traverse_top(ray);
+    let info = hit_info(ray, hit);
+    s.sample_position = info.position;
+    s.sample_normal = info.normal;
+    s.radiance += shading(position, normal, surface, ray, light, info);
+
+    // Second bounce
+    var p2 = 1.0;
+    if (random_float(workgroup_id.x * hash(workgroup_id.y) ^ hashed_frame_number) < SECOND_BOUNCE_CHANCE && hit.instance_index != U32_MAX) {
+        ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
+        ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(s.random.zw);
+        ray.inv_direction = 1.0 / ray.direction;
+        p2 = SECOND_BOUNCE_CHANCE * dot(ray.direction, info.normal);
+
+        hit = traverse_top(ray);
+        let info_2 = hit_info(ray, hit);
+        s.radiance += shading(info.position, info.normal, info.surface, ray, light, info_2);
+    }
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
@@ -527,14 +565,15 @@ fn direct_lit(
         r.s.visible_normal = vec3<f32>(0.0);
     }
 
-    let p = luminance(s.radiance) / dot(s.random, normal);
+    let p = luminance(s.radiance) / (p1 * p2);
     update_reservoir(invocation_id, &r, s, p);
     r.w = r.w_sum / (r.count * luminance(r.s.radiance) + 0.0001);
 
     // Sample validation: is the path xv-xs still valid?
-    if (frame.number % 3u == 0u) {
+    if (frame.number % VALIDATION_INTERVAL == 0u) {
         ray.origin = r.s.visible_position.xyz + light.shadow_normal_bias * r.s.visible_normal;
-        ray.direction = r.s.random;
+        ray.direction = cosine_sample_hemisphere(r.s.random.xy);
+        ray.direction = normal_basis(normal) * ray.direction;
         ray.inv_direction = 1.0 / ray.direction;
         let hit_validate = traverse_top(ray);
 
@@ -557,79 +596,5 @@ fn direct_lit(
     }
 
     store_reservoir(coords, r);
-    // storageBarrier();
-
-    // ReSTIR: Spatio
-    // let kernel_index = (hash(workgroup_id.x) * hash(workgroup_id.y) ^ hash(frame.number)) % 25u;
-    // let offset = vec2<i32>(frame.kernel[kernel_index].xy);
-
-    // var z = 0.0;
-    // var q_coords = min(size, max(vec2<i32>(0), coords + offset));
-    // if (any(q_coords != coords)) {
-    //     let q = load_reservoir(q_coords);
-    //     if (dot(q.s.visible_normal, r.s.visible_normal) > 0.866 && distance(q.s.visible_position.w, r.s.visible_position.w) < 0.001) {
-    //         let x2q = q.s.sample_position.xyz;
-    //         let x1q = q.s.visible_position.xyz;
-    //         let nq = q.s.sample_normal;
-    //         let x1r = r.s.visible_position.xyz;
-
-    //         let xqq = x1q - x2q;
-    //         let xqr = x1r - x2q;
-
-    //         let cos_phi_q = abs(dot(nq, normalize(xqq)));
-    //         let cos_phi_r = abs(dot(nq, normalize(xqr)));
-
-    //         let dqq = dot(xqq, xqq);
-    //         let dqr = dot(xqr, xqr);
-
-    //         let inv_jacobian = (cos_phi_q * dqr) / (cos_phi_r * dqq + 0.0001);
-    //         var p = luminance(q.s.radiance) * inv_jacobian;
-
-    //         // Trace a ray to check.
-    //         let delta = x2q - ray.origin;
-    //         ray.direction = normalize(delta);
-    //         ray.inv_direction = 1.0 / ray.direction;
-
-    //         let hit = traverse_top(ray);
-    //         if (hit.instance_index == U32_MAX || distance(hit.intersection.distance, length(delta)) > 0.1) {
-    //             p = 0.0;
-    //         }
-
-    //         z += sign(p) * q.count;
-    //         merge_reservoir(invocation_id, &r, q, p);
-    //     }
-    // }
-
-    // q_coords = min(size, max(vec2<i32>(0), coords - offset));
-    // if (r.count < 60.0 && any(q_coords != coords)) {
-    //     let q = load_reservoir(q_coords);
-    //     if (dot(q.s.visible_normal, r.s.visible_normal) > 0.866 && distance(q.s.visible_position.w, r.s.visible_position.w) < 0.001) {
-    //         let x2q = q.s.sample_position.xyz;
-    //         let x1q = q.s.visible_position.xyz;
-    //         let nq = q.s.sample_normal;
-    //         let x1r = r.s.visible_position.xyz;
-
-    //         let xqq = x1q - x2q;
-    //         let xqr = x1r - x2q;
-
-    //         let cos_phi_q = abs(dot(nq, normalize(xqq)));
-    //         let cos_phi_r = abs(dot(nq, normalize(xqr)));
-
-    //         let dqq = dot(xqq, xqq);
-    //         let dqr = dot(xqr, xqr);
-
-    //         let inv_jacobian = (cos_phi_q * dqr) / (cos_phi_r * dqq + 0.0001);
-    //         let p = luminance(q.s.radiance) * inv_jacobian;
-    //         merge_reservoir(invocation_id, &r, q, p);
-    //     }
-    // }
-
-    // if (z > 0.0) {
-    //     r.w = r.w_sum / (z * luminance(r.s.radiance));
-    // }
-
-    // storageBarrier();
-    // store_reservoir(coords, r);
-
     textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
 }

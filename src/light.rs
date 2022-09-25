@@ -26,7 +26,7 @@ pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const RADIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const POSITION_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
-pub const RANDOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
+pub const RANDOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
