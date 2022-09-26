@@ -68,7 +68,7 @@ fn setup(
             mesh: meshes.add(Mesh::from(shape::Plane::default())),
             material: materials.add(StandardMaterial {
                 base_color: Color::GRAY,
-                perceptual_roughness: 1.0,
+                perceptual_roughness: 0.5,
                 ..Default::default()
             }),
             transform: Transform {
@@ -83,7 +83,11 @@ fn setup(
     // Left
     commands.spawn_bundle(PbrBundle {
         mesh: cube.clone(),
-        material: materials.add(Color::PINK.into()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::PINK,
+            perceptual_roughness: 0.5,
+            ..Default::default()
+        }),
         transform: Transform {
             translation: Vec3::new(-3.5, 3.0, 0.0),
             scale: Vec3::new(1.0, 6.0, 8.0),
@@ -94,7 +98,11 @@ fn setup(
     // Right
     commands.spawn_bundle(PbrBundle {
         mesh: cube.clone(),
-        material: materials.add(Color::WHITE.into()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            perceptual_roughness: 0.5,
+            ..Default::default()
+        }),
         transform: Transform {
             translation: Vec3::new(3.5, 3.0, 0.0),
             scale: Vec3::new(1.0, 6.0, 8.0),
@@ -105,7 +113,11 @@ fn setup(
     // Back
     commands.spawn_bundle(PbrBundle {
         mesh: cube.clone(),
-        material: materials.add(Color::AQUAMARINE.into()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::AQUAMARINE,
+            perceptual_roughness: 0.5,
+            ..Default::default()
+        }),
         transform: Transform {
             translation: Vec3::new(0.0, 3.0, -3.5),
             scale: Vec3::new(6.0, 6.0, 1.0),
@@ -116,7 +128,11 @@ fn setup(
     // Top
     commands.spawn_bundle(PbrBundle {
         mesh: cube,
-        material: materials.add(Color::WHITE.into()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            perceptual_roughness: 0.5,
+            ..Default::default()
+        }),
         transform: Transform {
             translation: Vec3::new(0.0, 6.5, 0.0),
             scale: Vec3::new(8.0, 1.0, 8.0),
@@ -140,10 +156,20 @@ fn setup(
         transform: Transform::from_xyz(2.0, 0.5, 0.0),
         ..Default::default()
     });
+
     // Model
     commands.spawn_bundle(SceneBundle {
-        scene: asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0"),
-        transform: Transform::from_scale(Vec3::splat(2.0)),
+        scene: asset_server.load("models/extinguisher.glb#Scene0"),
+        transform: Transform::default(),
+        ..default()
+    });
+    commands.spawn_bundle(SceneBundle {
+        scene: asset_server.load("models/extinguisher.glb#Scene0"),
+        transform: Transform {
+            translation: Vec3::new(0.0, -1.0, 10.0),
+            rotation: Quat::from_rotation_y(PI / 2.0),
+            ..Default::default()
+        },
         ..default()
     });
 
