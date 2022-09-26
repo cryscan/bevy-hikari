@@ -83,6 +83,6 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     out.position = in.world_position;
     out.normal = vec4<f32>(in.world_normal, 1.0);
     out.instance_material = vec2<u32>(instance_index.instance, instance_index.material);
-    out.velocity_uv = vec4<f32>(velocity, in.uv);
+    out.velocity_uv = vec4<f32>(velocity * 100.0, in.uv);
     return out;
 }

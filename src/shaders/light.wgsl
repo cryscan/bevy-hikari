@@ -638,7 +638,7 @@ fn direct_lit(
     );
 
     // ReSTIR: Temporal
-    let previous_uv = uv - velocity_uv.xy;
+    let previous_uv = uv - velocity_uv.xy * 0.01;
     var r = sample_reservoir(previous_uv);
     if (any(abs(previous_uv - 0.5) > vec2<f32>(0.5))) {
         r.s.visible_normal = vec3<f32>(0.0);
