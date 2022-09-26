@@ -48,8 +48,9 @@ fn setup(
     asset_server: Res<AssetServer>,
 ) {
     // Ground
+    let cube = meshes.add(Mesh::from(shape::Cube::default()));
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cube::default())),
+        mesh: cube.clone(),
         material: materials.add(StandardMaterial {
             base_color: Color::rgb(0.3, 0.5, 0.3),
             perceptual_roughness: 0.5,
@@ -57,8 +58,8 @@ fn setup(
         }),
         transform: Transform {
             translation: Vec3::new(0.0, -0.5, 0.0),
-            rotation: Default::default(),
-            scale: Vec3::new(6.0, 1.0, 6.0),
+            scale: Vec3::new(8.0, 1.0, 8.0),
+            ..Default::default()
         },
         ..Default::default()
     });
@@ -78,6 +79,51 @@ fn setup(
             ..Default::default()
         })
         .insert(RayCastMesh::<RaycastSet>::default());
+
+    // Left
+    commands.spawn_bundle(PbrBundle {
+        mesh: cube.clone(),
+        material: materials.add(Color::PINK.into()),
+        transform: Transform {
+            translation: Vec3::new(-3.5, 3.0, 0.0),
+            scale: Vec3::new(1.0, 6.0, 8.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    // Right
+    commands.spawn_bundle(PbrBundle {
+        mesh: cube.clone(),
+        material: materials.add(Color::WHITE.into()),
+        transform: Transform {
+            translation: Vec3::new(3.5, 3.0, 0.0),
+            scale: Vec3::new(1.0, 6.0, 8.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    // Back
+    commands.spawn_bundle(PbrBundle {
+        mesh: cube.clone(),
+        material: materials.add(Color::AQUAMARINE.into()),
+        transform: Transform {
+            translation: Vec3::new(0.0, 3.0, -3.5),
+            scale: Vec3::new(6.0, 6.0, 1.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    // Top
+    commands.spawn_bundle(PbrBundle {
+        mesh: cube,
+        material: materials.add(Color::WHITE.into()),
+        transform: Transform {
+            translation: Vec3::new(0.0, 6.5, 0.0),
+            scale: Vec3::new(8.0, 1.0, 8.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
 
     // Sphere
     commands.spawn_bundle(PbrBundle {

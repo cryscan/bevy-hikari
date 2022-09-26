@@ -117,11 +117,6 @@ struct HitInfo {
     uv: vec2<f32>,
 };
 
-struct VirtualLight {
-    direction: vec3<f32>,
-    radiance: vec3<f32>,
-};
-
 struct Sample {
     radiance: vec3<f32>,
     random: vec4<f32>,
@@ -358,6 +353,7 @@ fn retreive_surface(material_id: u32, uv: vec2<f32>) -> Surface {
 
 fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
     var info: HitInfo;
+
     if (hit.instance_index != U32_MAX) {
         let instance = instance_buffer.data[hit.instance_index];
         let indices = primitive_buffer.data[hit.primitive_index].indices;
@@ -464,28 +460,43 @@ fn merge_reservoir(invocation_id: vec3<u32>, r: ptr<function, Reservoir>, other:
     (*r).count = count + other.count;
 }
 
-fn virtual_light(
-    light: VirtualLight,
+fn lit(
+    radiance: vec3<f32>,
+    diffuse_color: vec3<f32>,
     roughness: f32,
-    NdotV: f32,
-    normal: vec3<f32>,
-    view: vec3<f32>,
-    R: vec3<f32>,
     F0: vec3<f32>,
-    diffuse_color: vec3<f32>
+    L: vec3<f32>,
+    N: vec3<f32>,
+    V: vec3<f32>,
 ) -> vec3<f32> {
-    let incident_light = light.direction;
+    let H = normalize(L + V);
+    let NoL = saturate(dot(N, L));
+    let NoH = saturate(dot(N, H));
+    let LoH = saturate(dot(L, H));
+    let NdotV = max(dot(N, V), 0.0001);
 
-    let half_vector = normalize(incident_light + view);
-    let NoL = saturate(dot(normal, incident_light));
-    let NoH = saturate(dot(normal, half_vector));
-    let LoH = saturate(dot(incident_light, half_vector));
+    let R = reflect(-V, N);
 
     let diffuse = diffuse_color * Fd_Burley(roughness, NdotV, NoL, LoH);
     let specular_intensity = 1.0;
-    let specular_light = specular(F0, roughness, half_vector, NdotV, NoL, NoH, LoH, specular_intensity);
+    let specular_light = specular(F0, roughness, H, NdotV, NoL, NoH, LoH, specular_intensity);
 
-    return (specular_light + diffuse) * light.radiance * NoL;
+    return (specular_light + diffuse) * radiance * NoL;
+}
+
+fn ambient(
+    diffuse_color: vec3<f32>,
+    roughness: f32,
+    occlusion: f32,
+    F0: vec3<f32>,
+    N: vec3<f32>,
+    V: vec3<f32>,
+) -> vec3<f32> {
+    let NdotV = max(dot(N, V), 0.0001);
+
+    let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
+    let specular_ambient = EnvBRDFApprox(F0, roughness, NdotV);
+    return occlusion * (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb;
 }
 
 fn shading(
@@ -497,42 +508,29 @@ fn shading(
     info: HitInfo,
     head_radiance: vec3<f32>,
 ) -> vec3<f32> {
-    var out_radiance = vec3<f32>(0.0);
-
-    // let N = normal;
-    // let V = calculate_view(position, view.projection[3].w == 1.0);
-
-    let NdotV = max(dot(N, V), 0.0001);
+    var radiance = vec3<f32>(0.0);
 
     let reflectance = surface.reflectance;
     let metallic = surface.metallic;
-    let F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + surface.base_color.rgb * metallic;
+    let base_color = surface.base_color.rgb;
 
-    let R = reflect(-V, N);
+    let F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + base_color * metallic;
+    let diffuse_color = base_color * (1.0 - metallic);
 
-    let diffuse_color = surface.base_color.rgb * (1.0 - metallic);
-
-    var v: VirtualLight;
-    v.direction = ray.direction;
-    v.radiance = light.color.rgb;
-
-    if (info.position.w < 0.5) {
-        // Directional and enviromental lighing
+    if (info.position.w == 0.0) {
+        // Directional and ambient
         if (dot(light.direction_to_light, ray.direction) > cos(SOLAR_ANGLE)) {
-            out_radiance = virtual_light(v, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
+            radiance = lit(light.color.rgb, diffuse_color, surface.roughness, F0, ray.direction, N, V);
         } else {
-            let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
-            let specular_ambient = EnvBRDFApprox(F0, surface.roughness, NdotV);
-            out_radiance = surface.occlusion * (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb;
+            radiance = ambient(diffuse_color, surface.roughness, surface.occlusion, F0, N, V);
         }
     } else {
-        // Emissive lighting
-        v.radiance = 255.0 * info.surface.emissive.a * info.surface.emissive.rgb;
-        out_radiance = virtual_light(v, surface.roughness, NdotV, N, V, R, F0, diffuse_color);
-        out_radiance += head_radiance;
+        // Emissive
+        let emissive = 255.0 * info.surface.emissive.a * info.surface.emissive.rgb;
+        radiance = lit(emissive + head_radiance, diffuse_color, surface.roughness, F0, ray.direction, N, V);
     }
 
-    return out_radiance;
+    return radiance;
 }
 
 // var<workgroup> shared_reserviors: array<array<Reservoir, 12>, 12>;
