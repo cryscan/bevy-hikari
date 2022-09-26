@@ -51,6 +51,7 @@ let DISTANCE_MAX: f32 = 65535.0;
 let VALIDATION_INTERVAL: u32 = 16u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
+let SECOND_BOUNCE_CHANCE: f32 = 1.0;
 
 let SOLAR_ANGLE: f32 = 0.523598776;
 
@@ -215,20 +216,25 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
     for (; index < slice.node_len;) {
         let node_index = slice.node_offset + index;
         let node = asset_node_buffer.data[node_index];
+        var aabb: Aabb;
         if (node.entry_index == U32_MAX) {
             let primitive_index = slice.primitive + node.primitive_index;
-            let primitive = &primitive_buffer.data[primitive_index];
-            let intersection = intersects_triangle(ray, (*primitive).vertices);
+            let vertices = primitive_buffer.data[primitive_index].vertices;
 
-            if (intersection.distance < (*hit).intersection.distance) {
-                (*hit).intersection = intersection;
-                (*hit).primitive_index = primitive_index;
-                intersected = true;
+            aabb.min = min(vertices[0], min(vertices[1], vertices[2]));
+            aabb.max = max(vertices[0], max(vertices[1], vertices[2]));
+
+            if (intersects_aabb(ray, aabb) < (*hit).intersection.distance) {
+                let intersection = intersects_triangle(ray, vertices);
+                if (intersection.distance < (*hit).intersection.distance) {
+                    (*hit).intersection = intersection;
+                    (*hit).primitive_index = primitive_index;
+                    intersected = true;
+                }
             }
 
             index = node.exit_index;
         } else {
-            var aabb: Aabb;
             aabb.min = node.min;
             aabb.max = node.max;
 
@@ -570,9 +576,6 @@ fn direct_lit(
     // s.random.z = random_float(invocation_id.x ^ hash(invocation_id.y) * hashed_frame_number);
     // s.random.w = random_float(invocation_id.x ^ ~hash(invocation_id.y) * hashed_frame_number);
 
-    // let total_workgroups = num_workgroups.x * num_workgroups.y;
-    // let hashed_workgroup_id = hash(workgroup_id.x + workgroup_id.y * num_workgroups.x) % max(NOISE_TEXTURE_COUNT, total_workgroups);
-
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]).xy;
     let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
@@ -603,13 +606,17 @@ fn direct_lit(
     s.sample_normal = info.normal;
 
     // Second bounce: from sample position
+    let b2_rand = random_float(workgroup_id.x + workgroup_id.y * num_workgroups.x + hash(frame.number));
+    let b2_condition = max(0.0, sign(SECOND_BOUNCE_CHANCE - b2_rand));  // 1.0 if b2_rand < SECOND_BOUNCE_CHANCE
+    s.random *= vec4<f32>(1.0, 1.0, b2_condition, b2_condition);
+
     var p2 = 1.0;
     var head_radiance = vec3<f32>(0.0);
-    if (hit.instance_index != U32_MAX) {
+    if (any(s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
         bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
         bounce_ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(s.random.zw);
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-        p2 = dot(bounce_ray.direction, info.normal);
+        p2 = dot(bounce_ray.direction, info.normal) * SECOND_BOUNCE_CHANCE;
 
         hit = traverse_top(bounce_ray);
         bounce_info = hit_info(bounce_ray, hit);
@@ -656,7 +663,7 @@ fn direct_lit(
         info = hit_info(ray, hit);
         var valid_radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
 
-        if (hit.instance_index != U32_MAX) {
+        if (any(r.s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
             bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
             bounce_ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(r.s.random.zw);
             bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
