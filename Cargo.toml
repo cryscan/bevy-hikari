@@ -31,3 +31,4 @@ bevy = { version = "0.8", default-features = true, features = [
     "x11",
 ] }
 smooth-bevy-cameras = "0.5"
+bevy_mod_raycast = "0.6"

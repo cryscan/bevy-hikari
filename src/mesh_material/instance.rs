@@ -1,11 +1,11 @@
 use super::{
-    material::GpuStandardMaterialOffsets,
-    mesh::{GpuMeshSlices, MeshAssetState},
+    material::GpuStandardMaterials,
+    mesh::{GpuMeshes, MeshAssetState},
+    MeshMaterialSystems,
 };
 use crate::{
-    mesh::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
+    mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
     transform::PreviousGlobalTransform,
-    MeshMaterialSystems,
 };
 use bevy::{
     math::Vec3A,
@@ -21,6 +21,7 @@ use bevy::{
     transform::TransformSystem,
 };
 use bvh::bvh::BVH;
+use itertools::Itertools;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub struct InstancePlugin;
@@ -71,6 +72,7 @@ impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
 pub struct InstanceRenderAssets {
     pub instance_buffer: StorageBuffer<GpuInstanceBuffer>,
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
+    pub instance_indices: DynamicUniformBuffer<InstanceIndex>,
 }
 
 impl InstanceRenderAssets {
@@ -83,6 +85,7 @@ impl InstanceRenderAssets {
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
         self.instance_buffer.write_buffer(device, queue);
         self.node_buffer.write_buffer(device, queue);
+        self.instance_indices.write_buffer(device, queue);
     }
 }
 
@@ -151,6 +154,7 @@ fn instance_event_system<M: IntoStandardMaterial>(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct ExtractedInstances<M: IntoStandardMaterial> {
     extracted: Vec<(Entity, Aabb, GlobalTransform, Handle<Mesh>, Handle<M>)>,
     removed: Vec<Entity>,
@@ -172,7 +176,7 @@ fn extract_instances<M: IntoStandardMaterial>(
                     extracted.push((
                         *entity,
                         aabb.clone(),
-                        transform.clone(),
+                        *transform,
                         mesh.clone_weak(),
                         material.clone_weak(),
                     ));
@@ -188,8 +192,8 @@ fn extract_instances<M: IntoStandardMaterial>(
 fn prepare_generic_instances<M: IntoStandardMaterial>(
     mut extracted_instances: ResMut<ExtractedInstances<M>>,
     mut instances: ResMut<GpuInstances>,
-    meshes: Res<GpuMeshSlices>,
-    materials: Res<GpuStandardMaterialOffsets>,
+    meshes: Res<GpuMeshes>,
+    materials: Res<GpuStandardMaterials>,
     asset_state: Res<MeshAssetState>,
 ) {
     if *asset_state == MeshAssetState::Dirty {
@@ -222,11 +226,11 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
         min += center;
         max += center;
 
-        if let (Some(slice), Some(material)) = (meshes.get(&mesh), materials.get(&material)) {
+        if let (Some(mesh), Some(material)) = (meshes.get(&mesh), materials.get(&material)) {
             let min = Vec3::from(min);
             let max = Vec3::from(max);
-            let slice = *slice;
-            let material = *material;
+            let slice = mesh.1;
+            let material = material.1;
             instances.insert(
                 entity,
                 GpuInstance {
@@ -243,23 +247,58 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
     }
 }
 
+#[derive(Component, Default, Clone, Copy, ShaderType)]
+pub struct InstanceIndex {
+    pub instance: u32,
+    pub material: u32,
+}
+
+#[derive(Component, Default, Clone, Copy)]
+pub struct DynamicInstanceIndex(pub u32);
+
 fn prepare_instances(
+    mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut render_assets: ResMut<InstanceRenderAssets>,
-    instances: Res<GpuInstances>,
+    mut instances: ResMut<GpuInstances>,
     asset_state: Res<MeshAssetState>,
 ) {
-    if *asset_state == MeshAssetState::Clean && !instances.is_changed() {
-        return;
-    }
     if *asset_state == MeshAssetState::Dirty {
         panic!("Mesh assets must be prepared before instances!");
     }
 
-    if !instances.is_empty() {
-        let mut instances: Vec<_> = instances.values().cloned().collect();
-        let bvh = BVH::build(&mut instances);
+    if instances.is_empty() {
+        return;
+    }
+
+    let mut add_instance_indices = |instances: &GpuInstances| {
+        render_assets.instance_indices.clear();
+        let command_batch: Vec<_> = instances
+            .iter()
+            .enumerate()
+            .map(|(id, (entity, instance))| {
+                let component = InstanceIndex {
+                    instance: id as u32,
+                    material: instance.material.value,
+                };
+                let index = render_assets.instance_indices.push(component);
+                (*entity, (DynamicInstanceIndex(index),))
+            })
+            .collect();
+        commands.insert_or_spawn_batch(command_batch);
+    };
+
+    if *asset_state != MeshAssetState::Clean || instances.is_changed() {
+        let mut values: Vec<_> = instances.values().cloned().collect();
+        let bvh = BVH::build(&mut values);
+
+        for (instance, value) in instances.values_mut().zip_eq(values.iter()) {
+            *instance = *value;
+        }
+
+        add_instance_indices(&instances);
+
         let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, primitive_index| GpuNode {
             min: aabb.min.to_array().into(),
             max: aabb.max.to_array().into(),
@@ -267,7 +306,12 @@ fn prepare_instances(
             exit_index,
             primitive_index,
         });
-        render_assets.set(instances, nodes);
+        render_assets.set(values, nodes);
         render_assets.write_buffer(&render_device, &render_queue);
+    } else {
+        add_instance_indices(&instances);
+        render_assets
+            .instance_indices
+            .write_buffer(&render_device, &render_queue);
     }
 }

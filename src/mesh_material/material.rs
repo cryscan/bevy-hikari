@@ -1,5 +1,7 @@
-use super::{GpuStandardMaterial, GpuStandardMaterialBuffer, IntoStandardMaterial};
-use crate::MeshMaterialSystems;
+use super::{
+    GpuStandardMaterial, GpuStandardMaterialBuffer, GpuStandardMaterialOffset,
+    IntoStandardMaterial, MeshMaterialSystems,
+};
 use bevy::{
     asset::HandleId,
     prelude::*,
@@ -23,7 +25,6 @@ impl Plugin for MaterialPlugin {
                 .init_resource::<MaterialRenderAssets>()
                 .init_resource::<StandardMaterials>()
                 .init_resource::<GpuStandardMaterials>()
-                .init_resource::<GpuStandardMaterialOffsets>()
                 .add_system_to_stage(
                     RenderStage::Prepare,
                     prepare_material_assets
@@ -57,13 +58,12 @@ pub struct MaterialRenderAssets {
 }
 
 #[derive(Default, Deref, DerefMut)]
-pub struct StandardMaterials(BTreeMap<HandleId, bevy::pbr::StandardMaterial>);
+pub struct StandardMaterials(BTreeMap<HandleId, StandardMaterial>);
 
 #[derive(Default, Deref, DerefMut)]
-pub struct GpuStandardMaterials(HashMap<HandleUntyped, GpuStandardMaterial>);
-
-#[derive(Default, Deref, DerefMut)]
-pub struct GpuStandardMaterialOffsets(HashMap<HandleUntyped, u32>);
+pub struct GpuStandardMaterials(
+    HashMap<HandleUntyped, (GpuStandardMaterial, GpuStandardMaterialOffset)>,
+);
 
 #[derive(Default)]
 pub struct ExtractedMaterials<M: IntoStandardMaterial> {
@@ -120,7 +120,6 @@ fn prepare_material_assets(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     materials: Res<StandardMaterials>,
-    mut offsets: ResMut<GpuStandardMaterialOffsets>,
     mut assets: ResMut<GpuStandardMaterials>,
     mut render_assets: ResMut<MaterialRenderAssets>,
 ) {
@@ -129,7 +128,6 @@ fn prepare_material_assets(
     }
 
     assets.clear();
-    offsets.clear();
 
     // TODO: remove unused textures.
     let textures: Vec<_> = render_assets.textures.iter().cloned().collect();
@@ -169,10 +167,12 @@ fn prepare_material_assets(
                 normal_map_texture,
                 occlusion_texture,
             };
+            let offset = GpuStandardMaterialOffset {
+                value: offset as u32,
+            };
 
             let handle = HandleUntyped::weak(*handle);
-            assets.insert(handle.clone(), material.clone());
-            offsets.insert(handle, offset as u32);
+            assets.insert(handle, (material, offset));
             material
         })
         .collect();

@@ -1,5 +1,7 @@
 use crate::{
-    mesh::PreviousMeshUniform,
+    mesh_material::{
+        DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
+    },
     view::{PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
     PREPASS_SHADER_HANDLE,
 };
@@ -8,7 +10,7 @@ use bevy::{
         lifetimeless::{Read, SQuery, SRes},
         SystemParamItem,
     },
-    pbr::{DrawMesh, MeshUniform, SHADOW_FORMAT},
+    pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SHADOW_FORMAT},
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -23,12 +25,17 @@ use bevy::{
         },
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
-        texture::TextureCache,
+        texture::{GpuImage, TextureCache},
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms, VisibleEntities},
         Extract, RenderApp, RenderStage,
     },
     utils::FloatOrd,
 };
+
+pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
+pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
+pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
+pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba16Snorm;
 
 pub struct PrepassPlugin;
 impl Plugin for PrepassPlugin {
@@ -106,6 +113,16 @@ impl FromWorld for PrepassPipeline {
                     },
                     count: None,
                 },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: Some(InstanceIndex::min_size()),
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -116,41 +133,8 @@ impl FromWorld for PrepassPipeline {
     }
 }
 
-bitflags::bitflags! {
-    #[repr(transparent)]
-    pub struct PrepassPipelineKey: u32 {
-        const NONE               = 0;
-        const PRIMITIVE_TOPOLOGY_RESERVED_BITS = PrepassPipelineKey::PRIMITIVE_TOPOLOGY_MASK_BITS << PrepassPipelineKey::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
-    }
-}
-
-impl PrepassPipelineKey {
-    const PRIMITIVE_TOPOLOGY_MASK_BITS: u32 = 0b111;
-    const PRIMITIVE_TOPOLOGY_SHIFT_BITS: u32 = 32 - 3;
-
-    pub fn from_primitive_topology(primitive_topology: PrimitiveTopology) -> Self {
-        let primitive_topology_bits = ((primitive_topology as u32)
-            & Self::PRIMITIVE_TOPOLOGY_MASK_BITS)
-            << Self::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
-        Self::from_bits(primitive_topology_bits).unwrap()
-    }
-
-    pub fn primitive_topology(&self) -> PrimitiveTopology {
-        let primitive_topology_bits =
-            (self.bits >> Self::PRIMITIVE_TOPOLOGY_SHIFT_BITS) & Self::PRIMITIVE_TOPOLOGY_MASK_BITS;
-        match primitive_topology_bits {
-            x if x == PrimitiveTopology::PointList as u32 => PrimitiveTopology::PointList,
-            x if x == PrimitiveTopology::LineList as u32 => PrimitiveTopology::LineList,
-            x if x == PrimitiveTopology::LineStrip as u32 => PrimitiveTopology::LineStrip,
-            x if x == PrimitiveTopology::TriangleList as u32 => PrimitiveTopology::TriangleList,
-            x if x == PrimitiveTopology::TriangleStrip as u32 => PrimitiveTopology::TriangleStrip,
-            _ => PrimitiveTopology::default(),
-        }
-    }
-}
-
 impl SpecializedMeshPipeline for PrepassPipeline {
-    type Key = PrepassPipelineKey;
+    type Key = MeshPipelineKey;
 
     fn specialize(
         &self,
@@ -160,6 +144,7 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         let vertex_attributes = vec![
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
         ];
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
         let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
@@ -177,11 +162,28 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 shader: PREPASS_SHADER_HANDLE.typed::<Shader>(),
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
-                targets: vec![Some(ColorTargetState {
-                    format: TextureFormat::Rgba16Float,
-                    blend: None,
-                    write_mask: ColorWrites::ALL,
-                })],
+                targets: vec![
+                    Some(ColorTargetState {
+                        format: POSITION_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: NORMAL_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: INSTANCE_MATERIAL_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: VELOCITY_UV_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                ],
             }),
             primitive: PrimitiveState {
                 topology: key.primitive_topology(),
@@ -213,14 +215,6 @@ impl SpecializedMeshPipeline for PrepassPipeline {
     }
 }
 
-#[derive(Component)]
-pub struct PrepassTarget {
-    pub normal_velocity_view: TextureView,
-    pub normal_velocity_sampler: Sampler,
-    pub depth_view: TextureView,
-    pub depth_sampler: Sampler,
-}
-
 fn extract_prepass_camera_phases(
     mut commands: Commands,
     cameras_3d: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
@@ -234,6 +228,15 @@ fn extract_prepass_camera_phases(
     }
 }
 
+#[derive(Component)]
+pub struct PrepassTarget {
+    pub position: GpuImage,
+    pub normal: GpuImage,
+    pub instance_material: GpuImage,
+    pub velocity_uv: GpuImage,
+    pub depth: GpuImage,
+}
+
 fn prepare_prepass_targets(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
@@ -241,103 +244,173 @@ fn prepare_prepass_targets(
     cameras: Query<(Entity, &ExtractedCamera), With<RenderPhase<Prepass>>>,
 ) {
     for (entity, camera) in &cameras {
-        if let Some(target_size) = camera.physical_target_size {
-            let size = Extent3d {
-                width: target_size.x,
-                height: target_size.y,
+        if let Some(size) = camera.physical_target_size {
+            let extent = Extent3d {
+                width: size.x,
+                height: size.y,
                 depth_or_array_layers: 1,
             };
+            let size = size.as_vec2();
+            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
 
-            let normal_velocity_view = texture_cache
-                .get(
+            let mut create_texture = |texture_format| -> GpuImage {
+                let sampler = render_device.create_sampler(&SamplerDescriptor {
+                    label: None,
+                    address_mode_u: AddressMode::ClampToEdge,
+                    address_mode_v: AddressMode::ClampToEdge,
+                    address_mode_w: AddressMode::ClampToEdge,
+                    mag_filter: FilterMode::Nearest,
+                    min_filter: FilterMode::Nearest,
+                    mipmap_filter: FilterMode::Nearest,
+                    ..Default::default()
+                });
+                let texture = texture_cache.get(
                     &render_device,
                     TextureDescriptor {
-                        label: Some("prepass_color_attachment_texture"),
-                        size,
+                        label: None,
+                        size: extent,
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: TextureDimension::D2,
-                        format: TextureFormat::Rgba16Float,
-                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+                        format: texture_format,
+                        usage: texture_usage,
                     },
-                )
-                .default_view;
-            let normal_velocity_sampler =
-                render_device.create_sampler(&SamplerDescriptor::default());
+                );
+                GpuImage {
+                    texture: texture.texture,
+                    texture_view: texture.default_view,
+                    texture_format,
+                    sampler,
+                    size,
+                }
+            };
 
-            let depth_view = texture_cache
-                .get(
-                    &render_device,
-                    TextureDescriptor {
-                        label: Some("prepass_depth_stencil_attachment_texture"),
-                        size,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: SHADOW_FORMAT,
-                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
-                    },
-                )
-                .default_view;
-            let depth_sampler = render_device.create_sampler(&SamplerDescriptor::default());
+            let position = create_texture(POSITION_FORMAT);
+            let normal = create_texture(NORMAL_FORMAT);
+            let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
+            let velocity_uv = create_texture(VELOCITY_UV_FORMAT);
+            let depth = create_texture(SHADOW_FORMAT);
 
             commands.entity(entity).insert(PrepassTarget {
-                normal_velocity_view,
-                normal_velocity_sampler,
-                depth_view,
-                depth_sampler,
+                position,
+                normal,
+                instance_material,
+                velocity_uv,
+                depth,
             });
         }
     }
 }
 
 fn queue_prepass_meshes(
-    prepass_draw_functions: Res<DrawFunctions<Prepass>>,
+    draw_functions: Res<DrawFunctions<Prepass>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     prepass_pipeline: Res<PrepassPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
-    meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform)>,
+    meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform, &DynamicInstanceIndex)>,
     mut views: Query<(&ExtractedView, &VisibleEntities, &mut RenderPhase<Prepass>)>,
 ) {
-    let draw_function = prepass_draw_functions
-        .read()
-        .get_id::<DrawPrepass>()
-        .unwrap();
+    let draw_function = draw_functions.read().get_id::<DrawPrepass>().unwrap();
     for (view, visible_entities, mut prepass_phase) in &mut views {
         let rangefinder = view.rangefinder3d();
 
-        let add_render_phase =
-            |(entity, mesh_handle, mesh_uniform): (Entity, &Handle<Mesh>, &MeshUniform)| {
-                if let Some(mesh) = render_meshes.get(mesh_handle) {
-                    let key = PrepassPipelineKey::from_primitive_topology(mesh.primitive_topology);
-                    let pipeline_id = pipelines.specialize(
-                        &mut pipeline_cache,
-                        &prepass_pipeline,
-                        key,
-                        &mesh.layout,
-                    );
-                    let pipeline_id = match pipeline_id {
-                        Ok(id) => id,
-                        Err(err) => {
-                            error!("{}", err);
-                            return;
-                        }
-                    };
-                    prepass_phase.add(Prepass {
-                        distance: rangefinder.distance(&mesh_uniform.transform),
-                        entity,
-                        pipeline: pipeline_id,
-                        draw_function,
-                    });
-                }
-            };
+        let add_render_phase = |(entity, mesh_handle, mesh_uniform, _): (
+            Entity,
+            &Handle<Mesh>,
+            &MeshUniform,
+            &DynamicInstanceIndex,
+        )| {
+            if let Some(mesh) = render_meshes.get(mesh_handle) {
+                let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                let pipeline_id =
+                    pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);
+                let pipeline_id = match pipeline_id {
+                    Ok(id) => id,
+                    Err(err) => {
+                        error!("{}", err);
+                        return;
+                    }
+                };
+                prepass_phase.add(Prepass {
+                    distance: rangefinder.distance(&mesh_uniform.transform),
+                    entity,
+                    pipeline: pipeline_id,
+                    draw_function,
+                });
+            }
+        };
 
         visible_entities
             .entities
             .iter()
             .filter_map(|visible_entity| meshes.get(*visible_entity).ok())
             .for_each(add_render_phase);
+    }
+}
+
+pub struct PrepassBindGroup {
+    pub view: BindGroup,
+    pub mesh: BindGroup,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn queue_prepass_bind_group(
+    mut commands: Commands,
+    prepass_pipeline: Res<PrepassPipeline>,
+    render_device: Res<RenderDevice>,
+    mesh_uniforms: Res<ComponentUniforms<MeshUniform>>,
+    previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
+    instance_render_assets: Res<InstanceRenderAssets>,
+    view_uniforms: Res<ViewUniforms>,
+    previous_view_uniforms: Res<PreviousViewUniforms>,
+) {
+    if let (
+        Some(view_binding),
+        Some(previous_view_binding),
+        Some(mesh_binding),
+        Some(previous_mesh_binding),
+        Some(instance_indices_binding),
+    ) = (
+        view_uniforms.uniforms.binding(),
+        previous_view_uniforms.uniforms.binding(),
+        mesh_uniforms.binding(),
+        previous_mesh_uniforms.binding(),
+        instance_render_assets.instance_indices.binding(),
+    ) {
+        let view = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &prepass_pipeline.view_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: view_binding,
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: previous_view_binding,
+                },
+            ],
+        });
+        let mesh = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &prepass_pipeline.mesh_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: mesh_binding,
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: previous_mesh_binding,
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: instance_indices_binding,
+                },
+            ],
+        });
+        commands.insert_resource(PrepassBindGroup { view, mesh });
     }
 }
 
@@ -373,63 +446,6 @@ impl CachedRenderPipelinePhaseItem for Prepass {
     #[inline]
     fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
-    }
-}
-
-pub struct PrepassBindGroup {
-    pub view: BindGroup,
-    pub mesh: BindGroup,
-}
-
-fn queue_prepass_bind_group(
-    mut commands: Commands,
-    prepass_pipeline: Res<PrepassPipeline>,
-    render_device: Res<RenderDevice>,
-    mesh_uniforms: Res<ComponentUniforms<MeshUniform>>,
-    previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
-    view_uniforms: Res<ViewUniforms>,
-    previous_view_uniforms: Res<PreviousViewUniforms>,
-) {
-    if let (
-        Some(view_binding),
-        Some(previous_view_binding),
-        Some(mesh_binding),
-        Some(previous_mesh_binding),
-    ) = (
-        view_uniforms.uniforms.binding(),
-        previous_view_uniforms.uniforms.binding(),
-        mesh_uniforms.binding(),
-        previous_mesh_uniforms.binding(),
-    ) {
-        let view = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &prepass_pipeline.view_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: view_binding,
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: previous_view_binding,
-                },
-            ],
-        });
-        let mesh = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &prepass_pipeline.mesh_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: mesh_binding,
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: previous_mesh_binding,
-                },
-            ],
-        });
-        commands.insert_resource(PrepassBindGroup { view, mesh });
     }
 }
 
@@ -471,6 +487,7 @@ impl<const I: usize> EntityRenderCommand for SetPrepassMeshBindGroup<I> {
         SQuery<(
             Read<DynamicUniformIndex<MeshUniform>>,
             Read<DynamicUniformIndex<PreviousMeshUniform>>,
+            Read<DynamicInstanceIndex>,
         )>,
     );
 
@@ -480,11 +497,16 @@ impl<const I: usize> EntityRenderCommand for SetPrepassMeshBindGroup<I> {
         (bind_group, mesh_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (mesh_uniform, previous_mesh_uniform) = mesh_query.get_inner(item).unwrap();
+        let (mesh_uniform, previous_mesh_uniform, instance_index) =
+            mesh_query.get_inner(item).unwrap();
         pass.set_bind_group(
             I,
             &bind_group.into_inner().mesh,
-            &[mesh_uniform.index(), previous_mesh_uniform.index()],
+            &[
+                mesh_uniform.index(),
+                previous_mesh_uniform.index(),
+                instance_index.0,
+            ],
         );
 
         RenderCommandResult::Success
@@ -538,18 +560,36 @@ impl Node for PrepassNode {
         {
             #[cfg(feature = "trace")]
             let _main_prepass_span = info_span!("main_prepass").entered();
+            let ops = Operations {
+                load: LoadOp::Clear(Color::NONE.into()),
+                store: true,
+            };
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("main_prepass"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &target.normal_velocity_view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::NONE.into()),
-                        store: true,
-                    },
-                })],
+                color_attachments: &[
+                    Some(RenderPassColorAttachment {
+                        view: &target.position.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                    Some(RenderPassColorAttachment {
+                        view: &target.normal.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                    Some(RenderPassColorAttachment {
+                        view: &target.instance_material.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                    Some(RenderPassColorAttachment {
+                        view: &target.velocity_uv.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                ],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &target.depth_view,
+                    view: &target.depth.texture_view,
                     depth_ops: Some(Operations {
                         load: camera_3d.depth_load_op.clone().into(),
                         store: true,
