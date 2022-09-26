@@ -23,7 +23,7 @@ use bevy::{
 use std::num::NonZeroU32;
 
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg32Float;
 pub const RADIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const POSITION_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;

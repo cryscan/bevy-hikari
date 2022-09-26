@@ -25,7 +25,7 @@ var noise_sampler: sampler;
 @group(5) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
 @group(5) @binding(1)
-var reservoir_texture: texture_storage_2d<rgba16float, write>;
+var reservoir_texture: texture_storage_2d<rg32float, write>;
 @group(5) @binding(2)
 var radiance_texture: texture_storage_2d<rgba16float, write>;
 @group(5) @binding(3)
@@ -393,9 +393,8 @@ fn sample_reservoir(uv: vec2<f32>) -> Reservoir {
     var r: Reservoir;
 
     let reservoir = textureSampleLevel(previous_reservoir_textures[0], previous_reservoir_samplers[0], uv, 0.0);
-    r.w = reservoir.r;
-    r.w_sum = reservoir.g;
-    r.count = reservoir.b;
+    r.w_sum = reservoir.r;
+    r.count = reservoir.g;
 
     r.s.radiance = textureSampleLevel(previous_reservoir_textures[1], previous_reservoir_samplers[1], uv, 0.0).rgb;
     r.s.random = textureSampleLevel(previous_reservoir_textures[2], previous_reservoir_samplers[2], uv, 0.0);
@@ -411,9 +410,8 @@ fn load_reservoir(coords: vec2<i32>) -> Reservoir {
     var r: Reservoir;
 
     let reservoir = textureLoad(reservoir_texture, coords);
-    r.w = reservoir.r;
-    r.w_sum = reservoir.g;
-    r.count = reservoir.b;
+    r.w_sum = reservoir.r;
+    r.count = reservoir.g;
 
     r.s.radiance = textureLoad(radiance_texture, coords).rgb;
     r.s.random = textureLoad(random_texture, coords);
@@ -426,7 +424,7 @@ fn load_reservoir(coords: vec2<i32>) -> Reservoir {
 }
 
 fn store_reservoir(coords: vec2<i32>, r: Reservoir) {
-    let reservoir = vec4<f32>(r.w, r.w_sum, r.count, 0.0);
+    let reservoir = vec4<f32>(r.w_sum, r.count, 0.0, 0.0);
     textureStore(reservoir_texture, coords, reservoir);
 
     textureStore(radiance_texture, coords, vec4<f32>(r.s.radiance, 0.0));
@@ -650,7 +648,7 @@ fn direct_lit(
 
     let p = luminance(s.radiance) / (p1 * p2);
     update_reservoir(invocation_id, &r, s, p);
-    r.w = r.w_sum / (r.count * luminance(r.s.radiance) + 0.0001);
+    r.w = r.w_sum / (r.count * luminance(r.s.radiance));
 
     textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
 
