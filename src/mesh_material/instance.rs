@@ -4,7 +4,7 @@ use super::{
     MeshMaterialSystems,
 };
 use crate::{
-    mesh::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
+    mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
     transform::PreviousGlobalTransform,
 };
 use bevy::{
@@ -154,6 +154,7 @@ fn instance_event_system<M: IntoStandardMaterial>(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct ExtractedInstances<M: IntoStandardMaterial> {
     extracted: Vec<(Entity, Aabb, GlobalTransform, Handle<Mesh>, Handle<M>)>,
     removed: Vec<Entity>,
@@ -175,7 +176,7 @@ fn extract_instances<M: IntoStandardMaterial>(
                     extracted.push((
                         *entity,
                         aabb.clone(),
-                        transform.clone(),
+                        *transform,
                         mesh.clone_weak(),
                         material.clone_weak(),
                     ));

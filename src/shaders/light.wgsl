@@ -17,6 +17,10 @@ struct Frame {
 
 @group(4) @binding(0)
 var<uniform> frame: Frame;
+@group(4) @binding(1)
+var noise_texture: binding_array<texture_2d<f32>>;
+@group(4) @binding(2)
+var noise_sampler: sampler;
 
 @group(5) @binding(0)
 var render_texture: texture_storage_2d<rgba16float, write>;
@@ -42,9 +46,11 @@ var previous_reservoir_samplers: binding_array<sampler>;
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
+
 let DISTANCE_MAX: f32 = 65535.0;
 let VALIDATION_INTERVAL: u32 = 16u;
-let SECOND_BOUNCE_CHANCE: f32 = 1.0;
+let NOISE_TEXTURE_COUNT: u32 = 64u;
+let GOLDEN_RATIO: f32 = 1.618033989;
 
 let SOLAR_ANGLE: f32 = 0.523598776;
 
@@ -531,6 +537,7 @@ fn shading(
 fn direct_lit(
     @builtin(global_invocation_id) invocation_id: vec3<u32>,
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
     let size = textureDimensions(render_texture);
     let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
@@ -557,11 +564,21 @@ fn direct_lit(
     let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
-    let hashed_frame_number = hash(frame.number);
-    s.random.x = random_float(invocation_id.x * hash(invocation_id.y) ^ hashed_frame_number);
-    s.random.y = random_float(invocation_id.y * hash(invocation_id.x) ^ ~hashed_frame_number);
-    s.random.z = random_float(invocation_id.x ^ hash(invocation_id.y) * hashed_frame_number);
-    s.random.w = random_float(invocation_id.x ^ ~hash(invocation_id.y) * hashed_frame_number);
+    // let hashed_frame_number = hash(frame.number);
+    // s.random.x = random_float(invocation_id.x * hash(invocation_id.y) ^ hashed_frame_number);
+    // s.random.y = random_float(invocation_id.y * hash(invocation_id.x) ^ ~hashed_frame_number);
+    // s.random.z = random_float(invocation_id.x ^ hash(invocation_id.y) * hashed_frame_number);
+    // s.random.w = random_float(invocation_id.x ^ ~hash(invocation_id.y) * hashed_frame_number);
+
+    // let total_workgroups = num_workgroups.x * num_workgroups.y;
+    // let hashed_workgroup_id = hash(workgroup_id.x + workgroup_id.y * num_workgroups.x) % max(NOISE_TEXTURE_COUNT, total_workgroups);
+
+    let noise_id = frame.number % NOISE_TEXTURE_COUNT;
+    let noise_size = textureDimensions(noise_texture[noise_id]).xy;
+    let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
+    let noise_temporal_offset = f32(frame.number);
+    s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
+    s.random = fract(s.random + noise_temporal_offset * GOLDEN_RATIO);
 
     s.radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
     s.visible_position = vec4<f32>(position.xyz, depth);

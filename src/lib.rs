@@ -9,14 +9,14 @@ use bevy::{
     },
 };
 use light::{LightPassNode, LightPlugin};
-use mesh::MeshMaterialPlugin;
+use mesh_material::MeshMaterialPlugin;
 use overlay::{OverlayPassNode, OverlayPlugin};
 use prepass::{PrepassNode, PrepassPlugin};
 use transform::TransformPlugin;
 use view::ViewPlugin;
 
 pub mod light;
-pub mod mesh;
+pub mod mesh_material;
 pub mod overlay;
 pub mod prelude;
 pub mod prepass;
@@ -37,6 +37,7 @@ pub mod graph {
 }
 
 pub const WORKGROUP_SIZE: u32 = 8;
+pub const NOISE_TEXTURE_COUNT: usize = 64;
 
 pub const MESH_MATERIAL_TYPES_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
@@ -53,7 +54,29 @@ pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
 pub const QUAD_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 
-pub struct HikariPlugin;
+pub struct HikariPlugin {
+    noise_folder: String,
+}
+
+impl HikariPlugin {
+    pub fn new(noise_folder: &str) -> Self {
+        Self {
+            noise_folder: noise_folder.into(),
+        }
+    }
+}
+
+impl Default for HikariPlugin {
+    fn default() -> Self {
+        Self {
+            noise_folder: "textures/blue_noise".into(),
+        }
+    }
+}
+
+#[derive(Clone, Deref, DerefMut)]
+pub struct NoiseTexture(pub Vec<Handle<Image>>);
+
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(
@@ -93,12 +116,24 @@ impl Plugin for HikariPlugin {
             Shader::from_wgsl
         );
 
+        let noise_path = self.noise_folder.clone();
+        let load_system = move |mut commands: Commands, asset_server: Res<AssetServer>| {
+            let handles = (0..NOISE_TEXTURE_COUNT)
+                .map(|id| {
+                    let name = format!("{}/LDR_RGBA_{}.png", noise_path, id);
+                    asset_server.load(&name)
+                })
+                .collect();
+            commands.insert_resource(NoiseTexture(handles));
+        };
+
         app.add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshMaterialPlugin)
             .add_plugin(PrepassPlugin)
             .add_plugin(LightPlugin)
-            .add_plugin(OverlayPlugin);
+            .add_plugin(OverlayPlugin)
+            .add_startup_system(load_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);

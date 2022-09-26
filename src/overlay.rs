@@ -173,6 +173,7 @@ fn queue_overlay_bind_groups(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn queue_overlay_mesh(
     mut commands: Commands,
     msaa: Res<Msaa>,

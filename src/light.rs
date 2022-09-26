@@ -1,22 +1,23 @@
 use crate::{
-    mesh::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
+    mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::PrepassTarget,
-    LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
+    NoiseTexture, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
     pbr::{
-        GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, ShadowPipeline, ViewClusterBindings,
-        ViewLightsUniformOffset, ViewShadowBindings,
+        GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, MeshPipeline, ShadowPipeline,
+        ViewClusterBindings, ViewLightsUniformOffset, ViewShadowBindings,
     },
     prelude::*,
     render::{
         camera::ExtractedCamera,
+        render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{GpuImage, TextureCache},
         view::{ViewUniform, ViewUniformOffset, ViewUniforms},
-        RenderApp, RenderStage,
+        Extract, RenderApp, RenderStage,
     },
 };
 use std::num::NonZeroU32;
@@ -37,6 +38,7 @@ impl Plugin for LightPlugin {
                 .init_resource::<LightPipeline>()
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
                 .init_resource::<FrameUniform>()
+                .add_system_to_stage(RenderStage::Extract, extract_noise_texture)
                 .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
                 .add_system_to_stage(RenderStage::Prepare, prepare_frame_uniform)
                 .add_system_to_stage(RenderStage::Queue, queue_view_bind_groups)
@@ -46,6 +48,10 @@ impl Plugin for LightPlugin {
     }
 }
 
+fn extract_noise_texture(mut commands: Commands, noise_texture: Extract<Res<NoiseTexture>>) {
+    commands.insert_resource(noise_texture.clone());
+}
+
 pub struct LightPipeline {
     pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
@@ -53,6 +59,7 @@ pub struct LightPipeline {
     pub texture_layout: Option<BindGroupLayout>,
     pub frame_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
+    pub dummy_white_gpu_image: GpuImage,
 }
 
 impl FromWorld for LightPipeline {
@@ -60,6 +67,7 @@ impl FromWorld for LightPipeline {
         let buffer_binding_type = BufferBindingType::Storage { read_only: true };
 
         let render_device = world.resource::<RenderDevice>();
+        let mesh_pipeline = world.resource::<MeshPipeline>();
         let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -255,6 +263,23 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
+                // Noise Texture
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: NonZeroU32::new(NOISE_TEXTURE_COUNT as u32),
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    count: None,
+                },
             ],
         });
 
@@ -376,6 +401,7 @@ impl FromWorld for LightPipeline {
             texture_layout: None,
             frame_layout,
             render_layout,
+            dummy_white_gpu_image: mesh_pipeline.dummy_white_gpu_image.clone(),
         }
     }
 }
@@ -466,7 +492,7 @@ fn prepare_light_pass_targets(
                     texture: texture.texture,
                     texture_view: texture.default_view,
                     texture_format,
-                    sampler: sampler,
+                    sampler,
                     size,
                 }
             };
@@ -647,8 +673,32 @@ fn queue_light_bind_groups(
     pipeline: Res<LightPipeline>,
     counter: Res<FrameCounter>,
     frame_uniform: Res<FrameUniform>,
+    noise_texture: Res<NoiseTexture>,
+    images: Res<RenderAssets<Image>>,
     query: Query<(Entity, &PrepassTarget, &LightPassTarget)>,
 ) {
+    let mut noise_texture_views = vec![];
+    for handle in noise_texture.iter() {
+        let image = match images.get(handle) {
+            Some(image) => image,
+            None => {
+                return;
+            }
+        };
+        noise_texture_views.push(&*image.texture_view);
+    }
+
+    let noise_sampler = render_device.create_sampler(&SamplerDescriptor {
+        label: None,
+        address_mode_u: AddressMode::Repeat,
+        address_mode_v: AddressMode::Repeat,
+        address_mode_w: AddressMode::Repeat,
+        mag_filter: FilterMode::Nearest,
+        min_filter: FilterMode::Nearest,
+        mipmap_filter: FilterMode::Nearest,
+        ..Default::default()
+    });
+
     for (entity, prepass, light_pass) in &query {
         if let Some(frame_binding) = frame_uniform.buffer.binding() {
             let deferred = render_device.create_bind_group(&BindGroupDescriptor {
@@ -691,10 +741,20 @@ fn queue_light_bind_groups(
             let frame = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &pipeline.frame_layout,
-                entries: &[BindGroupEntry {
-                    binding: 0,
-                    resource: frame_binding,
-                }],
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: frame_binding,
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::TextureViewArray(&noise_texture_views),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: BindingResource::Sampler(&noise_sampler),
+                    },
+                ],
             });
 
             let current_id = counter.0 % 2;

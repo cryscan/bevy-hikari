@@ -1,5 +1,7 @@
 use crate::{
-    mesh::{DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform},
+    mesh_material::{
+        DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
+    },
     view::{PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
     PREPASS_SHADER_HANDLE,
 };
@@ -278,7 +280,7 @@ fn prepare_prepass_targets(
                     texture: texture.texture,
                     texture_view: texture.default_view,
                     texture_format,
-                    sampler: sampler,
+                    sampler,
                     size,
                 }
             };
@@ -567,7 +569,7 @@ impl Node for PrepassNode {
                     Some(RenderPassColorAttachment {
                         view: &target.position.texture_view,
                         resolve_target: None,
-                        ops: ops,
+                        ops,
                     }),
                     Some(RenderPassColorAttachment {
                         view: &target.normal.texture_view,
