@@ -431,6 +431,12 @@ fn store_reservoir(coords: vec2<i32>, r: Reservoir) {
     textureStore(sample_normal_texture, coords, vec4<f32>(r.s.sample_normal, 0.0));
 }
 
+fn set_reservoir(r: ptr<function, Reservoir>, s: Sample, w_new: f32) {
+    (*r).count = 1.0;
+    (*r).w_sum = w_new;
+    (*r).s = s;
+}
+
 fn update_reservoir(
     invocation_id: vec3<u32>,
     r: ptr<function, Reservoir>,
@@ -438,10 +444,7 @@ fn update_reservoir(
     w_new: f32,
 ) {
     if (distance(s.visible_position.w, (*r).s.visible_position.w) > 0.001 || dot(s.visible_normal, (*r).s.visible_normal) < 0.866) {
-        (*r).count = 0.0;
-        (*r).w = 0.0;
-        (*r).w_sum = 0.0;
-        (*r).s = s;
+        set_reservoir(r, s, w_new);
         return;
     }
 
@@ -549,10 +552,7 @@ fn direct_lit(
     let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
     if (position.w < 0.5) {
         var r: Reservoir;
-        r.s = s;
-        r.count = 0.0;
-        r.w = 0.0;
-        r.w_sum = 0.0;
+        set_reservoir(&r, s, 0.0);
         store_reservoir(coords, r);
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
@@ -688,10 +688,7 @@ fn direct_lit(
         );
 
         if (abs(luminance(r.s.radiance) - luminance(valid_radiance)) / luminance(r.s.radiance) > 0.1) {
-            r.count = 0.0;
-            r.w = 0.0;
-            r.w_sum = 0.0;
-            r.s = s;
+            set_reservoir(&r, s, p);
         }
     }
 
