@@ -648,7 +648,7 @@ fn direct_lit(
 
     let p = luminance(s.radiance) / (p1 * p2);
     update_reservoir(invocation_id, &r, s, p);
-    r.w = r.w_sum / (r.count * luminance(r.s.radiance));
+    r.w = r.w_sum / (max(r.count, 1.0) * luminance(r.s.radiance));
 
     textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
 
