@@ -172,7 +172,7 @@ fn prepare_material_assets(
             };
 
             let handle = HandleUntyped::weak(*handle);
-            assets.insert(handle.clone(), (material, offset));
+            assets.insert(handle, (material, offset));
             material
         })
         .collect();

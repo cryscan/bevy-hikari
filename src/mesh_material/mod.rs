@@ -443,6 +443,7 @@ pub struct MeshMaterialBindGroup {
     pub texture: BindGroup,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn queue_mesh_material_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,

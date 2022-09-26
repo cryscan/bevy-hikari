@@ -354,6 +354,7 @@ pub struct PrepassBindGroup {
     pub mesh: BindGroup,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn queue_prepass_bind_group(
     mut commands: Commands,
     prepass_pipeline: Res<PrepassPipeline>,

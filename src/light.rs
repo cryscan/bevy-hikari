@@ -667,6 +667,7 @@ pub struct LightBindGroup {
     pub render: BindGroup,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn queue_light_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
