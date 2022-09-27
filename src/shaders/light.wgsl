@@ -51,7 +51,10 @@ let DISTANCE_MAX: f32 = 65535.0;
 let VALIDATION_INTERVAL: u32 = 16u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
-let SECOND_BOUNCE_CHANCE: f32 = 1.0;
+
+#ifdef RUSSIAN_ROULETTE
+let SECOND_BOUNCE_CHANCE: f32 = 0.5;
+#endif
 
 let SOLAR_ANGLE: f32 = 0.523598776;
 
@@ -602,17 +605,22 @@ fn direct_lit(
     s.sample_normal = info.normal;
 
     // Second bounce: from sample position
+    var p2 = 1.0;
+    var head_radiance = vec3<f32>(0.0);
+
+#ifdef RUSSIAN_ROULETTE
+    p2 = SECOND_BOUNCE_CHANCE;
+    
     let b2_rand = random_float(workgroup_id.x + workgroup_id.y * num_workgroups.x + hash(frame.number));
     let b2_condition = max(0.0, sign(SECOND_BOUNCE_CHANCE - b2_rand));  // 1.0 if b2_rand < SECOND_BOUNCE_CHANCE
     s.random *= vec4<f32>(1.0, 1.0, b2_condition, b2_condition);
+#endif
 
-    var p2 = 1.0;
-    var head_radiance = vec3<f32>(0.0);
     if (any(s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
         bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
         bounce_ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(s.random.zw);
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-        p2 = dot(bounce_ray.direction, info.normal) * SECOND_BOUNCE_CHANCE;
+        p2 *= dot(bounce_ray.direction, info.normal);
 
         hit = traverse_top(bounce_ray);
         bounce_info = hit_info(bounce_ray, hit);

@@ -49,25 +49,27 @@ fn setup(
 ) {
     // Ground
     let cube = meshes.add(Mesh::from(shape::Cube::default()));
-    commands.spawn_bundle(PbrBundle {
-        mesh: cube.clone(),
-        material: materials.add(StandardMaterial {
-            base_color: Color::rgb(0.3, 0.5, 0.3),
-            perceptual_roughness: 0.5,
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube.clone(),
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(0.3, 0.5, 0.3),
+                perceptual_roughness: 0.5,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(0.0, -0.5, 0.0),
+                scale: Vec3::new(8.0, 1.0, 8.0),
+                ..Default::default()
+            },
             ..Default::default()
-        }),
-        transform: Transform {
-            translation: Vec3::new(0.0, -0.5, 0.0),
-            scale: Vec3::new(8.0, 1.0, 8.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
     commands
         .spawn_bundle(PbrBundle {
             mesh: meshes.add(Mesh::from(shape::Plane::default())),
             material: materials.add(StandardMaterial {
-                base_color: Color::GRAY,
+                base_color: Color::WHITE,
                 perceptual_roughness: 0.5,
                 ..Default::default()
             }),
@@ -81,65 +83,73 @@ fn setup(
         .insert(RayCastMesh::<RaycastSet>::default());
 
     // Left
-    commands.spawn_bundle(PbrBundle {
-        mesh: cube.clone(),
-        material: materials.add(StandardMaterial {
-            base_color: Color::PINK,
-            perceptual_roughness: 0.5,
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube.clone(),
+            material: materials.add(StandardMaterial {
+                base_color: Color::PINK,
+                perceptual_roughness: 0.5,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(-3.5, 3.0, 0.0),
+                scale: Vec3::new(1.0, 6.0, 8.0),
+                ..Default::default()
+            },
             ..Default::default()
-        }),
-        transform: Transform {
-            translation: Vec3::new(-3.5, 3.0, 0.0),
-            scale: Vec3::new(1.0, 6.0, 8.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
     // Right
-    commands.spawn_bundle(PbrBundle {
-        mesh: cube.clone(),
-        material: materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            perceptual_roughness: 0.5,
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube.clone(),
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 0.5,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(3.5, 3.0, 0.0),
+                scale: Vec3::new(1.0, 6.0, 8.0),
+                ..Default::default()
+            },
             ..Default::default()
-        }),
-        transform: Transform {
-            translation: Vec3::new(3.5, 3.0, 0.0),
-            scale: Vec3::new(1.0, 6.0, 8.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
     // Back
-    commands.spawn_bundle(PbrBundle {
-        mesh: cube.clone(),
-        material: materials.add(StandardMaterial {
-            base_color: Color::AQUAMARINE,
-            perceptual_roughness: 0.5,
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube.clone(),
+            material: materials.add(StandardMaterial {
+                base_color: Color::AQUAMARINE,
+                perceptual_roughness: 0.5,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(0.0, 3.0, -3.5),
+                scale: Vec3::new(6.0, 6.0, 1.0),
+                ..Default::default()
+            },
             ..Default::default()
-        }),
-        transform: Transform {
-            translation: Vec3::new(0.0, 3.0, -3.5),
-            scale: Vec3::new(6.0, 6.0, 1.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
     // Top
-    commands.spawn_bundle(PbrBundle {
-        mesh: cube,
-        material: materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            perceptual_roughness: 0.5,
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube,
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 0.5,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(0.0, 6.5, 0.0),
+                scale: Vec3::new(8.0, 1.0, 8.0),
+                ..Default::default()
+            },
             ..Default::default()
-        }),
-        transform: Transform {
-            translation: Vec3::new(0.0, 6.5, 0.0),
-            scale: Vec3::new(8.0, 1.0, 8.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
 
     // Sphere
     commands.spawn_bundle(PbrBundle {
@@ -158,13 +168,14 @@ fn setup(
     });
 
     // Model
+    let scene = asset_server.load("models/extinguisher.glb#Scene0");
     commands.spawn_bundle(SceneBundle {
-        scene: asset_server.load("models/extinguisher.glb#Scene0"),
+        scene: scene.clone(),
         transform: Transform::default(),
         ..default()
     });
     commands.spawn_bundle(SceneBundle {
-        scene: asset_server.load("models/extinguisher.glb#Scene0"),
+        scene,
         transform: Transform {
             translation: Vec3::new(0.0, -1.0, 10.0),
             rotation: Quat::from_rotation_y(PI / 2.0),
