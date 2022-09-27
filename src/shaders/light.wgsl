@@ -446,7 +446,8 @@ fn update_reservoir(
     s: Sample,
     w_new: f32,
 ) {
-    if (distance(s.visible_position.w, (*r).s.visible_position.w) > 0.001 || dot(s.visible_normal, (*r).s.visible_normal) < 0.866) {
+    let depth_frac = (*r).s.visible_position.w / s.visible_position.w;
+    if (abs(depth_frac - 1.0) > 0.1 || dot(s.visible_normal, (*r).s.visible_normal) < 0.866) {
         set_reservoir(r, s, w_new);
         return;
     }
@@ -565,9 +566,10 @@ fn direct_lit(
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
     let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
-    let instance_material = textureLoad(instance_material_texture, coords, 0);
-    let velocity_uv = textureSampleLevel(velocity_uv_texture, velocity_uv_sampler, uv, 0.0);
-    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let instance_material = textureLoad(instance_material_texture, coords, 0).xy;
+    let object_uv = textureSampleLevel(uv_texture, uv_sampler, uv, 0.0).xy;
+    let velocity = textureSampleLevel(velocity_texture, velocity_sampler, uv, 0.0).xy * 0.0001;
+    let surface = retreive_surface(instance_material.y, object_uv);
 
     // let hashed_frame_number = hash(frame.number);
     // s.random.x = random_float(invocation_id.x * hash(invocation_id.y) ^ hashed_frame_number);
@@ -610,7 +612,7 @@ fn direct_lit(
 
 #ifdef RUSSIAN_ROULETTE
     p2 = SECOND_BOUNCE_CHANCE;
-    
+
     let b2_rand = random_float(workgroup_id.x + workgroup_id.y * num_workgroups.x + hash(frame.number));
     let b2_condition = max(0.0, sign(SECOND_BOUNCE_CHANCE - b2_rand));  // 1.0 if b2_rand < SECOND_BOUNCE_CHANCE
     s.random *= vec4<f32>(1.0, 1.0, b2_condition, b2_condition);
@@ -646,7 +648,7 @@ fn direct_lit(
     );
 
     // ReSTIR: Temporal
-    let previous_uv = uv - velocity_uv.xy * 0.01;
+    let previous_uv = uv - velocity;
     var r = sample_reservoir(previous_uv);
     if (any(abs(previous_uv - 0.5) > vec2<f32>(0.5))) {
         r.s.visible_normal = vec3<f32>(0.0);
@@ -695,7 +697,8 @@ fn direct_lit(
             head_radiance
         );
 
-        if (abs(luminance(r.s.radiance) - luminance(valid_radiance)) / luminance(r.s.radiance) > 0.1) {
+        let luminance_frac = luminance(r.s.radiance) / luminance(valid_radiance);
+        if (abs(luminance_frac - 1.0) > 0.1) {
             set_reservoir(&r, s, p);
         }
     }

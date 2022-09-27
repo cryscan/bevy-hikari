@@ -213,12 +213,12 @@ fn setup(
     commands
         .spawn_bundle(Camera3dBundle {
             camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
-            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(-10.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         })
         .insert_bundle(OrbitCameraBundle::new(
             OrbitCameraController::default(),
-            Vec3::new(-2.0, 5.0, 5.0),
+            Vec3::new(-10.0, 5.0, 20.0),
             Vec3::new(0., 0., 0.),
         ))
         .insert(RayCastSource::<RaycastSet>::default());

@@ -35,7 +35,8 @@ use bevy::{
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
-pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
+pub const UV_FORMAT: TextureFormat = TextureFormat::Rg16Unorm;
+pub const VELOCITY_FORMAT: TextureFormat = TextureFormat::Rg32Float;
 
 pub struct PrepassPlugin;
 impl Plugin for PrepassPlugin {
@@ -179,7 +180,12 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                         write_mask: ColorWrites::ALL,
                     }),
                     Some(ColorTargetState {
-                        format: VELOCITY_UV_FORMAT,
+                        format: UV_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: VELOCITY_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
@@ -233,7 +239,8 @@ pub struct PrepassTarget {
     pub position: GpuImage,
     pub normal: GpuImage,
     pub instance_material: GpuImage,
-    pub velocity_uv: GpuImage,
+    pub uv: GpuImage,
+    pub velocity: GpuImage,
     pub depth: GpuImage,
 }
 
@@ -288,14 +295,16 @@ fn prepare_prepass_targets(
             let position = create_texture(POSITION_FORMAT);
             let normal = create_texture(NORMAL_FORMAT);
             let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
-            let velocity_uv = create_texture(VELOCITY_UV_FORMAT);
+            let uv = create_texture(UV_FORMAT);
+            let velocity = create_texture(VELOCITY_FORMAT);
             let depth = create_texture(SHADOW_FORMAT);
 
             commands.entity(entity).insert(PrepassTarget {
                 position,
                 normal,
                 instance_material,
-                velocity_uv,
+                uv,
+                velocity,
                 depth,
             });
         }
@@ -583,7 +592,12 @@ impl Node for PrepassNode {
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.velocity_uv.texture_view,
+                        view: &target.uv.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                    Some(RenderPassColorAttachment {
+                        view: &target.velocity.texture_view,
                         resolve_target: None,
                         ops,
                     }),

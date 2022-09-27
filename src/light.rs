@@ -235,9 +235,26 @@ impl FromWorld for LightPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
-                // Instance-material Buffer
+                // Velocity Buffer
                 BindGroupLayoutEntry {
                     binding: 6,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                // Instance-material Buffer
+                BindGroupLayoutEntry {
+                    binding: 8,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Uint,
@@ -724,14 +741,22 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 4,
-                        resource: BindingResource::TextureView(&prepass.velocity_uv.texture_view),
+                        resource: BindingResource::TextureView(&prepass.uv.texture_view),
                     },
                     BindGroupEntry {
                         binding: 5,
-                        resource: BindingResource::Sampler(&prepass.velocity_uv.sampler),
+                        resource: BindingResource::Sampler(&prepass.uv.sampler),
                     },
                     BindGroupEntry {
                         binding: 6,
+                        resource: BindingResource::TextureView(&prepass.velocity.texture_view),
+                    },
+                    BindGroupEntry {
+                        binding: 7,
+                        resource: BindingResource::Sampler(&prepass.velocity.sampler),
+                    },
+                    BindGroupEntry {
+                        binding: 8,
                         resource: BindingResource::TextureView(
                             &prepass.instance_material.texture_view,
                         ),

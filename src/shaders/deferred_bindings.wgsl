@@ -9,8 +9,12 @@ var normal_texture: texture_2d<f32>;
 @group(1) @binding(3)
 var normal_sampler: sampler;
 @group(1) @binding(4)
-var velocity_uv_texture: texture_2d<f32>;
+var uv_texture: texture_2d<f32>;
 @group(1) @binding(5)
-var velocity_uv_sampler: sampler;
+var uv_sampler: sampler;
 @group(1) @binding(6)
+var velocity_texture: texture_2d<f32>;
+@group(1) @binding(7)
+var velocity_sampler: sampler;
+@group(1) @binding(8)
 var instance_material_texture: texture_2d<u32>;
