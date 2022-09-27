@@ -685,9 +685,9 @@ fn direct_lit(
         r.s.visible_normal = vec3<f32>(0.0);
     }
 
-    let p = luminance(s.radiance) / (p1 * p2);
+    let p = length(s.radiance) / (p1 * p2);
     update_reservoir(invocation_id, &r, s, p);
-    r.w = r.w_sum / (max(r.count, 1.0) * luminance(r.s.radiance));
+    r.w = r.w_sum / (max(r.count, 1.0) * length(r.s.radiance));
 
     textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
 
@@ -728,7 +728,7 @@ fn direct_lit(
             head_radiance
         );
 
-        let luminance_frac = luminance(r.s.radiance) / luminance(valid_radiance);
+        let luminance_frac = length(r.s.radiance) / length(valid_radiance);
         if (abs(luminance_frac - 1.0) > 0.1) {
             set_reservoir(&r, s, p);
         }
