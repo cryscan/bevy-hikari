@@ -18,30 +18,41 @@ struct Frame {
 @group(4) @binding(0)
 var<uniform> frame: Frame;
 @group(4) @binding(1)
-var noise_texture: binding_array<texture_2d<f32>>;
+var render_texture: texture_storage_2d<rgba16float, write>;
 @group(4) @binding(2)
+var noise_texture: binding_array<texture_2d<f32>>;
+@group(4) @binding(3)
 var noise_sampler: sampler;
 
 @group(5) @binding(0)
-var render_texture: texture_storage_2d<rgba16float, write>;
+var reservoir_texture: texture_storage_2d<rgba32float, read_write>;
 @group(5) @binding(1)
-var reservoir_texture: texture_storage_2d<rg32float, write>;
+var radiance_texture: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(2)
-var radiance_texture: texture_storage_2d<rgba16float, write>;
+var random_texture: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(3)
-var random_texture: texture_storage_2d<rgba16float, write>;
+var visible_position_texture: texture_storage_2d<rgba32float, read_write>;
 @group(5) @binding(4)
-var visible_position_texture: texture_storage_2d<rgba32float, write>;
+var visible_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 @group(5) @binding(5)
-var visible_normal_texture: texture_storage_2d<rgba8snorm, write>;
+var sample_position_texture: texture_storage_2d<rgba32float, read_write>;
 @group(5) @binding(6)
-var sample_position_texture: texture_storage_2d<rgba32float, write>;
-@group(5) @binding(7)
-var sample_normal_texture: texture_storage_2d<rgba8snorm, write>;
-@group(5) @binding(8)
-var previous_reservoir_textures: binding_array<texture_2d<f32>>;
-@group(5) @binding(9)
-var previous_reservoir_samplers: binding_array<sampler>;
+var sample_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
+
+@group(6) @binding(0)
+var previous_reservoir_texture: texture_storage_2d<rgba32float, read_write>;
+@group(6) @binding(1)
+var previous_radiance_texture: texture_storage_2d<rgba16float, read_write>;
+@group(6) @binding(2)
+var previous_random_texture: texture_storage_2d<rgba16float, read_write>;
+@group(6) @binding(3)
+var previous_visible_position_texture: texture_storage_2d<rgba32float, read_write>;
+@group(6) @binding(4)
+var previous_visible_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
+@group(6) @binding(5)
+var previous_sample_position_texture: texture_storage_2d<rgba32float, read_write>;
+@group(6) @binding(6)
+var previous_sample_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
@@ -388,19 +399,37 @@ fn empty_sample() -> Sample {
     return s;
 }
 
-fn sample_reservoir(uv: vec2<f32>) -> Reservoir {
+// fn sample_reservoir(uv: vec2<f32>) -> Reservoir {
+//     var r: Reservoir;
+
+//     let reservoir = textureSampleLevel(previous_reservoir_textures[0], previous_reservoir_samplers[0], uv, 0.0);
+//     r.w_sum = reservoir.r;
+//     r.count = reservoir.g;
+
+//     r.s.radiance = textureSampleLevel(previous_reservoir_textures[1], previous_reservoir_samplers[1], uv, 0.0).rgb;
+//     r.s.random = textureSampleLevel(previous_reservoir_textures[2], previous_reservoir_samplers[2], uv, 0.0);
+//     r.s.visible_position = textureSampleLevel(previous_reservoir_textures[3], previous_reservoir_samplers[3], uv, 0.0);
+//     r.s.visible_normal = textureSampleLevel(previous_reservoir_textures[4], previous_reservoir_samplers[4], uv, 0.0).rgb;
+//     r.s.sample_position = textureSampleLevel(previous_reservoir_textures[5], previous_reservoir_samplers[5], uv, 0.0);
+//     r.s.sample_normal = textureSampleLevel(previous_reservoir_textures[6], previous_reservoir_samplers[6], uv, 0.0).rgb;
+
+//     return r;
+// }
+
+fn load_previous_reservoir(coords: vec2<i32>) -> Reservoir {
     var r: Reservoir;
 
-    let reservoir = textureSampleLevel(previous_reservoir_textures[0], previous_reservoir_samplers[0], uv, 0.0);
+    let reservoir = textureLoad(previous_reservoir_texture, coords);
     r.w_sum = reservoir.r;
     r.count = reservoir.g;
+    r.w = reservoir.b;
 
-    r.s.radiance = textureSampleLevel(previous_reservoir_textures[1], previous_reservoir_samplers[1], uv, 0.0).rgb;
-    r.s.random = textureSampleLevel(previous_reservoir_textures[2], previous_reservoir_samplers[2], uv, 0.0);
-    r.s.visible_position = textureSampleLevel(previous_reservoir_textures[3], previous_reservoir_samplers[3], uv, 0.0);
-    r.s.visible_normal = textureSampleLevel(previous_reservoir_textures[4], previous_reservoir_samplers[4], uv, 0.0).rgb;
-    r.s.sample_position = textureSampleLevel(previous_reservoir_textures[5], previous_reservoir_samplers[5], uv, 0.0);
-    r.s.sample_normal = textureSampleLevel(previous_reservoir_textures[6], previous_reservoir_samplers[6], uv, 0.0).rgb;
+    r.s.radiance = textureLoad(previous_radiance_texture, coords).rgb;
+    r.s.random = textureLoad(previous_random_texture, coords);
+    r.s.visible_position = textureLoad(previous_visible_position_texture, coords);
+    r.s.visible_normal = textureLoad(previous_visible_normal_texture, coords).rgb;
+    r.s.sample_position = textureLoad(previous_sample_position_texture, coords);
+    r.s.sample_normal = textureLoad(previous_sample_normal_texture, coords).rgb;
 
     return r;
 }
@@ -411,6 +440,7 @@ fn load_reservoir(coords: vec2<i32>) -> Reservoir {
     let reservoir = textureLoad(reservoir_texture, coords);
     r.w_sum = reservoir.r;
     r.count = reservoir.g;
+    r.w = reservoir.b;
 
     r.s.radiance = textureLoad(radiance_texture, coords).rgb;
     r.s.random = textureLoad(random_texture, coords);
@@ -423,7 +453,7 @@ fn load_reservoir(coords: vec2<i32>) -> Reservoir {
 }
 
 fn store_reservoir(coords: vec2<i32>, r: Reservoir) {
-    let reservoir = vec4<f32>(r.w_sum, r.count, 0.0, 0.0);
+    let reservoir = vec4<f32>(r.w_sum, r.count, r.w, 0.0);
     textureStore(reservoir_texture, coords, reservoir);
 
     textureStore(radiance_texture, coords, vec4<f32>(r.s.radiance, 0.0));
@@ -649,7 +679,8 @@ fn direct_lit(
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity;
-    var r = sample_reservoir(previous_uv);
+    let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
+    var r = load_previous_reservoir(previous_coords);
     if (any(abs(previous_uv - 0.5) > vec2<f32>(0.5))) {
         r.s.visible_normal = vec3<f32>(0.0);
     }

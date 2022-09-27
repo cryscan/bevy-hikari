@@ -23,7 +23,7 @@ use bevy::{
 use std::num::NonZeroU32;
 
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg32Float;
+pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const RADIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const POSITION_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
@@ -58,7 +58,7 @@ pub struct LightPipeline {
     pub mesh_material_layout: BindGroupLayout,
     pub texture_layout: Option<BindGroupLayout>,
     pub frame_layout: BindGroupLayout,
-    pub render_layout: BindGroupLayout,
+    pub reservoir_layout: BindGroupLayout,
     pub dummy_white_gpu_image: GpuImage,
 }
 
@@ -280,9 +280,20 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
-                // Noise Texture
+                // Render Texture
                 BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: RENDER_TEXTURE_FORMAT,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Noise Texture
+                BindGroupLayoutEntry {
+                    binding: 2,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Float { filterable: false },
@@ -292,7 +303,7 @@ impl FromWorld for LightPipeline {
                     count: NonZeroU32::new(NOISE_TEXTURE_COUNT as u32),
                 },
                 BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
@@ -300,26 +311,15 @@ impl FromWorld for LightPipeline {
             ],
         });
 
-        let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        let reservoir_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
-                // Render
+                // Reservoir
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: RENDER_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Reservoir
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RESERVOIR_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -327,10 +327,10 @@ impl FromWorld for LightPipeline {
                 },
                 // Reservoir Radiance
                 BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 1,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RADIANCE_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -338,10 +338,10 @@ impl FromWorld for LightPipeline {
                 },
                 // Reservoir Random
                 BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 2,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RANDOM_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -349,10 +349,10 @@ impl FromWorld for LightPipeline {
                 },
                 // Reservoir Visible Position
                 BindGroupLayoutEntry {
-                    binding: 4,
+                    binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: POSITION_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -360,10 +360,10 @@ impl FromWorld for LightPipeline {
                 },
                 // Reservoir Visible Normal
                 BindGroupLayoutEntry {
-                    binding: 5,
+                    binding: 4,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: NORMAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -371,10 +371,10 @@ impl FromWorld for LightPipeline {
                 },
                 // Reservoir Sample Position
                 BindGroupLayoutEntry {
-                    binding: 6,
+                    binding: 5,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: POSITION_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -382,31 +382,14 @@ impl FromWorld for LightPipeline {
                 },
                 // Reservoir Sample Normal
                 BindGroupLayoutEntry {
-                    binding: 7,
+                    binding: 6,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: NORMAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
-                },
-                // Previous Reservoir Textures
-                BindGroupLayoutEntry {
-                    binding: 8,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: NonZeroU32::new(7),
-                },
-                BindGroupLayoutEntry {
-                    binding: 9,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: NonZeroU32::new(7),
                 },
             ],
         });
@@ -417,7 +400,7 @@ impl FromWorld for LightPipeline {
             mesh_material_layout,
             texture_layout: None,
             frame_layout,
-            render_layout,
+            reservoir_layout,
             dummy_white_gpu_image: mesh_pipeline.dummy_white_gpu_image.clone(),
         }
     }
@@ -441,7 +424,8 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.mesh_material_layout.clone(),
                 self.texture_layout.clone().unwrap(),
                 self.frame_layout.clone(),
-                self.render_layout.clone(),
+                self.reservoir_layout.clone(),
+                self.reservoir_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs: vec![],
@@ -681,7 +665,7 @@ pub fn queue_view_bind_groups(
 pub struct LightBindGroup {
     pub deferred: BindGroup,
     pub frame: BindGroup,
-    pub render: BindGroup,
+    pub reservoir: [BindGroup; 2],
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -774,99 +758,74 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureViewArray(&noise_texture_views),
+                        resource: BindingResource::TextureView(&light_pass.render.texture_view),
                     },
                     BindGroupEntry {
                         binding: 2,
+                        resource: BindingResource::TextureViewArray(&noise_texture_views),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
                         resource: BindingResource::Sampler(&noise_sampler),
                     },
                 ],
             });
 
             let current_id = counter.0 % 2;
-            let current_reservoir = &light_pass.reservoir[current_id];
-            let previous_reservoir = &light_pass.reservoir[1 - current_id];
-            let render = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light_pass.render.texture_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(
-                            &current_reservoir.reservoir.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(
-                            &current_reservoir.radiance.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: BindingResource::TextureView(
-                            &current_reservoir.random.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 4,
-                        resource: BindingResource::TextureView(
-                            &current_reservoir.visible_position.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 5,
-                        resource: BindingResource::TextureView(
-                            &current_reservoir.visible_normal.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 6,
-                        resource: BindingResource::TextureView(
-                            &current_reservoir.sample_position.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 7,
-                        resource: BindingResource::TextureView(
-                            &current_reservoir.sample_normal.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 8,
-                        resource: BindingResource::TextureViewArray(&[
-                            &previous_reservoir.reservoir.texture_view,
-                            &previous_reservoir.radiance.texture_view,
-                            &previous_reservoir.random.texture_view,
-                            &previous_reservoir.visible_position.texture_view,
-                            &previous_reservoir.visible_normal.texture_view,
-                            &previous_reservoir.sample_position.texture_view,
-                            &previous_reservoir.sample_normal.texture_view,
-                        ]),
-                    },
-                    BindGroupEntry {
-                        binding: 9,
-                        resource: BindingResource::SamplerArray(&[
-                            &previous_reservoir.reservoir.sampler,
-                            &previous_reservoir.radiance.sampler,
-                            &previous_reservoir.random.sampler,
-                            &previous_reservoir.visible_position.sampler,
-                            &previous_reservoir.visible_normal.sampler,
-                            &previous_reservoir.sample_position.sampler,
-                            &previous_reservoir.sample_normal.sampler,
-                        ]),
-                    },
-                ],
+            let reservoir = [current_id, 1 - current_id].map(|id| {
+                let reservoir = &light_pass.reservoir[id];
+                render_device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.reservoir_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(
+                                &reservoir.reservoir.texture_view,
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::TextureView(
+                                &reservoir.radiance.texture_view,
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: BindingResource::TextureView(&reservoir.random.texture_view),
+                        },
+                        BindGroupEntry {
+                            binding: 3,
+                            resource: BindingResource::TextureView(
+                                &reservoir.visible_position.texture_view,
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 4,
+                            resource: BindingResource::TextureView(
+                                &reservoir.visible_normal.texture_view,
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 5,
+                            resource: BindingResource::TextureView(
+                                &reservoir.sample_position.texture_view,
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 6,
+                            resource: BindingResource::TextureView(
+                                &reservoir.sample_normal.texture_view,
+                            ),
+                        },
+                    ],
+                })
             });
 
             commands.entity(entity).insert(LightBindGroup {
                 deferred,
                 frame,
-                render,
+                reservoir,
             });
         }
     }
@@ -933,7 +892,8 @@ impl Node for LightPassNode {
         pass.set_bind_group(2, &mesh_material_bind_group.mesh_material, &[]);
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &light_bind_group.frame, &[]);
-        pass.set_bind_group(5, &light_bind_group.render, &[]);
+        pass.set_bind_group(5, &light_bind_group.reservoir[0], &[]);
+        pass.set_bind_group(6, &light_bind_group.reservoir[1], &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
             pass.set_pipeline(pipeline);
