@@ -59,7 +59,7 @@ let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 
 let DISTANCE_MAX: f32 = 65535.0;
-let VALIDATION_INTERVAL: u32 = 4294967295u;
+let VALIDATION_INTERVAL: u32 = 16u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
 
@@ -72,7 +72,7 @@ let SECOND_BOUNCE_CHANCE: f32 = 0.5;
 
 let SOLAR_ANGLE: f32 = 0.261799388;
 
-let MAX_TEMPORAL_REUSE_COUNT: f32 = 60.0;
+let MAX_TEMPORAL_REUSE_COUNT: f32 = 100.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
 
@@ -343,6 +343,7 @@ fn choose_light_candidate(
     var sample_direction = normal_basis(directional.direction_to_light) * sample_uniform_cone(rand.zw, cos_solar_angle);
     var sum_radiance = length(directional.color.rgb);
     var choosen_radiance = sum_radiance;
+    var choosen_cos_angle = cos_solar_angle;
 
     var candidate: LightCandidate;
     candidate.instance = DONT_SAMPLE_EMISSIVE;
@@ -362,6 +363,7 @@ fn choose_light_candidate(
             candidate.instance = source.instance;
             candidate.direction = sample_direction;
             choosen_radiance = radiance;
+            choosen_cos_angle = cos_angle;
         }
     }
 
@@ -380,7 +382,8 @@ fn choose_light_candidate(
     //     p *= saturate(sign(dot(sample_direction, d) - cos_angle));
     // }
 
-    candidate.p = choosen_radiance / sum_radiance;
+    candidate.p = sum_radiance / choosen_radiance;
+    candidate.p *= 0.5 / (1.0 - choosen_cos_angle);
     return candidate;
 }
 
@@ -779,8 +782,7 @@ fn direct_lit(
     r.w = r.w_sum / max(r.count * luminance(r.s.radiance), 0.0001);
 
     // Sample validation: is the temporally reused path xv-xs still valid?
-    let rand_workgroup = random_float(workgroup_id.x + workgroup_id.y * num_workgroups.x + hash(frame.number));
-    if (rand_workgroup < 1.0 / f32(VALIDATION_INTERVAL) && distance(s.sample_position, r.s.sample_position) > 0.1) {
+    if ((frame.number % VALIDATION_INTERVAL == 0u) && distance(s.random, r.s.random) > 0.0001) {
         ray.origin = position.xyz + light.shadow_normal_bias * normal;
         ray.direction = normal_basis(normal) * sample_cosine_hemisphere(r.s.random.xy);
         ray.inv_direction = 1.0 / ray.direction;

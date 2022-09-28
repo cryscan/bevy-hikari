@@ -54,7 +54,7 @@ fn setup(
             mesh: cube.clone(),
             material: materials.add(StandardMaterial {
                 base_color: Color::rgb(0.3, 0.5, 0.3),
-                perceptual_roughness: 0.5,
+                perceptual_roughness: 0.9,
                 ..Default::default()
             }),
             transform: Transform {
@@ -70,7 +70,7 @@ fn setup(
             mesh: meshes.add(Mesh::from(shape::Plane::default())),
             material: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                perceptual_roughness: 0.5,
+                perceptual_roughness: 0.9,
                 ..Default::default()
             }),
             transform: Transform {
@@ -88,7 +88,7 @@ fn setup(
             mesh: cube.clone(),
             material: materials.add(StandardMaterial {
                 base_color: Color::PINK,
-                perceptual_roughness: 0.5,
+                perceptual_roughness: 0.9,
                 ..Default::default()
             }),
             transform: Transform {
@@ -105,7 +105,7 @@ fn setup(
             mesh: cube.clone(),
             material: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                perceptual_roughness: 0.5,
+                perceptual_roughness: 0.9,
                 ..Default::default()
             }),
             transform: Transform {
@@ -122,7 +122,7 @@ fn setup(
             mesh: cube.clone(),
             material: materials.add(StandardMaterial {
                 base_color: Color::AQUAMARINE,
-                perceptual_roughness: 0.5,
+                perceptual_roughness: 0.9,
                 ..Default::default()
             }),
             transform: Transform {
@@ -139,7 +139,7 @@ fn setup(
             mesh: cube,
             material: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                perceptual_roughness: 0.5,
+                perceptual_roughness: 0.9,
                 ..Default::default()
             }),
             transform: Transform {
