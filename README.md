@@ -1,41 +1,30 @@
-# Bevy Voxel Cone Tracing
+# Realtime Path Tracer for Bevy
 
 [![crates.io](https://img.shields.io/crates/v/bevy-hikari)](https://crates.io/crates/bevy-hikari)
 [![docs.rs](https://docs.rs/bevy-hikari/badge.svg)](https://docs.rs/bevy-hikari)
 
-<img src="assets/screenshots/cover.gif" width="427" height="240" />
+`bevy-hikari` is an implementation of global illumination for [Bevy](https://bevyengine.org/).
 
-`bevy-hikari` is an implementation of voxel cone tracing global illumination with anisotropic mip-mapping in [Bevy](https://bevyengine.org/).
+After Bevy releasing 0.8, the plugin moves to deferred hybrid path tracing.
+For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-mapping, please check the `bevy-0.6` branch.
 
 ## Bevy Version Support
 | `bevy` | `bevy-hikari` |
 | ------ | ------------- |
 | 0.6    | 0.1           |
+| 0.8    | In Progress   |
 
-## Limitations and Todo
-The implementation is very basic and have, but not limited to, the following limitations:
-- [ ] Only directional light is supported
-- [ ] Only support 256x256x256 voxel grid
+## Progress
+- [x] Extraction and preparation of mesh assets and instances
+- [x] G-Buffer generation
+- [x] Multi-bounce path tracing
+- [x] ReSTIR: Temporal sample reuse
+- [ ] ReSTIR: Spatial sample reuse
+- [ ] Spatiotemporal filtering
+- [ ] Hardware ray tracing (upstream related)
 
-Todo:
-- [x] Fix flickering
-- [x] Voxel HDR support
-- [ ] Use memory-efficient voxel structures
-- [ ] Correct glossy reflection
-
-## Examples
-Two examples are included: one minimal example, one in which can move around and adjust light directions.
-
-You can download and test the compiled examples [here](https://github.com/cryscan/bevy-hikari/releases).
-
-### Effects
-No GI:
-
-<img src="assets/screenshots/no-gi.png" width="427" height="240" />
-
-Has GI:
-
-<img src="assets/screenshots/has-gi.png" width="427" height="240" />
+## Effects
+<img src="assets/screenshots/rt-gi.png" />
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
