@@ -59,7 +59,7 @@ let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
 
 let DISTANCE_MAX: f32 = 65535.0;
-let VALIDATION_INTERVAL: u32 = 16u;
+let VALIDATION_INTERVAL: u32 = 4294967295u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
 
@@ -338,30 +338,46 @@ fn choose_light_candidate(
     position: vec3<f32>,
     normal: vec3<f32>,
 ) -> LightCandidate {
-    var sample_direction = normal_basis(directional.direction_to_light) * sample_uniform_cone(rand.zw, cos(SOLAR_ANGLE));
-    var sum_radiance = luminance(directional.color.rgb);
+    let cos_solar_angle = cos(SOLAR_ANGLE);
+
+    var sample_direction = normal_basis(directional.direction_to_light) * sample_uniform_cone(rand.zw, cos_solar_angle);
+    var sum_radiance = length(directional.color.rgb);
     var choosen_radiance = sum_radiance;
 
     var candidate: LightCandidate;
     candidate.instance = DONT_SAMPLE_EMISSIVE;
     candidate.direction = sample_direction;
 
-    // let rand_1d = fract(rand.x + GOLDEN_RATIO);
+    let rand_1d = fract(rand.x + GOLDEN_RATIO);
+    for (var id = 0u; id < light_source_buffer.count; id += 1u) {
+        let source = light_source_buffer.data[id];
+        var delta = source.position - position;
+        let d2 = dot(delta, delta);
+        let cos_angle = sqrt(max(d2 - source.radius, 0.0) / max(d2, 0.0001));
+        sample_direction = normal_basis(normalize(delta)) * sample_uniform_cone(rand.zw, cos_angle);
+        let radiance = source.luminance * source.radius * source.radius / max(d2, 0.0001);
+
+        sum_radiance += radiance;
+        if (rand_1d < radiance / sum_radiance) {
+            candidate.instance = source.instance;
+            candidate.direction = sample_direction;
+            choosen_radiance = radiance;
+        }
+    }
+
+    // sample_direction = candidate.direction;
+    // candidate.p = 0.5 * (1.0 - cos_solar_angle);
+    // candidate.p *= saturate(sign(dot(sample_direction, directional.direction_to_light) - cos_solar_angle));
+
     // for (var id = 0u; id < light_source_buffer.count; id += 1u) {
     //     let source = light_source_buffer.data[id];
     //     var d = source.position - position;
-    //     d = d - normalize(d) * source;
     //     let d2 = dot(d, d);
-    //     let cos_angle = sqrt(d2 / (d2 + source.radius * source.radius));
-    //     sample_direction = normal_basis(d) * sample_uniform_cone(rand.zw, cos_angle);
-    //     let radiance = 0.0;
-
-    //     sum_radiance += radiance;
-    //     if (rand_1d < radiance / sum_radiance) {
-    //         candidate.instance = source.instance;
-    //         candidate.direction = sample_direction;
-    //         choosen_radiance = radiance;
-    //     }
+    //     d = normalize(d);
+    //     let cos_angle = sqrt(max(d2 - source.radius, 0.0) / max(d2, 0.0001));
+        
+    //     var p = 0.5 * (1.0 - cos_angle);
+    //     p *= saturate(sign(dot(sample_direction, d) - cos_angle));
     // }
 
     candidate.p = choosen_radiance / sum_radiance;
@@ -763,7 +779,8 @@ fn direct_lit(
     r.w = r.w_sum / max(r.count * luminance(r.s.radiance), 0.0001);
 
     // Sample validation: is the temporally reused path xv-xs still valid?
-    if (frame.number % VALIDATION_INTERVAL == 0u && distance(s.sample_position, r.s.sample_position) > 0.1) {
+    let rand_workgroup = random_float(workgroup_id.x + workgroup_id.y * num_workgroups.x + hash(frame.number));
+    if (rand_workgroup < 1.0 / f32(VALIDATION_INTERVAL) && distance(s.sample_position, r.s.sample_position) > 0.1) {
         ray.origin = position.xyz + light.shadow_normal_bias * normal;
         ray.direction = normal_basis(normal) * sample_cosine_hemisphere(r.s.random.xy);
         ray.inv_direction = 1.0 / ray.direction;
