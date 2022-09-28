@@ -17,7 +17,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 ## Progress
 - [x] Extraction and preparation of mesh assets and instances
 - [x] G-Buffer generation
-- [x] Multi-bounce path tracing
+- [x] 2-bounce path tracing
 - [x] ReSTIR: Temporal sample reuse
 - [ ] ReSTIR: Spatial sample reuse
 - [ ] Spatiotemporal filtering
@@ -33,3 +33,7 @@ Just like Bevy, all code in this repository is dual-licensed under either:
 * Apache License, Version 2.0 ([LICENSE-APACHE](docs/LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
 
 at your option.
+
+## Credits
+"Fire Extinguisher" model and textures Copyright (C) 2021 by Cameron 'cron' Fraser.
+Released under Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0) license.
