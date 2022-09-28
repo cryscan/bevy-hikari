@@ -53,6 +53,12 @@ struct Material {
     occlusion_texture: u32,
 };
 
+struct LightSource {
+    position: vec3<f32>,
+    radius: f32,
+    luminance: f32,
+};
+
 struct Vertices {
     data: array<Vertex>,
 };
@@ -69,3 +75,8 @@ struct Nodes {
 struct Materials {
     data: array<Material>,
 }
+
+struct LightSources {
+    count: u32,
+    data: array<LightSource>,
+};

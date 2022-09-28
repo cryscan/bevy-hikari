@@ -1,14 +1,14 @@
 use super::{
     material::GpuStandardMaterials,
     mesh::{GpuMeshes, MeshAssetState},
-    MeshMaterialSystems,
+    GpuLightSource, GpuLightSourceBuffer, MeshMaterialSystems,
 };
 use crate::{
     mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
     transform::PreviousGlobalTransform,
 };
 use bevy::{
-    math::Vec3A,
+    math::{Vec3A, Vec4Swizzles},
     prelude::*,
     render::{
         extract_component::UniformComponentPlugin,
@@ -32,6 +32,7 @@ impl Plugin for InstancePlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<GpuInstances>()
+                .init_resource::<GpuLightSources>()
                 .init_resource::<InstanceRenderAssets>()
                 .add_system_to_stage(RenderStage::Extract, extract_mesh_transforms)
                 .add_system_to_stage(
@@ -72,19 +73,26 @@ impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
 pub struct InstanceRenderAssets {
     pub instance_buffer: StorageBuffer<GpuInstanceBuffer>,
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
+    pub light_source_buffer: StorageBuffer<GpuLightSourceBuffer>,
     pub instance_indices: DynamicUniformBuffer<InstanceIndex>,
 }
 
 impl InstanceRenderAssets {
-    pub fn set(&mut self, instances: Vec<GpuInstance>, nodes: Vec<GpuNode>) {
+    pub fn set_nodes(&mut self, instances: Vec<GpuInstance>, nodes: Vec<GpuNode>) {
         self.instance_buffer.get_mut().data = instances;
         self.node_buffer.get_mut().count = nodes.len() as u32;
         self.node_buffer.get_mut().data = nodes;
     }
 
+    pub fn set_light_sources(&mut self, light_sources: Vec<GpuLightSource>) {
+        self.light_source_buffer.get_mut().count = light_sources.len() as u32;
+        self.light_source_buffer.get_mut().data = light_sources;
+    }
+
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
         self.instance_buffer.write_buffer(device, queue);
         self.node_buffer.write_buffer(device, queue);
+        self.light_source_buffer.write_buffer(device, queue);
         self.instance_indices.write_buffer(device, queue);
     }
 }
@@ -112,6 +120,9 @@ fn extract_mesh_transforms(
 
 #[derive(Default, Deref, DerefMut)]
 pub struct GpuInstances(BTreeMap<Entity, GpuInstance>);
+
+#[derive(Default, Deref, DerefMut)]
+pub struct GpuLightSources(BTreeMap<Entity, GpuLightSource>);
 
 pub enum InstanceEvent<M: IntoStandardMaterial> {
     Created(Entity, Handle<Mesh>, Handle<M>),
@@ -192,6 +203,7 @@ fn extract_instances<M: IntoStandardMaterial>(
 fn prepare_generic_instances<M: IntoStandardMaterial>(
     mut extracted_instances: ResMut<ExtractedInstances<M>>,
     mut instances: ResMut<GpuInstances>,
+    mut light_sources: ResMut<GpuLightSources>,
     meshes: Res<GpuMeshes>,
     materials: Res<GpuStandardMaterials>,
     asset_state: Res<MeshAssetState>,
@@ -202,7 +214,9 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
 
     for removed in extracted_instances.removed.drain(..) {
         instances.remove(&removed);
+        light_sources.remove(&removed);
     }
+
     for (entity, aabb, transform, mesh, material) in extracted_instances.extracted.drain(..) {
         let material = HandleUntyped::weak(material.id);
         let transform = transform.compute_matrix();
@@ -229,8 +243,6 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
         if let (Some(mesh), Some(material)) = (meshes.get(&mesh), materials.get(&material)) {
             let min = Vec3::from(min);
             let max = Vec3::from(max);
-            let slice = mesh.1;
-            let material = material.1;
             instances.insert(
                 entity,
                 GpuInstance {
@@ -238,11 +250,26 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
                     max,
                     transform,
                     inverse_transpose_model: transform.inverse().transpose(),
-                    slice,
-                    material,
+                    slice: mesh.1,
+                    material: material.1,
                     node_index: 0,
                 },
             );
+
+            // Add it to the light source list if it's emissive.
+            let emissive = material.0.emissive;
+            let luminance = emissive.xyz().length() * emissive.w * 255.0;
+            if luminance > 0.0 {
+                let radius = aabb.half_extents.length();
+                light_sources.insert(
+                    entity,
+                    GpuLightSource {
+                        position: Vec3::from(center),
+                        radius,
+                        luminance,
+                    },
+                );
+            }
         }
     }
 }
@@ -262,6 +289,7 @@ fn prepare_instances(
     render_queue: Res<RenderQueue>,
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut instances: ResMut<GpuInstances>,
+    light_sources: Res<GpuLightSources>,
     asset_state: Res<MeshAssetState>,
 ) {
     if *asset_state == MeshAssetState::Dirty {
@@ -272,6 +300,7 @@ fn prepare_instances(
         return;
     }
 
+    // Since entities are cleared every frame, this should always be called.
     let mut add_instance_indices = |instances: &GpuInstances| {
         render_assets.instance_indices.clear();
         let command_batch: Vec<_> = instances
@@ -306,7 +335,11 @@ fn prepare_instances(
             exit_index,
             primitive_index,
         });
-        render_assets.set(values, nodes);
+        render_assets.set_nodes(values, nodes);
+
+        let light_sources = light_sources.values().cloned().collect();
+        render_assets.set_light_sources(light_sources);
+
         render_assets.write_buffer(&render_device, &render_queue);
     } else {
         add_instance_indices(&instances);

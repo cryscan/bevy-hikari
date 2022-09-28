@@ -148,6 +148,13 @@ pub struct GpuStandardMaterial {
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuLightSource {
+    pub position: Vec3,
+    pub radius: f32,
+    pub luminance: f32,
+}
+
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuStandardMaterialOffset {
     pub value: u32,
 }
@@ -181,6 +188,13 @@ pub struct GpuInstanceBuffer {
 pub struct GpuStandardMaterialBuffer {
     #[size(runtime)]
     pub data: Vec<GpuStandardMaterial>,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuLightSourceBuffer {
+    pub count: u32,
+    #[size(runtime)]
+    pub data: Vec<GpuLightSource>,
 }
 
 #[derive(Debug)]
@@ -394,6 +408,17 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                     },
                     count: None,
                 },
+                // Light Sources
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuLightSourceBuffer::min_size()),
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -462,6 +487,7 @@ fn queue_mesh_material_bind_group(
         Some(instance_binding),
         Some(instance_node_binding),
         Some(material_binding),
+        Some(light_source_binding),
     ) = (
         meshes.vertex_buffer.binding(),
         meshes.primitive_buffer.binding(),
@@ -469,6 +495,7 @@ fn queue_mesh_material_bind_group(
         instances.instance_buffer.binding(),
         instances.node_buffer.binding(),
         materials.buffer.binding(),
+        instances.light_source_buffer.binding(),
     ) {
         let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -497,6 +524,10 @@ fn queue_mesh_material_bind_group(
                 BindGroupEntry {
                     binding: 5,
                     resource: material_binding,
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: light_source_binding,
                 },
             ],
         });

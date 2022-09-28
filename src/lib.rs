@@ -39,6 +39,8 @@ pub mod graph {
 pub const WORKGROUP_SIZE: u32 = 8;
 pub const NOISE_TEXTURE_COUNT: usize = 64;
 
+pub const MESH_VIEW_BINDINGS_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 8835349515886344623);
 pub const MESH_MATERIAL_TYPES_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
 pub const MESH_MATERIAL_BINDINGS_HANDLE: HandleUntyped =
@@ -79,6 +81,12 @@ pub struct NoiseTexture(pub Vec<Handle<Image>>);
 
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            MESH_VIEW_BINDINGS_HANDLE,
+            "shaders/mesh_view_bindings.wgsl",
+            Shader::from_wgsl
+        );
         load_internal_asset!(
             app,
             MESH_MATERIAL_TYPES_HANDLE,

@@ -14,3 +14,5 @@ var<storage> instance_buffer: Instances;
 var<storage> instance_node_buffer: Nodes;
 @group(2) @binding(5)
 var<storage> material_buffer: Materials;
+@group(2) @binding(6)
+var<storage> light_source_buffer: LightSources;

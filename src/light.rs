@@ -4,10 +4,7 @@ use crate::{
     NoiseTexture, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
-    pbr::{
-        GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, MeshPipeline, ShadowPipeline,
-        ViewClusterBindings, ViewLightsUniformOffset, ViewShadowBindings,
-    },
+    pbr::{GpuLights, LightMeta, MeshPipeline, ViewLightsUniformOffset},
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -16,7 +13,7 @@ use bevy::{
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{GpuImage, TextureCache},
-        view::{ViewUniform, ViewUniformOffset, ViewUniforms},
+        view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms},
         Extract, RenderApp, RenderStage,
     },
 };
@@ -64,8 +61,6 @@ pub struct LightPipeline {
 
 impl FromWorld for LightPipeline {
     fn from_world(world: &mut World) -> Self {
-        let buffer_binding_type = BufferBindingType::Storage { read_only: true };
-
         let render_device = world.resource::<RenderDevice>();
         let mesh_pipeline = world.resource::<MeshPipeline>();
         let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
@@ -91,89 +86,6 @@ impl FromWorld for LightPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
                         min_binding_size: Some(GpuLights::min_size()),
-                    },
-                    count: None,
-                },
-                // Point Shadow Texture Cube Array
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        multisampled: false,
-                        sample_type: TextureSampleType::Depth,
-                        #[cfg(not(feature = "webgl"))]
-                        view_dimension: TextureViewDimension::CubeArray,
-                        #[cfg(feature = "webgl")]
-                        view_dimension: TextureViewDimension::Cube,
-                    },
-                    count: None,
-                },
-                // Point Shadow Texture Array Sampler
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Comparison),
-                    count: None,
-                },
-                // Directional Shadow Texture Array
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        multisampled: false,
-                        sample_type: TextureSampleType::Depth,
-                        #[cfg(not(feature = "webgl"))]
-                        view_dimension: TextureViewDimension::D2Array,
-                        #[cfg(feature = "webgl")]
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Directional Shadow Texture Array Sampler
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Comparison),
-                    count: None,
-                },
-                // PointLights
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: buffer_binding_type,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuPointLights::min_size(buffer_binding_type)),
-                    },
-                    count: None,
-                },
-                // Clustered Light Index Lists
-                BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: buffer_binding_type,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(
-                            ViewClusterBindings::min_size_cluster_light_index_lists(
-                                buffer_binding_type,
-                            ),
-                        ),
-                    },
-                    count: None,
-                },
-                // Cluster Offsets And Counts
-                BindGroupLayoutEntry {
-                    binding: 8,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: buffer_binding_type,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(
-                            ViewClusterBindings::min_size_cluster_offsets_and_counts(
-                                buffer_binding_type,
-                            ),
-                        ),
                     },
                     count: None,
                 },
@@ -595,18 +507,15 @@ pub fn queue_view_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
-    shadow_pipeline: Res<ShadowPipeline>,
     light_meta: Res<LightMeta>,
-    global_light_meta: Res<GlobalLightMeta>,
     view_uniforms: Res<ViewUniforms>,
-    views: Query<(Entity, &ViewShadowBindings, &ViewClusterBindings)>,
+    views: Query<Entity, With<ExtractedView>>,
 ) {
-    if let (Some(view_binding), Some(light_binding), Some(point_light_binding)) = (
+    if let (Some(view_binding), Some(light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
-        global_light_meta.gpu_point_lights.binding(),
     ) {
-        for (entity, view_shadow_bindings, view_cluster_bindings) in &views {
+        for entity in &views {
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[
                     BindGroupEntry {
@@ -616,40 +525,6 @@ pub fn queue_view_bind_groups(
                     BindGroupEntry {
                         binding: 1,
                         resource: light_binding.clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(
-                            &view_shadow_bindings.point_light_depth_texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: BindingResource::Sampler(&shadow_pipeline.point_light_sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 4,
-                        resource: BindingResource::TextureView(
-                            &view_shadow_bindings.directional_light_depth_texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 5,
-                        resource: BindingResource::Sampler(
-                            &shadow_pipeline.directional_light_sampler,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 6,
-                        resource: point_light_binding.clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 7,
-                        resource: view_cluster_bindings.light_index_lists_binding().unwrap(),
-                    },
-                    BindGroupEntry {
-                        binding: 8,
-                        resource: view_cluster_bindings.offsets_and_counts_binding().unwrap(),
                     },
                 ],
                 label: None,

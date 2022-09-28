@@ -302,16 +302,19 @@ fn traverse_top(ray: Ray) -> Hit {
     return hit;
 }
 
-fn cosine_sample_hemisphere(rand: vec2<f32>) -> vec3<f32> {
+fn sample_cosine_hemisphere(rand: vec2<f32>) -> vec3<f32> {
     let r = sqrt(rand.x);
     let theta = 2.0 * PI * rand.y;
-    var direction = vec3<f32>(
-        r * cos(theta),
-        r * sin(theta),
-        0.0
-    );
+    var direction = vec3<f32>(r * cos(theta), r * sin(theta), 0.0);
     direction.z = sqrt(1.0 - dot(direction.xy, direction.xy));
     return direction;
+}
+
+fn sample_uniform_cone(rand: vec2<f32>, angle: f32) -> vec3<f32> {
+    let z = 1.0 - (1.0 - cos(angle)) * rand.x;  // [cos(angle), 1.0]
+    let theta = 2.0 * PI * rand.y;
+    let r = sqrt(1.0 - z * z);
+    return vec3<f32>(r * cos(theta), r * sin(theta), z);
 }
 
 // NOTE: Correctly calculates the view vector depending on whether
@@ -627,7 +630,7 @@ fn direct_lit(
     var bounce_info: HitInfo;
 
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
-    ray.direction = normal_basis(normal) * cosine_sample_hemisphere(s.random.xy);
+    ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
     ray.inv_direction = 1.0 / ray.direction;
     let p1 = dot(ray.direction, normal);
 
@@ -650,7 +653,7 @@ fn direct_lit(
 
     if (any(s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
         bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
-        bounce_ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(s.random.zw);
+        bounce_ray.direction = normal_basis(info.normal) * sample_cosine_hemisphere(s.random.zw);
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
         p2 *= dot(bounce_ray.direction, info.normal);
 
@@ -694,7 +697,7 @@ fn direct_lit(
     // Sample validation: is the temporally reused path xv-xs still valid?
     if (frame.number % VALIDATION_INTERVAL == 0u && distance(s.sample_position, r.s.sample_position) > 0.1) {
         ray.origin = position.xyz + light.shadow_normal_bias * normal;
-        ray.direction = normal_basis(normal) * cosine_sample_hemisphere(r.s.random.xy);
+        ray.direction = normal_basis(normal) * sample_cosine_hemisphere(r.s.random.xy);
         ray.inv_direction = 1.0 / ray.direction;
         hit = traverse_top(ray);
         info = hit_info(ray, hit);
@@ -702,7 +705,7 @@ fn direct_lit(
 
         if (any(r.s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
             bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
-            bounce_ray.direction = normal_basis(info.normal) * cosine_sample_hemisphere(r.s.random.zw);
+            bounce_ray.direction = normal_basis(info.normal) * sample_cosine_hemisphere(r.s.random.zw);
             bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
 
             hit = traverse_top(bounce_ray);
