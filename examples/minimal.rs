@@ -69,7 +69,7 @@ fn setup(
         .spawn_bundle(PbrBundle {
             mesh: meshes.add(Mesh::from(shape::Plane::default())),
             material: materials.add(StandardMaterial {
-                base_color: Color::GRAY,
+                base_color: Color::WHITE,
                 perceptual_roughness: 0.5,
                 ..Default::default()
             }),
@@ -203,7 +203,7 @@ fn setup(
         },
         transform: Transform {
             translation: Vec3::new(0.0, 5.0, 0.0),
-            rotation: Quat::from_euler(EulerRot::XYZ, -PI / 8.0, -PI / 4.0, 0.0),
+            rotation: Quat::from_euler(EulerRot::XYZ, -PI / 4.0, -PI / 4.0, 0.0),
             ..Default::default()
         },
         ..Default::default()
