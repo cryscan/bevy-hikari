@@ -69,7 +69,7 @@ fn setup(
         .spawn_bundle(PbrBundle {
             mesh: meshes.add(Mesh::from(shape::Plane::default())),
             material: materials.add(StandardMaterial {
-                base_color: Color::WHITE,
+                base_color: Color::GRAY,
                 perceptual_roughness: 0.5,
                 ..Default::default()
             }),

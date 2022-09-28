@@ -152,6 +152,7 @@ pub struct GpuLightSource {
     pub position: Vec3,
     pub radius: f32,
     pub luminance: f32,
+    pub instance: u32,
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]

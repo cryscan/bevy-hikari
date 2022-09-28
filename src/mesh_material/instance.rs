@@ -267,6 +267,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
                         position: Vec3::from(center),
                         radius,
                         luminance,
+                        instance: 0,
                     },
                 );
             }
@@ -289,7 +290,7 @@ fn prepare_instances(
     render_queue: Res<RenderQueue>,
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut instances: ResMut<GpuInstances>,
-    light_sources: Res<GpuLightSources>,
+    mut light_sources: ResMut<GpuLightSources>,
     asset_state: Res<MeshAssetState>,
 ) {
     if *asset_state == MeshAssetState::Dirty {
@@ -337,6 +338,11 @@ fn prepare_instances(
         });
         render_assets.set_nodes(values, nodes);
 
+        for (id, (entity, _)) in instances.iter().enumerate() {
+            if let Some(light_source) = light_sources.get_mut(entity) {
+                light_source.instance = id as u32;
+            }
+        }
         let light_sources = light_sources.values().cloned().collect();
         render_assets.set_light_sources(light_sources);
 

@@ -57,6 +57,7 @@ struct LightSource {
     position: vec3<f32>,
     radius: f32,
     luminance: f32,
+    instance: u32,
 };
 
 struct Vertices {
