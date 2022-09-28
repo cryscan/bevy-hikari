@@ -70,7 +70,7 @@ let SAMPLE_ALL_EMISSIVE: u32 = 4294967295u;
 let SECOND_BOUNCE_CHANCE: f32 = 0.5;
 #endif
 
-let SOLAR_ANGLE: f32 = 0.523598776;
+let SOLAR_ANGLE: f32 = 0.261799388;
 
 fn hash(value: u32) -> u32 {
     var state = value;
@@ -335,7 +335,7 @@ fn choose_light_candidate(
     normal: vec3<f32>,
 ) -> LightCandidate {
     var sample_direction = normal_basis(directional.direction_to_light) * sample_uniform_cone(rand.zw, cos(SOLAR_ANGLE));
-    var sum_radiance = length(directional.color.rgb);
+    var sum_radiance = luminance(directional.color.rgb);
     var choosen_radiance = sum_radiance;
 
     var candidate: LightCandidate;
@@ -755,9 +755,9 @@ fn direct_lit(
         r.s.visible_normal = vec3<f32>(0.0);
     }
 
-    let p = length(s.radiance) / (p1 * p2);
+    let p = luminance(s.radiance) / (p1 * p2);
     update_reservoir(invocation_id, &r, s, p);
-    r.w = r.w_sum / (max(r.count, 1.0) * length(r.s.radiance));
+    r.w = r.w_sum / (max(r.count, 1.0) * luminance(r.s.radiance));
 
     textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
 
@@ -811,7 +811,7 @@ fn direct_lit(
             head_radiance
         );
 
-        let luminance_frac = length(r.s.radiance) / length(valid_radiance);
+        let luminance_frac = luminance(r.s.radiance) / luminance(valid_radiance);
         if (abs(luminance_frac - 1.0) > 0.1) {
             set_reservoir(&r, s, p);
         }
