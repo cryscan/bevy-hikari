@@ -63,7 +63,6 @@ let VALIDATION_INTERVAL: u32 = 16u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
 
-let COSINE_HEMISPHERE_SAMPLE_CHANCE: f32 = 0.5;
 let DONT_SAMPLE_EMISSIVE: u32 = 4294967294u;
 let SAMPLE_ALL_EMISSIVE: u32 = 4294967295u;
 
@@ -684,28 +683,14 @@ fn direct_lit(
     var bounce_info: HitInfo;
 
     // TODO: Change this when direct emissive sampling is ready
-    var enable_directional_light = false;
+    var enable_directional_light = true;
     var emissive_index = SAMPLE_ALL_EMISSIVE;
 
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
-    var p1 = dot(ray.direction, normal) * COSINE_HEMISPHERE_SAMPLE_CHANCE;
-
-    var b1_rand = fract(s.random.x + s.random.y + GOLDEN_RATIO);
-    if (b1_rand > COSINE_HEMISPHERE_SAMPLE_CHANCE) {
-        let candidate = choose_light_candidate(s.random.wzyx, light, position.xyz, normal);
-        if (dot(candidate.direction, normal) > 0.0) {
-            ray.direction = candidate.direction;
-            p1 = candidate.p * (1.0 - COSINE_HEMISPHERE_SAMPLE_CHANCE);
-
-            enable_directional_light = (candidate.instance == DONT_SAMPLE_EMISSIVE);
-            emissive_index = candidate.instance;
-        } else {
-            p1 /= COSINE_HEMISPHERE_SAMPLE_CHANCE;
-        }
-    }
-
     ray.inv_direction = 1.0 / ray.direction;
+
+    var p1 = dot(ray.direction, normal);
 
     var hit = traverse_top(ray);
     info = hit_info(ray, hit);
@@ -780,23 +765,11 @@ fn direct_lit(
     if (frame.number % VALIDATION_INTERVAL == 0u && distance(s.sample_position, r.s.sample_position) > 0.1) {
         ray.origin = position.xyz + light.shadow_normal_bias * normal;
         ray.direction = normal_basis(normal) * sample_cosine_hemisphere(r.s.random.xy);
+        ray.inv_direction = 1.0 / ray.direction;
 
         // TODO: Change this when direct emissive sampling is ready
-        enable_directional_light = false;
+        enable_directional_light = true;
         emissive_index = SAMPLE_ALL_EMISSIVE;
-
-        b1_rand = fract(r.s.random.x + r.s.random.y + GOLDEN_RATIO);
-        if (b1_rand > COSINE_HEMISPHERE_SAMPLE_CHANCE) {
-            let candidate = choose_light_candidate(r.s.random.wzyx, light, r.s.visible_position.xyz, r.s.visible_normal);
-            if (dot(candidate.direction, normal) > 0.0) {
-                ray.direction = candidate.direction;
-
-                enable_directional_light = (candidate.instance == DONT_SAMPLE_EMISSIVE);
-                emissive_index = candidate.instance;
-            }
-        }
-
-        ray.inv_direction = 1.0 / ray.direction;
 
         hit = traverse_top(ray);
         info = hit_info(ray, hit);
