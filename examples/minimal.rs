@@ -203,7 +203,7 @@ fn setup(
         },
         transform: Transform {
             translation: Vec3::new(0.0, 5.0, 0.0),
-            rotation: Quat::from_euler(EulerRot::XYZ, -PI / 4.0, -PI / 4.0, 0.0),
+            rotation: Quat::from_euler(EulerRot::XYZ, -PI / 4.0, PI / 4.0, 0.0),
             ..Default::default()
         },
         ..Default::default()

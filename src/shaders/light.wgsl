@@ -72,6 +72,10 @@ let SECOND_BOUNCE_CHANCE: f32 = 0.5;
 
 let SOLAR_ANGLE: f32 = 0.261799388;
 
+let MAX_TEMPORAL_REUSE_COUNT: f32 = 60.0;
+let SPATIAL_REUSE_COUNT: u32 = 1u;
+let SPATIAL_REUSE_RANGE: f32 = 30.0;
+
 fn hash(value: u32) -> u32 {
     var state = value;
     state = state ^ 2747636419u;
@@ -527,12 +531,6 @@ fn update_reservoir(
     s: Sample,
     w_new: f32,
 ) {
-    let depth_frac = (*r).s.visible_position.w / s.visible_position.w;
-    if (abs(depth_frac - 1.0) > 0.1 || dot(s.visible_normal, (*r).s.visible_normal) < 0.866) {
-        set_reservoir(r, s, w_new);
-        return;
-    }
-
     (*r).w_sum += w_new;
     (*r).count = (*r).count + 1.0;
 
@@ -682,10 +680,6 @@ fn direct_lit(
     var info: HitInfo;
     var bounce_info: HitInfo;
 
-    // TODO: Change this when direct emissive sampling is ready
-    var enable_directional_light = true;
-    var emissive_index = SAMPLE_ALL_EMISSIVE;
-
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
     ray.inv_direction = 1.0 / ray.direction;
@@ -742,8 +736,8 @@ fn direct_lit(
         light,
         surface,
         info,
-        enable_directional_light,
-        emissive_index,
+        true,
+        SAMPLE_ALL_EMISSIVE,
         head_radiance
     );
 
@@ -751,25 +745,28 @@ fn direct_lit(
     let previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
-    if (any(abs(previous_uv - 0.5) > vec2<f32>(0.5))) {
-        r.s.visible_normal = vec3<f32>(0.0);
-    }
 
     let p = luminance(s.radiance) / (p1 * p2);
-    update_reservoir(invocation_id, &r, s, p);
-    r.w = r.w_sum / (max(r.count, 1.0) * luminance(r.s.radiance));
+    let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
+    let depth_miss = abs(r.s.visible_position.w / s.visible_position.w - 1.0) > 0.1;
+    let normal_miss = dot(s.visible_normal, r.s.visible_normal) < 0.866;
+    if (uv_miss || depth_miss || normal_miss) {
+        set_reservoir(&r, s, p);
+    } else {
+        update_reservoir(invocation_id, &r, s, p);
+    }
 
-    textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
+    // Clamp...
+    r.w_sum *= MAX_TEMPORAL_REUSE_COUNT / max(r.count, MAX_TEMPORAL_REUSE_COUNT);
+    r.count = min(r.count, MAX_TEMPORAL_REUSE_COUNT);
+
+    r.w = r.w_sum / max(r.count * luminance(r.s.radiance), 0.0001);
 
     // Sample validation: is the temporally reused path xv-xs still valid?
     if (frame.number % VALIDATION_INTERVAL == 0u && distance(s.sample_position, r.s.sample_position) > 0.1) {
         ray.origin = position.xyz + light.shadow_normal_bias * normal;
         ray.direction = normal_basis(normal) * sample_cosine_hemisphere(r.s.random.xy);
         ray.inv_direction = 1.0 / ray.direction;
-
-        // TODO: Change this when direct emissive sampling is ready
-        enable_directional_light = true;
-        emissive_index = SAMPLE_ALL_EMISSIVE;
 
         hit = traverse_top(ray);
         info = hit_info(ray, hit);
@@ -806,8 +803,8 @@ fn direct_lit(
             light,
             surface,
             info,
-            enable_directional_light,
-            emissive_index,
+            true,
+            SAMPLE_ALL_EMISSIVE,
             head_radiance
         );
 
@@ -817,5 +814,38 @@ fn direct_lit(
         }
     }
 
+    // store_reservoir(coords, r);
+
+    // storageBarrier();
+
+    // // ReSTIR: Spatial
+    // var z = r.count;
+    // for (var iter = 0u; iter < SPATIAL_REUSE_COUNT; iter += 1u) {
+    //     // let spatial_uv = uv + (s.random.xy - 0.5) * SPATIAL_REUSE_RANGE / vec2<f32>(size);
+    //     let spatial_coords = vec2<i32>(uv * vec2<f32>(size) + SPATIAL_REUSE_RANGE * (s.random.xy - 0.5));
+    //     let q = load_reservoir(spatial_coords);
+
+    //     if (abs(r.s.visible_position.w / q.s.visible_position.w - 1.0) > 0.1 || dot(q.s.visible_normal, r.s.visible_normal) < 0.866) {
+    //         continue;
+    //     }
+
+    //     let x1r = r.s.visible_position.xyz;
+    //     let x1q = q.s.visible_position.xyz;
+    //     let x2q = q.s.sample_position.xyz;
+    //     let dqq = x1q - x2q;
+    //     let drq = x1r - x2q;
+    //     let cos_phi_r = abs(dot(normalize(drq), q.s.sample_normal));
+    //     let cos_phi_q = abs(dot(normalize(dqq), q.s.sample_normal));
+    //     let inv_jac = cos_phi_q * dot(drq, drq) / max(cos_phi_r * dot(dqq, dqq), 0.0001);
+
+    //     let pq = luminance(q.s.radiance);
+    //     merge_reservoir(invocation_id, &r, q, pq);
+    //     z += q.count;
+    // }
+    // r.w = r.w_sum / max(z * luminance(r.s.radiance), 0.0001);
+
+    // storageBarrier();
+
     store_reservoir(coords, r);
+    textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
 }
