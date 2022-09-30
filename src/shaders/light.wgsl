@@ -63,6 +63,7 @@ let VALIDATION_INTERVAL: u32 = 16u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
 
+let DIRECT_LIGHT_SAMPLE_CHANCE: f32 = 0.5;
 let DONT_SAMPLE_EMISSIVE: u32 = 4294967294u;
 let SAMPLE_ALL_EMISSIVE: u32 = 4294967295u;
 
@@ -140,8 +141,10 @@ struct HitInfo {
 };
 
 struct LightCandidate {
-    direction: vec3<f32>,
+    sample_direction: vec3<f32>,
     instance: u32,
+    light_direction: vec3<f32>,
+    cos_angle: f32,
     p: f32,
 };
 
@@ -338,36 +341,43 @@ fn select_light_candidate(
     position: vec3<f32>,
     normal: vec3<f32>,
 ) -> LightCandidate {
-    var selected_cos_angle = cos(SOLAR_ANGLE);
-    var sample_direction = normal_basis(directional.direction_to_light) * sample_uniform_cone(rand.zw, selected_cos_angle);
-    var sum_flux = length(directional.color.rgb) * (1.0 - selected_cos_angle);
-    var selected_flux = sum_flux;
-
     var candidate: LightCandidate;
+    candidate.cos_angle = cos(SOLAR_ANGLE);
+    candidate.light_direction = directional.direction_to_light;
+    candidate.sample_direction = normal_basis(candidate.light_direction) * sample_uniform_cone(rand.zw, candidate.cos_angle);
     candidate.instance = DONT_SAMPLE_EMISSIVE;
-    candidate.direction = sample_direction;
+
+    var sum_flux = length(directional.color.rgb) * (1.0 - candidate.cos_angle);
+    var selected_flux = sum_flux;
 
     let rand_1d = fract(rand.x + GOLDEN_RATIO);
     for (var id = 0u; id < light_source_buffer.count; id += 1u) {
         let source = light_source_buffer.data[id];
-        var delta = source.position - position;
+        let delta = source.position - position;
         let d2 = dot(delta, delta);
+
         let cos_angle = sqrt(max(d2 - source.radius, 0.0) / max(d2, 0.0001));
-        sample_direction = normal_basis(normalize(delta)) * sample_uniform_cone(rand.zw, cos_angle);
+        let light_direction = normalize(delta);
+        let sample_direction = normal_basis(light_direction) * sample_uniform_cone(rand.zw, cos_angle);
         let flux = source.luminance * (1.0 - cos_angle);
 
         sum_flux += flux;
         if (rand_1d < flux / sum_flux) {
             candidate.instance = source.instance;
-            candidate.direction = sample_direction;
+            candidate.light_direction = light_direction;
+            candidate.sample_direction = sample_direction;
+            candidate.cos_angle = cos_angle;
             selected_flux = flux;
-            selected_cos_angle = cos_angle;
         }
     }
 
     candidate.p = selected_flux / sum_flux;
-    candidate.p *= 0.5 / (1.0 - selected_cos_angle);
+    candidate.p *= 0.5 / (1.0 - candidate.cos_angle);
     return candidate;
+}
+
+fn light_candidate_pdf(candidate: LightCandidate, direction: vec3<f32>) -> f32 {
+    return candidate.p * max(sign(dot(direction, candidate.light_direction) - candidate.cos_angle), 0.0);
 }
 
 // NOTE: Correctly calculates the view vector depending on whether
@@ -684,9 +694,23 @@ fn direct_lit(
 
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
-    ray.inv_direction = 1.0 / ray.direction;
 
-    var p1 = dot(ray.direction, normal);
+    let candidate = select_light_candidate(s.random, light, position.xyz, normal);
+
+    var p1 = (1.0 - DIRECT_LIGHT_SAMPLE_CHANCE) * dot(ray.direction, normal);
+    var emissive_instance = DONT_SAMPLE_EMISSIVE;
+    var enable_directional_light = false;
+
+    if (fract(s.random.x + s.random.z + GOLDEN_RATIO) < DIRECT_LIGHT_SAMPLE_CHANCE) {
+        ray.direction = candidate.sample_direction;
+
+        p1 = DIRECT_LIGHT_SAMPLE_CHANCE * candidate.p;
+        emissive_instance = candidate.instance;
+        enable_directional_light = (candidate.instance == DONT_SAMPLE_EMISSIVE);
+    }
+
+    ray.inv_direction = 1.0 / ray.direction;
+    let m1 = p1 / mix(dot(ray.direction, normal), light_candidate_pdf(candidate, ray.direction), DIRECT_LIGHT_SAMPLE_CHANCE);
 
     var hit = traverse_top(ray);
     info = hit_info(ray, hit);
@@ -709,11 +733,11 @@ fn direct_lit(
         let candidate = select_light_candidate(s.random, light, info.position.xyz, info.normal);
 
         bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
-        bounce_ray.direction = candidate.direction;
+        bounce_ray.direction = candidate.sample_direction;
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
         p2 *= candidate.p;
 
-        if (dot(candidate.direction, info.normal) > 0.0) {
+        if (dot(candidate.sample_direction, info.normal) > 0.0) {
             hit = traverse_top(bounce_ray);
             bounce_info = hit_info(bounce_ray, hit);
             head_radiance = shading(
@@ -737,8 +761,8 @@ fn direct_lit(
         light,
         surface,
         info,
-        true,
-        SAMPLE_ALL_EMISSIVE,
+        enable_directional_light,
+        emissive_instance,
         head_radiance
     );
 
@@ -747,7 +771,7 @@ fn direct_lit(
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
 
-    let p = luminance(s.radiance) / (p1 * p2);
+    let p = m1 * luminance(s.radiance) / (p1 * p2);
     let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
     let depth_miss = abs(r.s.visible_position.w / s.visible_position.w - 1.0) > 0.1;
     let normal_miss = dot(s.visible_normal, r.s.visible_normal) < 0.866;
