@@ -358,6 +358,12 @@ fn select_light_candidate(
 
         let cos_angle = sqrt(max(d2 - source.radius, 0.0) / max(d2, 0.0001));
         let light_direction = normalize(delta);
+
+        let sin_angle = sqrt(1.0 - cos_angle * cos_angle);
+        if (dot(light_direction, normal) < -sin_angle) {
+            continue;
+        }
+
         let sample_direction = normal_basis(light_direction) * sample_uniform_cone(rand.zw, cos_angle);
         let flux = source.luminance * (1.0 - cos_angle);
 
@@ -377,7 +383,7 @@ fn select_light_candidate(
 }
 
 fn light_candidate_pdf(candidate: LightCandidate, direction: vec3<f32>) -> f32 {
-    return candidate.p * max(sign(dot(direction, candidate.light_direction) - candidate.cos_angle), 0.0);
+    return candidate.p * saturate(sign(dot(direction, candidate.light_direction) - candidate.cos_angle));
 }
 
 // NOTE: Correctly calculates the view vector depending on whether
