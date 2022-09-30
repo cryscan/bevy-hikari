@@ -72,7 +72,7 @@ let SECOND_BOUNCE_CHANCE: f32 = 0.5;
 
 let SOLAR_ANGLE: f32 = 0.261799388;
 
-let MAX_TEMPORAL_REUSE_COUNT: f32 = 100.0;
+let MAX_TEMPORAL_REUSE_COUNT: f32 = 500.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
 
@@ -332,18 +332,16 @@ fn sample_uniform_cone(rand: vec2<f32>, cos_angle: f32) -> vec3<f32> {
 }
 
 // Choose a light source based on luminance
-fn choose_light_candidate(
+fn select_light_candidate(
     rand: vec4<f32>,
     directional: DirectionalLight,
     position: vec3<f32>,
     normal: vec3<f32>,
 ) -> LightCandidate {
-    let cos_solar_angle = cos(SOLAR_ANGLE);
-
-    var sample_direction = normal_basis(directional.direction_to_light) * sample_uniform_cone(rand.zw, cos_solar_angle);
-    var sum_radiance = length(directional.color.rgb);
-    var choosen_radiance = sum_radiance;
-    var choosen_cos_angle = cos_solar_angle;
+    var selected_cos_angle = cos(SOLAR_ANGLE);
+    var sample_direction = normal_basis(directional.direction_to_light) * sample_uniform_cone(rand.zw, selected_cos_angle);
+    var sum_flux = length(directional.color.rgb) * (1.0 - selected_cos_angle);
+    var selected_flux = sum_flux;
 
     var candidate: LightCandidate;
     candidate.instance = DONT_SAMPLE_EMISSIVE;
@@ -356,34 +354,19 @@ fn choose_light_candidate(
         let d2 = dot(delta, delta);
         let cos_angle = sqrt(max(d2 - source.radius, 0.0) / max(d2, 0.0001));
         sample_direction = normal_basis(normalize(delta)) * sample_uniform_cone(rand.zw, cos_angle);
-        let radiance = source.luminance * source.radius * source.radius / max(d2, 0.0001);
+        let flux = source.luminance * (1.0 - cos_angle);
 
-        sum_radiance += radiance;
-        if (rand_1d < radiance / sum_radiance) {
+        sum_flux += flux;
+        if (rand_1d < flux / sum_flux) {
             candidate.instance = source.instance;
             candidate.direction = sample_direction;
-            choosen_radiance = radiance;
-            choosen_cos_angle = cos_angle;
+            selected_flux = flux;
+            selected_cos_angle = cos_angle;
         }
     }
 
-    // sample_direction = candidate.direction;
-    // candidate.p = 0.5 * (1.0 - cos_solar_angle);
-    // candidate.p *= saturate(sign(dot(sample_direction, directional.direction_to_light) - cos_solar_angle));
-
-    // for (var id = 0u; id < light_source_buffer.count; id += 1u) {
-    //     let source = light_source_buffer.data[id];
-    //     var d = source.position - position;
-    //     let d2 = dot(d, d);
-    //     d = normalize(d);
-    //     let cos_angle = sqrt(max(d2 - source.radius, 0.0) / max(d2, 0.0001));
-        
-    //     var p = 0.5 * (1.0 - cos_angle);
-    //     p *= saturate(sign(dot(sample_direction, d) - cos_angle));
-    // }
-
-    candidate.p = sum_radiance / choosen_radiance;
-    candidate.p *= 0.5 / (1.0 - choosen_cos_angle);
+    candidate.p = selected_flux / sum_flux;
+    candidate.p *= 0.5 / (1.0 - selected_cos_angle);
     return candidate;
 }
 
@@ -723,29 +706,28 @@ fn direct_lit(
 #endif
 
     if (any(s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
-        let candidate = choose_light_candidate(s.random, light, info.position.xyz, info.normal);
+        let candidate = select_light_candidate(s.random, light, info.position.xyz, info.normal);
 
         bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
-        // bounce_ray.direction = normal_basis(info.normal) * sample_cosine_hemisphere(s.random.zw);
-        // bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-        // p2 *= dot(bounce_ray.direction, info.normal);
         bounce_ray.direction = candidate.direction;
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
         p2 *= candidate.p;
 
-        hit = traverse_top(bounce_ray);
-        bounce_info = hit_info(bounce_ray, hit);
-        head_radiance = shading(
-            ray.direction,
-            info.normal,
-            bounce_ray,
-            light,
-            info.surface,
-            bounce_info,
-            (candidate.instance == DONT_SAMPLE_EMISSIVE),
-            candidate.instance,
-            vec3<f32>(0.0)
-        );
+        if (dot(candidate.direction, info.normal) > 0.0) {
+            hit = traverse_top(bounce_ray);
+            bounce_info = hit_info(bounce_ray, hit);
+            head_radiance = shading(
+                ray.direction,
+                info.normal,
+                bounce_ray,
+                light,
+                info.surface,
+                bounce_info,
+                (candidate.instance == DONT_SAMPLE_EMISSIVE),
+                candidate.instance,
+                vec3<f32>(0.0)
+            );
+        }
     }
 
     s.radiance += shading(
@@ -782,56 +764,58 @@ fn direct_lit(
     r.w = r.w_sum / max(r.count * luminance(r.s.radiance), 0.0001);
 
     // Sample validation: is the temporally reused path xv-xs still valid?
-    if ((frame.number % VALIDATION_INTERVAL == 0u) && distance(s.random, r.s.random) > 0.0001) {
-        ray.origin = position.xyz + light.shadow_normal_bias * normal;
-        ray.direction = normal_basis(normal) * sample_cosine_hemisphere(r.s.random.xy);
-        ray.inv_direction = 1.0 / ray.direction;
+    // if ((frame.number % VALIDATION_INTERVAL == 0u) && distance(s.random, r.s.random) > 0.0001) {
+        // ray.origin = position.xyz + light.shadow_normal_bias * normal;
+        // ray.direction = normal_basis(normal) * sample_cosine_hemisphere(r.s.random.xy);
+        // ray.inv_direction = 1.0 / ray.direction;
 
-        hit = traverse_top(ray);
-        info = hit_info(ray, hit);
-        var valid_radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
+        // hit = traverse_top(ray);
+        // info = hit_info(ray, hit);
+        // var valid_radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
 
-        if (any(r.s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
-            let candidate = choose_light_candidate(r.s.random, light, r.s.sample_position.xyz, r.s.sample_normal);
+        // if (any(r.s.random.zw > vec2<f32>(0.0)) && hit.instance_index != U32_MAX) {
+        //     let candidate = select_light_candidate(r.s.random, light, r.s.sample_position.xyz, r.s.sample_normal);
 
-            bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
-            // bounce_ray.direction = normal_basis(info.normal) * sample_cosine_hemisphere(r.s.random.zw);
-            // bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-            bounce_ray.direction = candidate.direction;
-            bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
+        //     bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
+        //     // bounce_ray.direction = normal_basis(info.normal) * sample_cosine_hemisphere(r.s.random.zw);
+        //     // bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
+        //     bounce_ray.direction = candidate.direction;
+        //     bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
 
-            hit = traverse_top(bounce_ray);
-            bounce_info = hit_info(bounce_ray, hit);
-            head_radiance = shading(
-                ray.direction,
-                info.normal,
-                bounce_ray,
-                light,
-                info.surface,
-                bounce_info,
-                (candidate.instance == DONT_SAMPLE_EMISSIVE),
-                candidate.instance,
-                vec3<f32>(0.0)
-            );
-        }
+        //     if (dot(candidate.direction, r.s.sample_normal) > 0.0) {
+        //         hit = traverse_top(bounce_ray);
+        //         bounce_info = hit_info(bounce_ray, hit);
+        //         head_radiance = shading(
+        //             ray.direction,
+        //             info.normal,
+        //             bounce_ray,
+        //             light,
+        //             info.surface,
+        //             bounce_info,
+        //             (candidate.instance == DONT_SAMPLE_EMISSIVE),
+        //             candidate.instance,
+        //             vec3<f32>(0.0)
+        //         );
+        //     }
+        // }
 
-        valid_radiance += shading(
-            view_direction,
-            normal,
-            ray,
-            light,
-            surface,
-            info,
-            true,
-            SAMPLE_ALL_EMISSIVE,
-            head_radiance
-        );
+        // valid_radiance += shading(
+        //     view_direction,
+        //     normal,
+        //     ray,
+        //     light,
+        //     surface,
+        //     info,
+        //     true,
+        //     SAMPLE_ALL_EMISSIVE,
+        //     head_radiance
+        // );
 
-        let luminance_frac = luminance(r.s.radiance) / luminance(valid_radiance);
-        if (abs(luminance_frac - 1.0) > 0.1) {
-            set_reservoir(&r, s, p);
-        }
-    }
+        // let luminance_frac = luminance(r.s.radiance) / luminance(valid_radiance);
+        // if (abs(luminance_frac - 1.0) > 0.1) {
+        //     set_reservoir(&r, s, p);
+        // }
+    // }
 
     // store_reservoir(coords, r);
 
