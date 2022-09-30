@@ -710,7 +710,7 @@ fn direct_lit(
     }
 
     ray.inv_direction = 1.0 / ray.direction;
-    let m1 = p1 / mix(dot(ray.direction, normal), light_candidate_pdf(candidate, ray.direction), DIRECT_LIGHT_SAMPLE_CHANCE);
+    let m1 = p1 / mix(saturate(dot(ray.direction, normal)), light_candidate_pdf(candidate, ray.direction), DIRECT_LIGHT_SAMPLE_CHANCE);
 
     var hit = traverse_top(ray);
     info = hit_info(ray, hit);
