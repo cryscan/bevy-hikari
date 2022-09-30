@@ -24,11 +24,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [ ] Hardware ray tracing (upstream related)
 
 ## Effects
-GI without Next Event Estimation:
 <img src="assets/screenshots/rt-gi.png" />
-
-GI with Next Event Estimation:
-<img src="assets/screenshots/rt-gi-nee.png">
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
