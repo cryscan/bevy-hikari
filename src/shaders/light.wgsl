@@ -73,7 +73,7 @@ let SECOND_BOUNCE_CHANCE: f32 = 0.5;
 
 let SOLAR_ANGLE: f32 = 0.261799388;
 
-let MAX_TEMPORAL_REUSE_COUNT: f32 = 500.0;
+let MAX_TEMPORAL_REUSE_COUNT: f32 = 100.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
 
@@ -625,7 +625,7 @@ fn shading(
 
     if (info.position.w == 0.0) {
         // Directional and ambient
-        if (enable_direct_light && dot(light.direction_to_light, ray.direction) > cos(SOLAR_ANGLE)) {
+        if (enable_direct_light) {
             radiance = lit(light.color.rgb, diffuse_color, surface.roughness, F0, ray.direction, N, V);
         } else {
             radiance = ambient(diffuse_color, surface.roughness, surface.occlusion, F0, N, V);
