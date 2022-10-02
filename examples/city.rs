@@ -52,7 +52,11 @@ fn setup(
         .spawn_bundle(PbrBundle {
             mesh: meshes.add(shape::Plane::default().into()),
             material: materials.add(Color::GRAY.into()),
-            transform: Transform::from_scale(Vec3::new(100.0, 1.0, 100.0)),
+            transform: Transform {
+                translation: Vec3::new(0.0, -3.0, 0.0),
+                scale: Vec3::new(100.0, 1.0, 100.0),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .insert(RayCastMesh::<RaycastSet>::default());
@@ -114,7 +118,7 @@ fn setup(
         })
         .insert_bundle(OrbitCameraBundle::new(
             OrbitCameraController::default(),
-            Vec3::new(-10.0, 5.0, 20.0),
+            Vec3::new(-50.0, 25.0, 100.0),
             Vec3::new(0., 0., 0.),
         ))
         .insert(RayCastSource::<RaycastSet>::default());
