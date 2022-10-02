@@ -133,17 +133,17 @@ struct Surface {
 };
 
 struct HitInfo {
-    surface: Surface,
     position: vec4<f32>,
     normal: vec3<f32>,
     uv: vec2<f32>,
     instance_index: u32,
+    material_index: u32,
 };
 
 struct LightCandidate {
     cone: vec4<f32>,    // orientation + cos(half_angle)
     direction: vec3<f32>,
-    instance: u32,
+    instance_index: u32,
     p: f32,
 };
 
@@ -344,7 +344,7 @@ fn select_light_candidate(
     var candidate: LightCandidate;
     candidate.cone = vec4<f32>(directional.direction_to_light, cos(SOLAR_ANGLE));
     candidate.direction = normal_basis(candidate.cone.xyz) * sample_uniform_cone(rand.zw, candidate.cone.w);
-    candidate.instance = DONT_SAMPLE_EMISSIVE;
+    candidate.instance_index = DONT_SAMPLE_EMISSIVE;
 
     // The luminance of directional light should be scaled by cosine angle
     var sum_flux = luminance(directional.color.rgb) * candidate.cone.w * (1.0 - candidate.cone.w);
@@ -368,7 +368,7 @@ fn select_light_candidate(
 
         sum_flux += flux;
         if (rand_1d < flux / sum_flux) {
-            candidate.instance = source.instance;
+            candidate.instance_index = source.instance;
             candidate.direction = direction;
             candidate.cone = cone;
             selected_flux = flux;
@@ -401,9 +401,9 @@ fn calculate_view(
     return V;
 }
 
-fn retreive_surface(material_id: u32, uv: vec2<f32>) -> Surface {
+fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
     var surface: Surface;
-    let material = material_buffer.data[material_id];
+    let material = material_buffer.data[material_index];
 
     surface.base_color = material.base_color;
     var id = material.base_color_texture;
@@ -435,9 +435,22 @@ fn retreive_surface(material_id: u32, uv: vec2<f32>) -> Surface {
     return surface;
 }
 
+fn retreive_emissive(material_index: u32, uv: vec2<f32>) -> vec4<f32> {
+    let material = material_buffer.data[material_index];
+
+    var emissive = material.emissive;
+    let id = material.emissive_texture;
+    if (id != U32_MAX) {
+        emissive *= textureSampleLevel(textures[id], samplers[id], uv, 0.0);
+    }
+    
+    return emissive;
+}
+
 fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
     var info: HitInfo;
     info.instance_index = hit.instance_index;
+    info.material_index = U32_MAX;
 
     if (hit.instance_index != U32_MAX) {
         let instance = instance_buffer.data[hit.instance_index];
@@ -450,8 +463,9 @@ fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
         info.uv = v0.uv + uv.x * (v1.uv - v0.uv) + uv.y * (v2.uv - v0.uv);
         info.normal = v0.normal + uv.x * (v1.normal - v0.normal) + uv.y * (v2.normal - v0.normal);
 
-        info.surface = retreive_surface(instance.material, info.uv);
+        // info.surface = retreive_surface(instance.material, info.uv);
         info.position = vec4<f32>(ray.origin + ray.direction * hit.intersection.distance, 1.0);
+        info.material_index = instance.material;
     } else {
         info.position = vec4<f32>(ray.origin + ray.direction * DISTANCE_MAX, 0.0);
     }
@@ -633,7 +647,8 @@ fn shading(
         // Emissive
         var emissive = vec3<f32>(0.0);
         if (emissive_instance == SAMPLE_ALL_EMISSIVE || emissive_instance == info.instance_index) {
-            emissive = 255.0 * info.surface.emissive.a * info.surface.emissive.rgb;
+            let hit_emissive = retreive_emissive(info.material_index, info.uv);
+            emissive = 255.0 * hit_emissive.a * hit_emissive.rgb;
         }
         radiance = lit(emissive + head_radiance, diffuse_color, surface.roughness, F0, ray.direction, N, V);
     }
@@ -670,7 +685,8 @@ fn direct_lit(
     let instance_material = textureLoad(instance_material_texture, coords, 0).xy;
     let object_uv = textureSampleLevel(uv_texture, uv_sampler, uv, 0.0).xy;
     let velocity = textureSampleLevel(velocity_texture, velocity_sampler, uv, 0.0).xy * 0.0001;
-    let surface = retreive_surface(instance_material.y, object_uv);
+    // let surface = retreive_surface(instance_material.y, object_uv);
+    var surface: Surface;
 
     // let hashed_frame_number = hash(frame.number);
     // s.random.x = random_float(invocation_id.x * hash(invocation_id.y) ^ hashed_frame_number);
@@ -690,11 +706,8 @@ fn direct_lit(
     let light = lights.directional_lights[0];
 
     var ray: Ray;
-    var bounce_ray: Ray;
-
     var info: HitInfo;
-    var bounce_info: HitInfo;
-    
+
     let candidate = select_light_candidate(s.random, light, position.xyz, normal, instance_material.x);
 
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
@@ -712,6 +725,10 @@ fn direct_lit(
     var bounce_radiance = vec3<f32>(0.0);
     if (hit.instance_index != U32_MAX) {
         let bounce_candidate = select_light_candidate(s.random, light, info.position.xyz, info.normal, info.instance_index);
+
+        var bounce_ray: Ray;
+        var bounce_info: HitInfo;
+
         bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
         bounce_ray.direction = bounce_candidate.direction;
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
@@ -720,20 +737,23 @@ fn direct_lit(
         if (dot(bounce_candidate.direction, info.normal) > 0.0) {
             hit = traverse_top(bounce_ray);
             bounce_info = hit_info(bounce_ray, hit);
+
+            surface = retreive_surface(info.material_index, info.uv);
             bounce_radiance = shading(
                 ray.direction,
                 info.normal,
                 bounce_ray,
                 light,
-                info.surface,
+                surface,
                 bounce_info,
-                (bounce_candidate.instance == DONT_SAMPLE_EMISSIVE),
-                bounce_candidate.instance,
+                (bounce_candidate.instance_index == DONT_SAMPLE_EMISSIVE),
+                bounce_candidate.instance_index,
                 vec3<f32>(0.0)
             );
         }
     }
 
+    surface = retreive_surface(instance_material.y, object_uv);
     s.radiance += shading(
         view_direction,
         normal,
@@ -762,8 +782,8 @@ fn direct_lit(
             light,
             surface,
             info,
-            (candidate.instance == DONT_SAMPLE_EMISSIVE),
-            candidate.instance,
+            (candidate.instance_index == DONT_SAMPLE_EMISSIVE),
+            candidate.instance_index,
             vec3<f32>(0.0)
         );
     }
