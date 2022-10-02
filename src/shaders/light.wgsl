@@ -339,6 +339,7 @@ fn select_light_candidate(
     directional: DirectionalLight,
     position: vec3<f32>,
     normal: vec3<f32>,
+    instance: u32,
 ) -> LightCandidate {
     var candidate: LightCandidate;
     candidate.cone = vec4<f32>(directional.direction_to_light, cos(SOLAR_ANGLE));
@@ -354,10 +355,11 @@ fn select_light_candidate(
         let source = light_source_buffer.data[id];
         let delta = source.position - position;
         let d2 = dot(delta, delta);
+        let r2 = source.radius * source.radius;
 
-        let cone = vec4<f32>(normalize(delta), sqrt(max(d2 - source.radius, 0.0) / max(d2, 0.0001)));
+        let cone = vec4<f32>(normalize(delta), sqrt(max(d2 - r2, 0.0) / max(d2, 0.0001)));
         let sin = sqrt(1.0 - cone.w * cone.w);
-        if (dot(cone.xyz, normal) < -sin) {
+        if (instance == source.instance || dot(cone.xyz, normal) < -sin) {
             continue;
         }
 
@@ -679,9 +681,8 @@ fn direct_lit(
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]).xy;
     let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
-    let noise_temporal_offset = f32(frame.number);
     s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
-    s.random = fract(s.random + noise_temporal_offset * GOLDEN_RATIO);
+    s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
 
     s.radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
     s.visible_position = vec4<f32>(position.xyz, depth);
@@ -695,7 +696,7 @@ fn direct_lit(
     var info: HitInfo;
     var bounce_info: HitInfo;
     
-    let candidate = select_light_candidate(s.random, light, position.xyz, normal);
+    let candidate = select_light_candidate(s.random, light, position.xyz, normal, instance_material.x);
 
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
@@ -711,7 +712,7 @@ fn direct_lit(
     var p2 = 0.5;
     var bounce_radiance = vec3<f32>(0.0);
     if (hit.instance_index != U32_MAX) {
-        let bounce_candidate = select_light_candidate(s.random, light, info.position.xyz, info.normal);
+        let bounce_candidate = select_light_candidate(s.random, light, info.position.xyz, info.normal, info.instance_index);
         bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
         bounce_ray.direction = bounce_candidate.direction;
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
