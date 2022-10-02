@@ -69,9 +69,11 @@ fn setup(
         })),
         material: materials.add(StandardMaterial {
             base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+            emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
+            emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
             ..Default::default()
         }),
-        transform: Transform::from_xyz(2.0, 0.0, 0.0),
+        transform: Transform::from_xyz(2.0, 1.5, 0.0),
         ..Default::default()
     });
 
