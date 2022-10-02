@@ -19,8 +19,8 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
-            width: 800.,
-            height: 600.,
+            width: 400.,
+            height: 300.,
             ..default()
         })
         .insert_resource(Msaa { samples: 4 })
@@ -107,7 +107,7 @@ fn setup(
         ..Default::default()
     });
 
-    ambient.brightness = 0.5;
+    ambient.brightness = 5.0;
 
     // Camera
     commands
