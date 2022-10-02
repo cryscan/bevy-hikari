@@ -684,7 +684,6 @@ fn direct_lit(
     s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
     s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
 
-    s.radiance = 255.0 * surface.emissive.a * surface.emissive.rgb;
     s.visible_position = vec4<f32>(position.xyz, depth);
     s.visible_normal = normal;
 
@@ -791,5 +790,7 @@ fn direct_lit(
     r.w = r.w_sum / max(r.count * luminance(r.s.radiance), 0.0001);
 
     store_reservoir(coords, r);
-    textureStore(render_texture, coords, vec4<f32>(r.s.radiance * r.w, 1.0));
+
+    let out_color = 255.0 * surface.emissive.a * surface.emissive.rgb + r.s.radiance * r.w;
+    textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
