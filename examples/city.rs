@@ -19,11 +19,18 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
-            width: 400.,
-            height: 300.,
+            width: 800.,
+            height: 600.,
             ..default()
         })
         .insert_resource(Msaa { samples: 4 })
+        // .insert_resource(ClearColor(Color::rgb_u8(0, 171, 240)))
+        .insert_resource(AmbientLight {
+            // color: Color::rgb_u8(135, 206, 235),
+            brightness: 1.0,
+            ..Default::default()
+        })
+        .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
@@ -31,6 +38,7 @@ fn main() {
         .add_plugin(PbrPlugin)
         .add_plugin(HikariPlugin::default())
         .add_startup_system(setup)
+        .add_system(load_models)
         .add_system(camera_input_map)
         .add_system_to_stage(
             CoreStage::First,
@@ -45,15 +53,18 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut ambient: ResMut<AmbientLight>,
     asset_server: Res<AssetServer>,
 ) {
     commands
         .spawn_bundle(PbrBundle {
             mesh: meshes.add(shape::Plane::default().into()),
-            material: materials.add(Color::GRAY.into()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(0.8, 0.7, 0.6).into(),
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            }),
             transform: Transform {
-                translation: Vec3::new(0.0, -3.0, 0.0),
+                translation: Vec3::new(0.0, 0.0, 0.0),
                 scale: Vec3::new(100.0, 1.0, 100.0),
                 ..Default::default()
             },
@@ -73,15 +84,8 @@ fn setup(
             emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
             ..Default::default()
         }),
-        transform: Transform::from_xyz(2.0, 1.5, 0.0),
+        transform: Transform::from_xyz(0.0, 0.5, 0.0),
         ..Default::default()
-    });
-
-    // Model
-    commands.spawn_bundle(SceneBundle {
-        scene: asset_server.load("models/city.glb#Scene0"),
-        transform: Transform::default(),
-        ..default()
     });
 
     // Only directional light is supported
@@ -109,8 +113,6 @@ fn setup(
         ..Default::default()
     });
 
-    ambient.brightness = 5.0;
-
     // Camera
     commands
         .spawn_bundle(Camera3dBundle {
@@ -124,6 +126,60 @@ fn setup(
             Vec3::new(0., 0., 0.),
         ))
         .insert(RayCastSource::<RaycastSet>::default());
+}
+
+#[derive(Deref, DerefMut)]
+pub struct LoadTimer(Timer);
+
+fn load_models(
+    mut commands: Commands,
+    time: Res<Time>,
+    asset_server: Res<AssetServer>,
+    mut timer: ResMut<LoadTimer>,
+    mut counter: Local<usize>,
+) {
+    if timer.tick(time.delta()).just_finished() {
+        match *counter {
+            0 => {
+                commands.spawn_bundle(SceneBundle {
+                    scene: asset_server.load("models/Low Poly/Big House 2.glb#Scene0"),
+                    transform: Transform::from_translation(Vec3::new(-4.0, 0.0, 0.0)),
+                    ..default()
+                });
+            }
+            1 => {
+                commands.spawn_bundle(SceneBundle {
+                    scene: asset_server.load("models/Low Poly/Big House 2.glb#Scene0"),
+                    transform: Transform::from_translation(Vec3::new(4.0, 0.0, 0.0)),
+                    ..default()
+                });
+            }
+            2 => {
+                commands.spawn_bundle(SceneBundle {
+                    scene: asset_server.load("models/Low Poly/Big House 3.glb#Scene0"),
+                    transform: Transform::from_translation(Vec3::new(4.0, 0.0, 8.0)),
+                    ..default()
+                });
+            }
+            3 => {
+                commands.spawn_bundle(SceneBundle {
+                    scene: asset_server.load("models/Low Poly/Big House 3.glb#Scene0"),
+                    transform: Transform::from_translation(Vec3::new(-4.0, 0.0, -8.0)),
+                    ..default()
+                });
+            }
+            4 => {
+                commands.spawn_bundle(SceneBundle {
+                    scene: asset_server.load("models/Low Poly/Big House.glb#Scene0"),
+                    transform: Transform::from_translation(Vec3::new(-4.0, 0.0, 8.0)),
+                    ..default()
+                });
+            }
+            _ => {}
+        }
+
+        *counter += 1;
+    }
 }
 
 pub fn camera_input_map(

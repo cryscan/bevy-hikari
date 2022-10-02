@@ -132,9 +132,10 @@ fn prepare_mesh_assets(
         match GpuMesh::from_mesh(mesh) {
             Ok(mesh) => {
                 assets.insert(handle, mesh);
+                info!("Loaded mesh")
             }
             Err(err) => {
-                warn!("{:#?}", err);
+                warn!("Encounter an error when loading mesh: {:#?}", err);
             }
         }
     }
