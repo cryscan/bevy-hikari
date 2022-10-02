@@ -8,7 +8,7 @@ use crate::{
     transform::PreviousGlobalTransform,
 };
 use bevy::{
-    math::{Vec3A, Vec4Swizzles},
+    math::Vec3A,
     prelude::*,
     render::{
         extract_component::UniformComponentPlugin,
@@ -258,15 +258,14 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
 
             // Add it to the light source list if it's emissive.
             let emissive = material.0.emissive;
-            let luminance = emissive.xyz().length() * emissive.w * 255.0;
-            if luminance > 0.0 {
+            if emissive.w > 0.0 {
                 let radius = aabb.half_extents.length();
                 light_sources.insert(
                     entity,
                     GpuLightSource {
+                        emissive,
                         position: Vec3::from(center),
                         radius,
-                        luminance,
                         instance: 0,
                     },
                 );

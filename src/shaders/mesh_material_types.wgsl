@@ -54,9 +54,9 @@ struct Material {
 };
 
 struct LightSource {
+    emissive: vec4<f32>,
     position: vec3<f32>,
     radius: f32,
-    luminance: f32,
     instance: u32,
 };
 

@@ -149,9 +149,9 @@ pub struct GpuStandardMaterial {
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuLightSource {
+    pub emissive: Vec4,
     pub position: Vec3,
     pub radius: f32,
-    pub luminance: f32,
     pub instance: u32,
 }
 

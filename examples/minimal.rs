@@ -45,6 +45,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut ambient: ResMut<AmbientLight>,
     asset_server: Res<AssetServer>,
 ) {
     // Ground
@@ -208,6 +209,8 @@ fn setup(
         },
         ..Default::default()
     });
+
+    ambient.brightness = 0.5;
 
     // Camera
     commands
