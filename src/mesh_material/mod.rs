@@ -204,6 +204,7 @@ pub enum PrepareMeshError {
     MissingAttributeNormal,
     MissingAttributeUV,
     IncompatiblePrimitiveTopology,
+    NoPrimitive,
 }
 
 #[derive(Default, Clone)]
@@ -285,6 +286,10 @@ impl GpuMesh {
             }
             _ => Err(PrepareMeshError::IncompatiblePrimitiveTopology),
         }?;
+
+        if primitives.is_empty() {
+            return Err(PrepareMeshError::NoPrimitive);
+        }
 
         let bvh = BVH::build(&mut primitives);
         let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, primitive_index| GpuNode {

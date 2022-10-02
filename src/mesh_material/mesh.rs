@@ -129,7 +129,14 @@ fn prepare_mesh_assets(
         meshes.remove(&handle);
     }
     for (handle, mesh) in extracted_assets.extracted.drain(..) {
-        assets.insert(handle, GpuMesh::from_mesh(mesh).unwrap());
+        match GpuMesh::from_mesh(mesh) {
+            Ok(mesh) => {
+                assets.insert(handle, mesh);
+            }
+            Err(err) => {
+                warn!("{:#?}", err);
+            }
+        }
     }
 
     render_assets.clear();
