@@ -141,34 +141,32 @@ fn load_models(
     if timer.tick(time.delta()).just_finished() {
         match *counter {
             0 => {
+                let handle = asset_server.load("models/Low Poly/Big House 2.glb#Scene0");
                 commands.spawn_bundle(SceneBundle {
-                    scene: asset_server.load("models/Low Poly/Big House 2.glb#Scene0"),
+                    scene: handle.clone(),
                     transform: Transform::from_translation(Vec3::new(-4.0, 0.0, 0.0)),
                     ..default()
                 });
-            }
-            1 => {
                 commands.spawn_bundle(SceneBundle {
-                    scene: asset_server.load("models/Low Poly/Big House 2.glb#Scene0"),
+                    scene: handle,
                     transform: Transform::from_translation(Vec3::new(4.0, 0.0, 0.0)),
                     ..default()
                 });
             }
-            2 => {
+            1 => {
+                let handle = asset_server.load("models/Low Poly/Big House 3.glb#Scene0");
                 commands.spawn_bundle(SceneBundle {
-                    scene: asset_server.load("models/Low Poly/Big House 3.glb#Scene0"),
+                    scene: handle.clone(),
                     transform: Transform::from_translation(Vec3::new(4.0, 0.0, 8.0)),
                     ..default()
                 });
-            }
-            3 => {
                 commands.spawn_bundle(SceneBundle {
-                    scene: asset_server.load("models/Low Poly/Big House 3.glb#Scene0"),
+                    scene: handle,
                     transform: Transform::from_translation(Vec3::new(-4.0, 0.0, -8.0)),
                     ..default()
                 });
             }
-            4 => {
+            2 => {
                 commands.spawn_bundle(SceneBundle {
                     scene: asset_server.load("models/Low Poly/Big House.glb#Scene0"),
                     transform: Transform::from_translation(Vec3::new(-4.0, 0.0, 8.0)),

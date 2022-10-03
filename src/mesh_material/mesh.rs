@@ -131,8 +131,8 @@ fn prepare_mesh_assets(
     for (handle, mesh) in extracted_assets.extracted.drain(..) {
         match GpuMesh::from_mesh(mesh) {
             Ok(mesh) => {
+                info!("Loaded mesh {}", assets.len());
                 assets.insert(handle, mesh);
-                info!("Loaded mesh")
             }
             Err(err) => {
                 warn!("Encounter an error when loading mesh: {:#?}", err);
