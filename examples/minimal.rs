@@ -186,20 +186,9 @@ fn setup(
     });
 
     // Only directional light is supported
-    const HALF_SIZE: f32 = 5.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 100000.0,
-            shadow_projection: OrthographicProjection {
-                left: -HALF_SIZE,
-                right: HALF_SIZE,
-                bottom: -HALF_SIZE,
-                top: HALF_SIZE,
-                near: -10.0 * HALF_SIZE,
-                far: 10.0 * HALF_SIZE,
-                ..Default::default()
-            },
-            shadows_enabled: true,
+            illuminance: 20000.0,
             ..Default::default()
         },
         transform: Transform {

@@ -72,37 +72,10 @@ fn setup(
         })
         .insert(RayCastMesh::<RaycastSet>::default());
 
-    // Sphere
-    // commands.spawn_bundle(PbrBundle {
-    //     mesh: meshes.add(Mesh::from(shape::UVSphere {
-    //         radius: 0.5,
-    //         ..Default::default()
-    //     })),
-    //     material: materials.add(StandardMaterial {
-    //         base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-    //         emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
-    //         emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-    //         ..Default::default()
-    //     }),
-    //     transform: Transform::from_xyz(0.0, 0.5, 0.0),
-    //     ..Default::default()
-    // });
-
     // Only directional light is supported
-    const HALF_SIZE: f32 = 5.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 100000.0,
-            shadow_projection: OrthographicProjection {
-                left: -HALF_SIZE,
-                right: HALF_SIZE,
-                bottom: -HALF_SIZE,
-                top: HALF_SIZE,
-                near: -10.0 * HALF_SIZE,
-                far: 10.0 * HALF_SIZE,
-                ..Default::default()
-            },
-            shadows_enabled: true,
+            illuminance: 20000.0,
             ..Default::default()
         },
         transform: Transform {

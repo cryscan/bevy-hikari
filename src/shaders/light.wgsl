@@ -61,6 +61,7 @@ var previous_sample_position_texture: texture_storage_2d<rgba32float, read_write
 @group(6) @binding(6)
 var previous_sample_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 
+let TAU: f32 = 6.283185307;
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
@@ -79,7 +80,7 @@ let SAMPLE_ALL_EMISSIVE: u32 = 4294967295u;
 let SECOND_BOUNCE_CHANCE: f32 = 0.5;
 #endif
 
-let SOLAR_ANGLE: f32 = 0.261799388;
+let SOLAR_ANGLE: f32 = 0.130899694;
 
 let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
@@ -354,7 +355,7 @@ fn select_light_candidate(
     candidate.direction = normal_basis(candidate.cone.xyz) * sample_uniform_cone(rand.zw, candidate.cone.w);
     candidate.instance_index = DONT_SAMPLE_EMISSIVE;
 
-    var sum_flux = luminance(directional.color.rgb) * (1.0 - candidate.cone.w);
+    var sum_flux = luminance(directional.color.rgb) / TAU;
     var selected_flux = sum_flux;
 
     let rand_1d = fract(rand.x + GOLDEN_RATIO);
@@ -666,7 +667,7 @@ fn shading(
     if (info.position.w == 0.0) {
         // Directional and ambient
         if (enable_direct_light && dot(ray.direction, light.direction_to_light) > cos(SOLAR_ANGLE)) {
-            let in_radiance = light.color.rgb;
+            let in_radiance = light.color.rgb / (TAU * (1.0 - cos(SOLAR_ANGLE)));
             radiance = lit(in_radiance, diffuse_color, surface.roughness, F0, ray.direction, N, V);
         } else {
             radiance = ambient(diffuse_color, surface.roughness, surface.occlusion, F0, N, V);
@@ -741,7 +742,8 @@ fn direct_lit(
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
     ray.inv_direction = 1.0 / ray.direction;
-    let p1 = mix(dot(ray.direction, normal), light_candidate_pdf(candidate, ray.direction), 0.5);
+    // let p1 = mix(dot(ray.direction, normal), light_candidate_pdf(candidate, ray.direction), 0.5);
+    let p1 = dot(ray.direction, normal);
 
     var hit = traverse_top(ray);
     info = hit_info(ray, hit);
@@ -752,7 +754,13 @@ fn direct_lit(
     var p2 = 0.5;
     var bounce_radiance = vec3<f32>(0.0);
     if (hit.instance_index != U32_MAX) {
-        let bounce_candidate = select_light_candidate(s.random, light, info.position.xyz, info.normal, info.instance_index);
+        let bounce_candidate = select_light_candidate(
+            fract(s.random + f32(frame.number) * GOLDEN_RATIO), 
+            light, 
+            info.position.xyz, 
+            info.normal, 
+            info.instance_index
+        );
 
         var bounce_ray: Ray;
         var bounce_info: HitInfo;
@@ -797,7 +805,8 @@ fn direct_lit(
     // First light sampling
     ray.direction = candidate.direction;
     ray.inv_direction = 1.0 / ray.direction;
-    let p3 = mix(candidate.p, saturate(dot(ray.direction, normal)), 0.5);
+    // let p3 = mix(candidate.p, saturate(dot(ray.direction, normal)), 0.5);
+    let p3 = candidate.p;
 
     if (dot(candidate.direction, normal) > 0.0) {
         hit = traverse_top(ray);
@@ -821,7 +830,7 @@ fn direct_lit(
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
 
-    let p = luminance(s.radiance) / (p1 * p2 + p3);
+    let p = luminance(s.radiance) / mix(p1 * p2, p3, 0.5);
     let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
     let depth_miss = abs(r.s.visible_position.w / s.visible_position.w - 1.0) > 0.1;
     let normal_miss = dot(s.visible_normal, r.s.visible_normal) < 0.866;
