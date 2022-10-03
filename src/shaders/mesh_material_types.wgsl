@@ -21,20 +21,19 @@ struct Slice {
 
 struct Instance {
     min: vec3<f32>,
+    material: u32,
     max: vec3<f32>,
+    node_index: u32,
     model: mat4x4<f32>,
     inverse_transpose_model: mat4x4<f32>,
     slice: Slice,
-    material: u32,
-    node_index: u32,
 };
 
 struct Node {
     min: vec3<f32>,
-    max: vec3<f32>,
     entry_index: u32,
+    max: vec3<f32>,
     exit_index: u32,
-    primitive_index: u32,
 };
 
 struct Material {

@@ -328,13 +328,7 @@ fn prepare_instances(
 
         add_instance_indices(&instances);
 
-        let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, primitive_index| GpuNode {
-            min: aabb.min.to_array().into(),
-            max: aabb.max.to_array().into(),
-            entry_index,
-            exit_index,
-            primitive_index,
-        });
+        let nodes = bvh.flatten_custom(&GpuNode::pack);
         render_assets.set_nodes(values, nodes);
 
         for (id, (entity, _)) in instances.iter().enumerate() {

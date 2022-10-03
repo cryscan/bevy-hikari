@@ -64,6 +64,7 @@ var previous_sample_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 4294967295u;
+let BVH_LEAF_FLAG: u32 = 0x80000000u;
 
 let DISTANCE_MAX: f32 = 65535.0;
 let VALIDATION_INTERVAL: u32 = 16u;
@@ -249,8 +250,8 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
         let node_index = slice.node_offset + index;
         let node = asset_node_buffer.data[node_index];
         var aabb: Aabb;
-        if (node.entry_index == U32_MAX) {
-            let primitive_index = slice.primitive + node.primitive_index;
+        if ((node.entry_index & BVH_LEAF_FLAG) != 0u) {
+            let primitive_index = slice.primitive + node.entry_index & ~BVH_LEAF_FLAG;
             let vertices = primitive_buffer.data[primitive_index].vertices;
 
             aabb.min = min(vertices[0], min(vertices[1], vertices[2]));
@@ -292,8 +293,8 @@ fn traverse_top(ray: Ray) -> Hit {
         let node = instance_node_buffer.data[index];
         var aabb: Aabb;
 
-        if (node.entry_index == U32_MAX) {
-            let instance_index = node.primitive_index;
+        if ((node.entry_index & BVH_LEAF_FLAG) != 0u) {
+            let instance_index = node.entry_index & ~BVH_LEAF_FLAG;
             let instance = instance_buffer.data[instance_index];
             aabb.min = instance.min;
             aabb.max = instance.max;

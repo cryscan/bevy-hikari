@@ -94,12 +94,12 @@ impl BHShape for GpuPrimitive {
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuInstance {
     pub min: Vec3,
+    pub material: GpuStandardMaterialOffset,
     pub max: Vec3,
+    node_index: u32,
     pub transform: Mat4,
     pub inverse_transpose_model: Mat4,
     pub slice: GpuMeshSlice,
-    pub material: GpuStandardMaterialOffset,
-    node_index: u32,
 }
 
 impl Bounded for GpuInstance {
@@ -124,10 +124,27 @@ impl BHShape for GpuInstance {
 #[derive(Debug, Default, Clone, ShaderType)]
 pub struct GpuNode {
     pub min: Vec3,
-    pub max: Vec3,
     pub entry_index: u32,
+    pub max: Vec3,
     pub exit_index: u32,
-    pub primitive_index: u32,
+}
+
+impl GpuNode {
+    fn pack(aabb: &AABB, entry_index: u32, exit_index: u32, primitive_index: u32) -> Self {
+        let entry_index = if entry_index == u32::MAX {
+            primitive_index | 0x80000000
+        } else {
+            entry_index
+        };
+        let min = aabb.min.to_array().into();
+        let max = aabb.max.to_array().into();
+        Self {
+            min,
+            entry_index,
+            max,
+            exit_index,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
@@ -292,13 +309,7 @@ impl GpuMesh {
         }
 
         let bvh = BVH::build(&mut primitives);
-        let nodes = bvh.flatten_custom(&|aabb, entry_index, exit_index, primitive_index| GpuNode {
-            min: aabb.min.to_array().into(),
-            max: aabb.max.to_array().into(),
-            entry_index,
-            exit_index,
-            primitive_index,
-        });
+        let nodes = bvh.flatten_custom(&GpuNode::pack);
 
         Ok(Self {
             vertices,
