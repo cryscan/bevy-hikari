@@ -328,6 +328,11 @@ impl SpecializedComputePipeline for LightPipeline {
     type Key = LightPipelineKey;
 
     fn specialize(&self, key: Self::Key) -> ComputePipelineDescriptor {
+        let mut shader_defs = vec![];
+        if key.texture_count < 1 {
+            shader_defs.push("NO_TEXTURE".into());
+        }
+
         ComputePipelineDescriptor {
             label: None,
             layout: Some(vec![
@@ -340,7 +345,7 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.reservoir_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
-            shader_defs: vec![],
+            shader_defs,
             entry_point: key.entry_point.into(),
         }
     }

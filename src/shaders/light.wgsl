@@ -5,10 +5,17 @@
 #import bevy_hikari::mesh_material_bindings
 #import bevy_hikari::deferred_bindings
 
+#ifdef NO_TEXTURE
+@group(3) @binding(0)
+var textures: texture_2d<f32>;
+@group(3) @binding(1)
+var samplers: sampler;
+#else
 @group(3) @binding(0)
 var textures: binding_array<texture_2d<f32>>;
 @group(3) @binding(1)
 var samplers: binding_array<sampler>;
+#endif
 
 struct Frame {
     number: u32,
@@ -401,6 +408,26 @@ fn calculate_view(
     return V;
 }
 
+#ifdef NO_TEXTURE
+fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
+    var surface: Surface;
+    let material = material_buffer.data[material_index];
+
+    surface.base_color = material.base_color;
+    surface.emissive = material.emissive;
+    surface.metallic = material.metallic;
+    surface.occlusion = 1.0;
+    surface.roughness = perceptualRoughnessToRoughness(material.perceptual_roughness);
+    surface.reflectance = material.reflectance;
+
+    return surface;
+}
+
+fn retreive_emissive(material_index: u32, uv: vec2<f32>) -> vec4<f32> {
+    var emissive = material_buffer.data[material_index].emissive;
+    return emissive;
+}
+#else
 fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
     var surface: Surface;
     let material = material_buffer.data[material_index];
@@ -446,6 +473,7 @@ fn retreive_emissive(material_index: u32, uv: vec2<f32>) -> vec4<f32> {
     
     return emissive;
 }
+#endif
 
 fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
     var info: HitInfo;

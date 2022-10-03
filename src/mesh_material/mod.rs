@@ -442,7 +442,7 @@ fn prepare_texture_bind_group_layout(
     render_device: Res<RenderDevice>,
     materials: Res<MaterialRenderAssets>,
 ) {
-    let count = materials.textures.len().max(1);
+    let count = materials.textures.len();
     let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
@@ -569,13 +569,11 @@ fn queue_mesh_material_bind_group(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureViewArray(&[
-                            &*dummy_white_gpu_image.texture_view
-                        ]),
+                        resource: BindingResource::TextureView(&dummy_white_gpu_image.texture_view),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::SamplerArray(&[&*dummy_white_gpu_image.sampler]),
+                        resource: BindingResource::Sampler(&dummy_white_gpu_image.sampler),
                     },
                 ],
             })
