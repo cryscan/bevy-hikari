@@ -8,7 +8,7 @@ use crate::{
     transform::PreviousGlobalTransform,
 };
 use bevy::{
-    math::Vec3A,
+    math::{Vec3A, Vec4Swizzles},
     prelude::*,
     render::{
         extract_component::UniformComponentPlugin,
@@ -258,7 +258,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
 
             // Add it to the light source list if it's emissive.
             let emissive = material.0.emissive;
-            if emissive.w > 0.0 {
+            if emissive.w * emissive.xyz().length() > 0.0 {
                 let radius = aabb.half_extents.length();
                 light_sources.insert(
                     entity,
