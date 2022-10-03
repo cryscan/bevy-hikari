@@ -354,8 +354,7 @@ fn select_light_candidate(
     candidate.direction = normal_basis(candidate.cone.xyz) * sample_uniform_cone(rand.zw, candidate.cone.w);
     candidate.instance_index = DONT_SAMPLE_EMISSIVE;
 
-    // The luminance of directional light should be scaled by cosine angle
-    var sum_flux = luminance(directional.color.rgb) * candidate.cone.w * (1.0 - candidate.cone.w);
+    var sum_flux = luminance(directional.color.rgb) * (1.0 - candidate.cone.w);
     var selected_flux = sum_flux;
 
     let rand_1d = fract(rand.x + GOLDEN_RATIO);
@@ -667,7 +666,7 @@ fn shading(
     if (info.position.w == 0.0) {
         // Directional and ambient
         if (enable_direct_light && dot(ray.direction, light.direction_to_light) > cos(SOLAR_ANGLE)) {
-            let in_radiance = light.color.rgb * cos(SOLAR_ANGLE);
+            let in_radiance = light.color.rgb;
             radiance = lit(in_radiance, diffuse_color, surface.roughness, F0, ray.direction, N, V);
         } else {
             radiance = ambient(diffuse_color, surface.roughness, surface.occlusion, F0, N, V);
