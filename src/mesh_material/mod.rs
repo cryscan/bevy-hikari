@@ -442,7 +442,7 @@ fn prepare_texture_bind_group_layout(
     render_device: Res<RenderDevice>,
     materials: Res<MaterialRenderAssets>,
 ) {
-    let count = materials.textures.len();
+    let count = materials.textures.len().max(1);
     let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
@@ -546,20 +546,40 @@ fn queue_mesh_material_bind_group(
         let textures: Vec<_> = images.clone().map(|image| &*image.texture_view).collect();
         let samplers: Vec<_> = images.map(|image| &*image.sampler).collect();
 
-        let texture = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &texture_layout.layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureViewArray(textures.as_slice()),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::SamplerArray(samplers.as_slice()),
-                },
-            ],
-        });
+        let texture = if textures.len() > 0 {
+            render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &texture_layout.layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureViewArray(textures.as_slice()),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::SamplerArray(samplers.as_slice()),
+                    },
+                ],
+            })
+        } else {
+            let dummy_white_gpu_image = &mesh_pipeline.dummy_white_gpu_image;
+            render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &texture_layout.layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::TextureViewArray(&[
+                            &*dummy_white_gpu_image.texture_view
+                        ]),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::SamplerArray(&[&*dummy_white_gpu_image.sampler]),
+                    },
+                ],
+            })
+        };
 
         commands.insert_resource(MeshMaterialBindGroup {
             mesh_material,
