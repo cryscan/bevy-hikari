@@ -546,7 +546,7 @@ fn queue_mesh_material_bind_group(
         let textures: Vec<_> = images.clone().map(|image| &*image.texture_view).collect();
         let samplers: Vec<_> = images.map(|image| &*image.sampler).collect();
 
-        let texture = if textures.len() > 0 {
+        let texture = if !textures.is_empty() {
             render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &texture_layout.layout,
