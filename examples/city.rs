@@ -27,7 +27,7 @@ fn main() {
         // .insert_resource(ClearColor(Color::rgb_u8(0, 171, 240)))
         .insert_resource(AmbientLight {
             // color: Color::rgb_u8(135, 206, 235),
-            brightness: 1.0,
+            brightness: 5.0,
             ..Default::default()
         })
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
@@ -53,7 +53,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     commands
         .spawn_bundle(PbrBundle {
@@ -73,20 +73,20 @@ fn setup(
         .insert(RayCastMesh::<RaycastSet>::default());
 
     // Sphere
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::UVSphere {
-            radius: 0.5,
-            ..Default::default()
-        })),
-        material: materials.add(StandardMaterial {
-            base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-            emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
-            emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-            ..Default::default()
-        }),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
-        ..Default::default()
-    });
+    // commands.spawn_bundle(PbrBundle {
+    //     mesh: meshes.add(Mesh::from(shape::UVSphere {
+    //         radius: 0.5,
+    //         ..Default::default()
+    //     })),
+    //     material: materials.add(StandardMaterial {
+    //         base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+    //         emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
+    //         emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+    //         ..Default::default()
+    //     }),
+    //     transform: Transform::from_xyz(0.0, 0.5, 0.0),
+    //     ..Default::default()
+    // });
 
     // Only directional light is supported
     const HALF_SIZE: f32 = 5.0;
