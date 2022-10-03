@@ -250,8 +250,8 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
         let node_index = slice.node_offset + index;
         let node = asset_node_buffer.data[node_index];
         var aabb: Aabb;
-        if ((node.entry_index & BVH_LEAF_FLAG) != 0u) {
-            let primitive_index = slice.primitive + node.entry_index & ~BVH_LEAF_FLAG;
+        if (node.entry_index >= BVH_LEAF_FLAG) {
+            let primitive_index = slice.primitive + node.entry_index - BVH_LEAF_FLAG;
             let vertices = primitive_buffer.data[primitive_index].vertices;
 
             aabb.min = min(vertices[0], min(vertices[1], vertices[2]));
@@ -293,8 +293,8 @@ fn traverse_top(ray: Ray) -> Hit {
         let node = instance_node_buffer.data[index];
         var aabb: Aabb;
 
-        if ((node.entry_index & BVH_LEAF_FLAG) != 0u) {
-            let instance_index = node.entry_index & ~BVH_LEAF_FLAG;
+        if (node.entry_index >= BVH_LEAF_FLAG) {
+            let instance_index = node.entry_index - BVH_LEAF_FLAG;
             let instance = instance_buffer.data[instance_index];
             aabb.min = instance.min;
             aabb.max = instance.max;
