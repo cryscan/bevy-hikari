@@ -19,8 +19,8 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
-            width: 400.,
-            height: 300.,
+            width: 800.,
+            height: 600.,
             ..default()
         })
         .insert_resource(Msaa { samples: 4 })

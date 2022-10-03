@@ -742,8 +742,8 @@ fn direct_lit(
     ray.origin = position.xyz + normal * light.shadow_normal_bias;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
     ray.inv_direction = 1.0 / ray.direction;
-    // let p1 = mix(dot(ray.direction, normal), light_candidate_pdf(candidate, ray.direction), 0.5);
-    let p1 = dot(ray.direction, normal);
+    let p1 = mix(dot(ray.direction, normal), light_candidate_pdf(candidate, ray.direction), 0.5);
+    // let p1 = dot(ray.direction, normal);
 
     var hit = traverse_top(ray);
     info = hit_info(ray, hit);
@@ -805,8 +805,8 @@ fn direct_lit(
     // First light sampling
     ray.direction = candidate.direction;
     ray.inv_direction = 1.0 / ray.direction;
-    // let p3 = mix(candidate.p, saturate(dot(ray.direction, normal)), 0.5);
-    let p3 = candidate.p;
+    let p3 = mix(candidate.p, saturate(dot(ray.direction, normal)), 0.5);
+    // let p3 = candidate.p;
 
     if (dot(candidate.direction, normal) > 0.0) {
         hit = traverse_top(ray);
@@ -830,7 +830,7 @@ fn direct_lit(
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
 
-    let p = luminance(s.radiance) / mix(p1 * p2, p3, 0.5);
+    let p = luminance(s.radiance) / (p1 * p2 + p3);
     let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
     let depth_miss = abs(r.s.visible_position.w / s.visible_position.w - 1.0) > 0.1;
     let normal_miss = dot(s.visible_normal, r.s.visible_normal) < 0.866;
