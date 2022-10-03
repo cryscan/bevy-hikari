@@ -142,36 +142,47 @@ fn load_models(
         match *counter {
             0 => {
                 let handle = asset_server.load("models/Low Poly/Big House 2.glb#Scene0");
-                commands.spawn_bundle(SceneBundle {
-                    scene: handle.clone(),
-                    transform: Transform::from_translation(Vec3::new(-4.0, 0.0, 0.0)),
-                    ..default()
-                });
-                commands.spawn_bundle(SceneBundle {
-                    scene: handle,
-                    transform: Transform::from_translation(Vec3::new(4.0, 0.0, 0.0)),
-                    ..default()
-                });
+                for location in [-3, -1, 1, 3] {
+                    commands.spawn_bundle(SceneBundle {
+                        scene: handle.clone(),
+                        transform: Transform::from_translation(Vec3::new(
+                            4.0 * location as f32,
+                            0.0,
+                            0.0,
+                        )),
+                        ..default()
+                    });
+                }
             }
             1 => {
                 let handle = asset_server.load("models/Low Poly/Big House 3.glb#Scene0");
-                commands.spawn_bundle(SceneBundle {
-                    scene: handle.clone(),
-                    transform: Transform::from_translation(Vec3::new(4.0, 0.0, 8.0)),
-                    ..default()
-                });
-                commands.spawn_bundle(SceneBundle {
-                    scene: handle,
-                    transform: Transform::from_translation(Vec3::new(-4.0, 0.0, -8.0)),
-                    ..default()
-                });
+                for (id, location) in [-3, -1, 1, 3].iter().enumerate() {
+                    let sign = if id % 2 == 0 { 1.0 } else { -1.0 };
+                    commands.spawn_bundle(SceneBundle {
+                        scene: handle.clone(),
+                        transform: Transform::from_translation(Vec3::new(
+                            4.0 * (*location as f32),
+                            0.0,
+                            8.0 * sign,
+                        )),
+                        ..default()
+                    });
+                }
             }
             2 => {
-                commands.spawn_bundle(SceneBundle {
-                    scene: asset_server.load("models/Low Poly/Big House.glb#Scene0"),
-                    transform: Transform::from_translation(Vec3::new(-4.0, 0.0, 8.0)),
-                    ..default()
-                });
+                let handle = asset_server.load("models/Low Poly/Big House.glb#Scene0");
+                for (id, location) in [-3, -1, 1, 3].iter().enumerate() {
+                    let sign = if id % 2 == 0 { -1.0 } else { 1.0 };
+                    commands.spawn_bundle(SceneBundle {
+                        scene: handle.clone(),
+                        transform: Transform::from_translation(Vec3::new(
+                            4.0 * (*location as f32),
+                            0.0,
+                            8.0 * sign,
+                        )),
+                        ..default()
+                    });
+                }
             }
             _ => {}
         }
