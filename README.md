@@ -26,6 +26,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 ## Effects
 <img src="assets/screenshots/rt-gi.png" />
 <img src="assets/screenshots/rt-gi-2.png" />
+<img src="assets/screenshots/city.png">
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
