@@ -18,6 +18,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] Extraction and preparation of mesh assets and instances
 - [x] G-Buffer generation
 - [x] 2-bounce path tracing
+- [x] Next event estimation
 - [x] ReSTIR: Temporal sample reuse
 - [ ] ReSTIR: Spatial sample reuse
 - [ ] Spatiotemporal filtering
@@ -27,10 +28,9 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 <img src="assets/screenshots/rt-gi.png" />
 <img src="assets/screenshots/rt-gi-2.png" />
 <img src="assets/screenshots/city.png">
-<p float="left">
-    <img src="assets/screenshots/scene.png">
-    <img src="assets/screenshots/scene-box.png">
-</p>
+<img src="assets/screenshots/scene.png">
+<img src="assets/screenshots/scene-box.png">
+<img src="assets/screenshots/dissection/composed.jpg">
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
