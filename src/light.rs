@@ -426,7 +426,7 @@ fn prepare_light_pass_targets(
             });
 
             commands.entity(entity).insert(LightPassTarget {
-                render: create_texture(RADIANCE_TEXTURE_FORMAT, FilterMode::Linear),
+                render: create_texture(RENDER_TEXTURE_FORMAT, FilterMode::Linear),
                 reservoir,
             });
         }

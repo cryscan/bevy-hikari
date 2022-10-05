@@ -96,7 +96,7 @@ fn setup(
     // Only directional light is supported
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 20000.0,
+            illuminance: 10000.0,
             ..Default::default()
         },
         transform: Transform {
