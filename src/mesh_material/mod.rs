@@ -445,7 +445,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
 
 pub struct TextureBindGroupLayout {
     pub layout: BindGroupLayout,
-    pub count: usize,
+    pub texture_count: usize,
 }
 
 fn prepare_texture_bind_group_layout(
@@ -477,7 +477,10 @@ fn prepare_texture_bind_group_layout(
             },
         ],
     });
-    commands.insert_resource(TextureBindGroupLayout { layout, count });
+    commands.insert_resource(TextureBindGroupLayout {
+        layout,
+        texture_count: count,
+    });
 }
 
 pub struct MeshMaterialBindGroup {

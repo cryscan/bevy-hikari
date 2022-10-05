@@ -25,10 +25,12 @@ struct Frame {
 @group(4) @binding(0)
 var<uniform> frame: Frame;
 @group(4) @binding(1)
-var render_texture: texture_storage_2d<rgba16float, write>;
+var direct_render_texture: texture_storage_2d<rgba16float, write>;
 @group(4) @binding(2)
-var noise_texture: binding_array<texture_2d<f32>>;
+var indirect_render_texture: texture_storage_2d<rgba16float, write>;
 @group(4) @binding(3)
+var noise_texture: binding_array<texture_2d<f32>>;
+@group(4) @binding(4)
 var noise_sampler: sampler;
 
 @group(5) @binding(0)
@@ -67,6 +69,7 @@ let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 0xFFFFFFFFu;
 let BVH_LEAF_FLAG: u32 = 0x80000000u;
 
+let RAY_BIAS: f32 = 0.02;
 let DISTANCE_MAX: f32 = 65535.0;
 let VALIDATION_INTERVAL: u32 = 16u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
@@ -685,8 +688,8 @@ fn shading(
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>,) {
-    let size = textureDimensions(render_texture);
+fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let size = textureDimensions(direct_render_texture);
     let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
@@ -697,7 +700,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>,) {
         var r: Reservoir;
         set_reservoir(&r, s, 0.0);
         store_reservoir(coords, r);
-        textureStore(render_texture, coords, vec4<f32>(0.0));
+        textureStore(direct_render_texture, coords, vec4<f32>(0.0));
         return;
     }
     let ndc = view.view_proj * position;
@@ -725,75 +728,12 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>,) {
 
     let candidate = select_light_candidate(s.random, position.xyz, normal, instance_material.x);
 
-    // ray.origin = position.xyz + normal * light.shadow_normal_bias;
-    // ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
-    // ray.inv_direction = 1.0 / ray.direction;
-    // let p1 = mix(dot(ray.direction, normal), light_candidate_pdf(candidate, ray.direction), 0.5);
-    // // let p1 = dot(ray.direction, normal);
-
-    // var hit = traverse_top(ray);
-    // info = hit_info(ray, hit);
-    // s.sample_position = info.position;
-    // s.sample_normal = info.normal;
-
-    // // Second bounce: from sample position
-    // var p2 = 0.5;
-    // var bounce_radiance = vec3<f32>(0.0);
-    // if (hit.instance_index != U32_MAX) {
-    //     let bounce_candidate = select_light_candidate(
-    //         fract(s.random + f32(frame.number) * GOLDEN_RATIO), 
-    //         light, 
-    //         info.position.xyz, 
-    //         info.normal, 
-    //         info.instance_index
-    //     );
-
-    //     var bounce_ray: Ray;
-    //     var bounce_info: HitInfo;
-
-    //     bounce_ray.origin = info.position.xyz + info.normal * light.shadow_normal_bias;
-    //     bounce_ray.direction = bounce_candidate.direction;
-    //     bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-    //     p2 = bounce_candidate.p;
-
-    //     if (dot(bounce_candidate.direction, info.normal) > 0.0) {
-    //         hit = traverse_top(bounce_ray);
-    //         bounce_info = hit_info(bounce_ray, hit);
-
-    //         surface = retreive_surface(info.material_index, info.uv);
-    //         bounce_radiance = shading(
-    //             ray.direction,
-    //             info.normal,
-    //             bounce_ray,
-    //             light,
-    //             surface,
-    //             bounce_info,
-    //             (bounce_candidate.instance_index == DONT_SAMPLE_EMISSIVE),
-    //             bounce_candidate.instance_index,
-    //             vec3<f32>(0.0)
-    //         );
-    //     }
-    // }
-
     surface = retreive_surface(instance_material.y, object_uv);
-    // s.radiance += shading(
-    //     view_direction,
-    //     normal,
-    //     ray,
-    //     light,
-    //     surface,
-    //     info,
-    //     true,
-    //     SAMPLE_ALL_EMISSIVE,
-    //     bounce_radiance
-    // );
 
     // Direct light sampling
-    ray.origin = position.xyz + normal * lights.directional_lights[0].shadow_normal_bias;
+    ray.origin = position.xyz + normal * RAY_BIAS;
     ray.direction = candidate.direction;
     ray.inv_direction = 1.0 / ray.direction;
-    // let p3 = mix(candidate.p, saturate(dot(ray.direction, normal)), 0.5);
-    // let p3 = candidate.p;
 
     if (dot(candidate.direction, normal) > 0.0) {
         hit = traverse_top(ray);
@@ -812,8 +752,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>,) {
     let previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
-
-    // let p = luminance(s.radiance) / p3;    
+   
     var output_radiance = shading(view_direction, s.visible_normal, ray.direction, surface, s.radiance);
     let p = luminance(output_radiance) / candidate.p;
 
@@ -844,5 +783,126 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>,) {
     var output_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
     output_color += r.w * output_radiance;
 
-    textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
+    textureStore(direct_render_texture, coords, vec4<f32>(output_color, 1.0));
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let size = textureDimensions(indirect_render_texture);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
+    let coords = vec2<i32>(invocation_id.xy);
+
+    var s = empty_sample();
+
+    let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
+    if (position.w < 0.5) {
+        var r: Reservoir;
+        set_reservoir(&r, s, 0.0);
+        store_reservoir(coords, r);
+        textureStore(indirect_render_texture, coords, vec4<f32>(0.0));
+        return;
+    }
+    let ndc = view.view_proj * position;
+    let depth = ndc.z / ndc.w;
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+
+    let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
+    let instance_material = textureLoad(instance_material_texture, coords, 0).xy;
+    let object_uv = textureSampleLevel(uv_texture, uv_sampler, uv, 0.0).xy;
+    let velocity = textureSampleLevel(velocity_texture, velocity_sampler, uv, 0.0).xy * 0.0001;
+    var surface: Surface;
+
+    let noise_id = frame.number % NOISE_TEXTURE_COUNT;
+    let noise_size = textureDimensions(noise_texture[noise_id]).xy;
+    let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
+    s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
+    s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
+
+    s.visible_position = vec4<f32>(position.xyz, depth);
+    s.visible_normal = normal;
+
+    var ray: Ray;
+    var hit: Hit;
+    var info: HitInfo;
+
+    ray.origin = position.xyz + normal * RAY_BIAS;
+    ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
+    ray.inv_direction = 1.0 / ray.direction;
+    let p1 = dot(ray.direction, normal);
+
+    hit = traverse_top(ray);
+    info = hit_info(ray, hit);
+    s.sample_position = info.position;
+    s.sample_normal = info.normal;
+
+    // Only ambient radiance
+    s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
+
+    // Second bounce: from sample position
+    var p2 = 0.5;
+    var bounce_radiance = vec3<f32>(0.0);
+    if (hit.instance_index != U32_MAX) {
+        let bounce_candidate = select_light_candidate(
+            s.random, 
+            info.position.xyz,
+            info.normal,
+            info.instance_index
+        );
+
+        var bounce_ray: Ray;
+        var bounce_info: HitInfo;
+
+        bounce_ray.origin = info.position.xyz + info.normal * RAY_BIAS;
+        bounce_ray.direction = bounce_candidate.direction;
+        bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
+        p2 = bounce_candidate.p;
+
+        if (dot(bounce_candidate.direction, info.normal) > 0.0) {
+            hit = traverse_top(bounce_ray);
+            bounce_info = hit_info(bounce_ray, hit);
+
+            surface = retreive_surface(info.material_index, info.uv);
+            let radiance = input_radiance(bounce_ray, bounce_info, bounce_candidate.directional_index, bounce_candidate.emissive_index);
+            s.radiance += vec4<f32>(shading(-ray.direction, info.normal, bounce_ray.direction, surface, radiance), 0.0);
+        }
+    }
+
+    surface = retreive_surface(instance_material.y, object_uv);
+
+    // ReSTIR: Temporal
+    let previous_uv = uv - velocity;
+    let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
+    var r = load_previous_reservoir(previous_coords);
+
+    var output_radiance = shading(view_direction, s.visible_normal, ray.direction, surface, s.radiance);
+    let p = luminance(output_radiance) / (p1 * p2);
+
+    let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
+    let depth_miss = abs(r.s.visible_position.w / s.visible_position.w - 1.0) > 0.1;
+    let normal_miss = dot(s.visible_normal, r.s.visible_normal) < 0.866;
+    if (uv_miss || depth_miss || normal_miss) {
+        set_reservoir(&r, s, p);
+    } else {
+        update_reservoir(invocation_id, &r, s, p);
+    }
+
+    // Clamp...
+    r.w_sum *= MAX_TEMPORAL_REUSE_COUNT / max(r.count, MAX_TEMPORAL_REUSE_COUNT);
+    r.count = min(r.count, MAX_TEMPORAL_REUSE_COUNT);    
+    
+    output_radiance = shading(
+        view_direction,
+        r.s.visible_normal,
+        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+        surface,
+        r.s.radiance
+    );
+    r.w = r.w_sum / max(r.count * luminance(output_radiance), 0.0001);
+
+    store_reservoir(coords, r);
+
+    var output_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
+    output_color += r.w * output_radiance;
+
+    textureStore(indirect_render_texture, coords, vec4<f32>(output_color, 1.0));
 }

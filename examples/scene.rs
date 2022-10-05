@@ -24,12 +24,6 @@ fn main() {
             ..default()
         })
         .insert_resource(Msaa { samples: 4 })
-        // .insert_resource(ClearColor(Color::rgb_u8(0, 171, 240)))
-        .insert_resource(AmbientLight {
-            // color: Color::rgb_u8(135, 206, 235),
-            brightness: 5.0,
-            ..Default::default()
-        })
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)

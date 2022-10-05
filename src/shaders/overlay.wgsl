@@ -1,7 +1,11 @@
 @group(0) @binding(0)
-var render_texture: texture_2d<f32>;
+var direct_render_texture: texture_2d<f32>;
 @group(0) @binding(1)
-var render_sampler: sampler;
+var direct_render_sampler: sampler;
+@group(0) @binding(2)
+var indirect_render_texture: texture_2d<f32>;
+@group(0) @binding(3)
+var indirect_render_sampler: sampler;
 
 // luminance coefficients from Rec. 709.
 // https://en.wikipedia.org/wiki/Rec._709
@@ -42,6 +46,7 @@ fn vertex(@location(0) position: vec3<f32>) -> VertexOutput {
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var uv = 0.5 * in.position.xy + 0.5;
     uv.y = 1.0 - uv.y;
-    let color = textureSample(render_texture, render_sampler, uv);
-    return tone_mapping(color);
+    let direct_color = textureSample(direct_render_texture, direct_render_sampler, uv);
+    let indirect_color = textureSample(indirect_render_texture, indirect_render_sampler, uv);
+    return tone_mapping(direct_color + indirect_color);
 }
