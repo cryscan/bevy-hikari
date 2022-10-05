@@ -152,6 +152,7 @@ struct LightCandidate {
     // Orientation + cos(half_angle)
     cone: vec4<f32>, 
     direction: vec3<f32>,
+    distance: f32,
     directional_index: u32,
     emissive_index: u32,
     p: f32,
@@ -284,9 +285,9 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
     return intersected;
 }
 
-fn traverse_top(ray: Ray) -> Hit {
+fn traverse_top(ray: Ray, max_distance: f32) -> Hit {
     var hit: Hit;
-    hit.intersection.distance = F32_MAX;
+    hit.intersection.distance = max_distance;
     hit.instance_index = U32_MAX;
     hit.primitive_index = U32_MAX;
 
@@ -351,6 +352,7 @@ fn select_light_candidate(
     instance: u32,
 ) -> LightCandidate {
     var candidate: LightCandidate;
+    candidate.distance = F32_MAX;
     candidate.directional_index = 0u;
     candidate.emissive_index = DONT_SAMPLE_EMISSIVE;
 
@@ -402,6 +404,7 @@ fn select_light_candidate(
             candidate.emissive_index = source.instance;
             candidate.cone = cone;
             candidate.direction = direction;
+            candidate.distance = sqrt(d2) + source.radius;
             selected_flux = flux;
         }
     }
@@ -736,7 +739,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     ray.inv_direction = 1.0 / ray.direction;
 
     if (dot(candidate.direction, normal) > 0.0) {
-        hit = traverse_top(ray);
+        hit = traverse_top(ray, candidate.distance);
         info = hit_info(ray, hit);
 
         s.sample_position = info.position;
@@ -830,7 +833,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     ray.inv_direction = 1.0 / ray.direction;
     let p1 = dot(ray.direction, normal);
 
-    hit = traverse_top(ray);
+    hit = traverse_top(ray, F32_MAX);
     info = hit_info(ray, hit);
     s.sample_position = info.position;
     s.sample_normal = info.normal;
@@ -858,7 +861,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         p2 = bounce_candidate.p;
 
         if (dot(bounce_candidate.direction, info.normal) > 0.0) {
-            hit = traverse_top(bounce_ray);
+            hit = traverse_top(bounce_ray, bounce_candidate.distance);
             bounce_info = hit_info(bounce_ray, hit);
 
             surface = retreive_surface(info.material_index, info.uv);
