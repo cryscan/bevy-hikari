@@ -52,7 +52,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    _asset_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
 ) {
     commands
         .spawn_bundle(PbrBundle {
@@ -70,6 +70,22 @@ fn setup(
             ..Default::default()
         })
         .insert(RayCastMesh::<RaycastSet>::default());
+
+    // Sphere
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::UVSphere {
+            radius: 0.5,
+            ..Default::default()
+        })),
+        material: materials.add(StandardMaterial {
+            base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+            emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
+            emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+            ..Default::default()
+        }),
+        transform: Transform::from_xyz(0.0, 0.5, 0.0),
+        ..Default::default()
+    });
 
     // Only directional light is supported
     commands.spawn_bundle(DirectionalLightBundle {
