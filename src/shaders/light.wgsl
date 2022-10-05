@@ -901,8 +901,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     store_reservoir(coords, r);
 
-    var output_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
-    output_color += r.w * output_radiance;
-
+    let output_color = r.w * output_radiance;
     textureStore(indirect_render_texture, coords, vec4<f32>(output_color, 1.0));
 }
