@@ -19,12 +19,6 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
-        // .insert_resource(ClearColor(Color::rgb_u8(0, 171, 240)))
-        // .insert_resource(AmbientLight {
-        //     color: Color::rgb_u8(135, 206, 235),
-        //     ..Default::default()
-        // })
-        .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
@@ -32,7 +26,6 @@ fn main() {
         .add_plugin(PbrPlugin)
         .add_plugin(HikariPlugin::default())
         .add_startup_system(setup)
-        .add_system(load_models)
         .add_system(camera_input_map)
         .add_system_to_stage(
             CoreStage::First,
@@ -49,17 +42,104 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
+    // Ground
+    let cube = meshes.add(Mesh::from(shape::Cube::default()));
     commands
         .spawn_bundle(PbrBundle {
-            mesh: meshes.add(shape::Plane::default().into()),
+            mesh: cube.clone(),
             material: materials.add(StandardMaterial {
-                base_color: Color::rgb(0.8, 0.7, 0.6).into(),
+                base_color: Color::rgb(0.3, 0.5, 0.3),
                 perceptual_roughness: 0.9,
                 ..Default::default()
             }),
             transform: Transform {
-                translation: Vec3::new(0.0, 0.0, 0.0),
-                scale: Vec3::new(100.0, 1.0, 100.0),
+                translation: Vec3::new(0.0, -0.5, 0.0),
+                scale: Vec3::new(8.0, 1.0, 8.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Plane::default())),
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(0.0, -1.0, 0.0),
+                scale: Vec3::new(400.0, 1.0, 400.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
+
+    // Left
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube.clone(),
+            material: materials.add(StandardMaterial {
+                base_color: Color::PINK,
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(-3.5, 3.0, 0.0),
+                scale: Vec3::new(1.0, 6.0, 8.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
+    // Right
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube.clone(),
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(3.5, 3.0, 0.0),
+                scale: Vec3::new(1.0, 6.0, 8.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
+    // Back
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube.clone(),
+            material: materials.add(StandardMaterial {
+                base_color: Color::AQUAMARINE,
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(0.0, 3.0, -3.5),
+                scale: Vec3::new(6.0, 6.0, 1.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(RayCastMesh::<RaycastSet>::default());
+    // Top
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: cube,
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 0.9,
+                ..Default::default()
+            }),
+            transform: Transform {
+                translation: Vec3::new(0.0, 6.5, 0.0),
+                scale: Vec3::new(8.0, 1.0, 8.0),
                 ..Default::default()
             },
             ..Default::default()
@@ -74,12 +154,29 @@ fn setup(
         })),
         material: materials.add(StandardMaterial {
             base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-            emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
+            emissive: Color::rgba(1.0, 1.0, 1.0, 0.1),
             emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
             ..Default::default()
         }),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
+        transform: Transform::from_xyz(2.0, 0.5, 0.0),
         ..Default::default()
+    });
+
+    // Model
+    let scene = asset_server.load("models/extinguisher.glb#Scene0");
+    commands.spawn_bundle(SceneBundle {
+        scene: scene.clone(),
+        transform: Transform::default(),
+        ..default()
+    });
+    commands.spawn_bundle(SceneBundle {
+        scene,
+        transform: Transform {
+            translation: Vec3::new(0.0, -1.0, 10.0),
+            rotation: Quat::from_rotation_y(PI / 2.0),
+            ..Default::default()
+        },
+        ..default()
     });
 
     // Only directional light is supported
@@ -105,73 +202,10 @@ fn setup(
         })
         .insert_bundle(OrbitCameraBundle::new(
             OrbitCameraController::default(),
-            Vec3::new(-50.0, 25.0, 100.0),
+            Vec3::new(-10.0, 5.0, 20.0),
             Vec3::new(0., 0., 0.),
         ))
         .insert(RayCastSource::<RaycastSet>::default());
-}
-
-#[derive(Deref, DerefMut)]
-pub struct LoadTimer(Timer);
-
-fn load_models(
-    mut commands: Commands,
-    time: Res<Time>,
-    asset_server: Res<AssetServer>,
-    mut timer: ResMut<LoadTimer>,
-    mut counter: Local<usize>,
-) {
-    if timer.tick(time.delta()).just_finished() {
-        match *counter {
-            0 => {
-                let handle = asset_server.load("models/Low Poly/Big House 2.glb#Scene0");
-                for location in [-3, -1, 1, 3] {
-                    commands.spawn_bundle(SceneBundle {
-                        scene: handle.clone(),
-                        transform: Transform::from_translation(Vec3::new(
-                            4.0 * location as f32,
-                            0.0,
-                            0.0,
-                        )),
-                        ..default()
-                    });
-                }
-            }
-            1 => {
-                let handle = asset_server.load("models/Low Poly/Big House 3.glb#Scene0");
-                for (id, location) in [-3, -1, 1, 3].iter().enumerate() {
-                    let sign = if id % 2 == 0 { 1.0 } else { -1.0 };
-                    commands.spawn_bundle(SceneBundle {
-                        scene: handle.clone(),
-                        transform: Transform::from_translation(Vec3::new(
-                            4.0 * (*location as f32),
-                            0.0,
-                            8.0 * sign,
-                        )),
-                        ..default()
-                    });
-                }
-            }
-            2 => {
-                let handle = asset_server.load("models/Low Poly/Big House.glb#Scene0");
-                for (id, location) in [-3, -1, 1, 3].iter().enumerate() {
-                    let sign = if id % 2 == 0 { -1.0 } else { 1.0 };
-                    commands.spawn_bundle(SceneBundle {
-                        scene: handle.clone(),
-                        transform: Transform::from_translation(Vec3::new(
-                            4.0 * (*location as f32),
-                            0.0,
-                            8.0 * sign,
-                        )),
-                        ..default()
-                    });
-                }
-            }
-            _ => {}
-        }
-
-        *counter += 1;
-    }
 }
 
 pub fn camera_input_map(
