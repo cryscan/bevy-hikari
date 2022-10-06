@@ -30,7 +30,7 @@ fn main() {
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
         .add_plugin(PbrPlugin)
-        .add_plugin(HikariPlugin::default())
+        .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .add_system(load_models)
         .add_system(camera_input_map)

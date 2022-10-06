@@ -39,7 +39,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugin(PbrPlugin)
         // Add Hikari after PBR
-        .add_plugin(HikariPlugin::default())
+        .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .run();
 }

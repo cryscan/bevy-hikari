@@ -5,6 +5,7 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         render_graph::{RenderGraph, SlotInfo, SlotType},
+        texture::{CompressedImageFormats, ImageType},
         RenderApp,
     },
 };
@@ -56,28 +57,7 @@ pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
 pub const QUAD_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 
-pub struct HikariPlugin {
-    noise_folder: String,
-}
-
-impl HikariPlugin {
-    pub fn new(noise_folder: &str) -> Self {
-        Self {
-            noise_folder: noise_folder.into(),
-        }
-    }
-}
-
-impl Default for HikariPlugin {
-    fn default() -> Self {
-        Self {
-            noise_folder: "textures/blue_noise".into(),
-        }
-    }
-}
-
-#[derive(Clone, Deref, DerefMut)]
-pub struct NoiseTexture(pub Vec<Handle<Image>>);
+pub struct HikariPlugin;
 
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
@@ -124,14 +104,84 @@ impl Plugin for HikariPlugin {
             Shader::from_wgsl
         );
 
-        let noise_path = self.noise_folder.clone();
-        let load_system = move |mut commands: Commands, asset_server: Res<AssetServer>| {
-            let handles = (0..NOISE_TEXTURE_COUNT)
-                .map(|id| {
-                    let name = format!("{}/LDR_RGBA_{}.png", noise_path, id);
-                    asset_server.load(&name)
-                })
-                .collect();
+        let noise_load_system = move |mut commands: Commands, mut images: ResMut<Assets<Image>>| {
+            let bytes = [
+                include_bytes!("noise/LDR_RGBA_0.png"),
+                include_bytes!("noise/LDR_RGBA_1.png"),
+                include_bytes!("noise/LDR_RGBA_2.png"),
+                include_bytes!("noise/LDR_RGBA_3.png"),
+                include_bytes!("noise/LDR_RGBA_4.png"),
+                include_bytes!("noise/LDR_RGBA_5.png"),
+                include_bytes!("noise/LDR_RGBA_6.png"),
+                include_bytes!("noise/LDR_RGBA_7.png"),
+                include_bytes!("noise/LDR_RGBA_8.png"),
+                include_bytes!("noise/LDR_RGBA_9.png"),
+                include_bytes!("noise/LDR_RGBA_10.png"),
+                include_bytes!("noise/LDR_RGBA_11.png"),
+                include_bytes!("noise/LDR_RGBA_12.png"),
+                include_bytes!("noise/LDR_RGBA_13.png"),
+                include_bytes!("noise/LDR_RGBA_14.png"),
+                include_bytes!("noise/LDR_RGBA_15.png"),
+                include_bytes!("noise/LDR_RGBA_16.png"),
+                include_bytes!("noise/LDR_RGBA_17.png"),
+                include_bytes!("noise/LDR_RGBA_18.png"),
+                include_bytes!("noise/LDR_RGBA_19.png"),
+                include_bytes!("noise/LDR_RGBA_20.png"),
+                include_bytes!("noise/LDR_RGBA_21.png"),
+                include_bytes!("noise/LDR_RGBA_22.png"),
+                include_bytes!("noise/LDR_RGBA_23.png"),
+                include_bytes!("noise/LDR_RGBA_24.png"),
+                include_bytes!("noise/LDR_RGBA_25.png"),
+                include_bytes!("noise/LDR_RGBA_26.png"),
+                include_bytes!("noise/LDR_RGBA_27.png"),
+                include_bytes!("noise/LDR_RGBA_28.png"),
+                include_bytes!("noise/LDR_RGBA_29.png"),
+                include_bytes!("noise/LDR_RGBA_30.png"),
+                include_bytes!("noise/LDR_RGBA_31.png"),
+                include_bytes!("noise/LDR_RGBA_32.png"),
+                include_bytes!("noise/LDR_RGBA_33.png"),
+                include_bytes!("noise/LDR_RGBA_34.png"),
+                include_bytes!("noise/LDR_RGBA_35.png"),
+                include_bytes!("noise/LDR_RGBA_36.png"),
+                include_bytes!("noise/LDR_RGBA_37.png"),
+                include_bytes!("noise/LDR_RGBA_38.png"),
+                include_bytes!("noise/LDR_RGBA_39.png"),
+                include_bytes!("noise/LDR_RGBA_40.png"),
+                include_bytes!("noise/LDR_RGBA_41.png"),
+                include_bytes!("noise/LDR_RGBA_42.png"),
+                include_bytes!("noise/LDR_RGBA_43.png"),
+                include_bytes!("noise/LDR_RGBA_44.png"),
+                include_bytes!("noise/LDR_RGBA_45.png"),
+                include_bytes!("noise/LDR_RGBA_46.png"),
+                include_bytes!("noise/LDR_RGBA_47.png"),
+                include_bytes!("noise/LDR_RGBA_48.png"),
+                include_bytes!("noise/LDR_RGBA_49.png"),
+                include_bytes!("noise/LDR_RGBA_50.png"),
+                include_bytes!("noise/LDR_RGBA_51.png"),
+                include_bytes!("noise/LDR_RGBA_52.png"),
+                include_bytes!("noise/LDR_RGBA_53.png"),
+                include_bytes!("noise/LDR_RGBA_54.png"),
+                include_bytes!("noise/LDR_RGBA_55.png"),
+                include_bytes!("noise/LDR_RGBA_56.png"),
+                include_bytes!("noise/LDR_RGBA_57.png"),
+                include_bytes!("noise/LDR_RGBA_58.png"),
+                include_bytes!("noise/LDR_RGBA_59.png"),
+                include_bytes!("noise/LDR_RGBA_60.png"),
+                include_bytes!("noise/LDR_RGBA_61.png"),
+                include_bytes!("noise/LDR_RGBA_62.png"),
+                include_bytes!("noise/LDR_RGBA_63.png"),
+            ];
+            let handles = Vec::from(bytes.map(|buffer| {
+                let image = Image::from_buffer(
+                    buffer,
+                    ImageType::Extension("png"),
+                    CompressedImageFormats::NONE,
+                    false,
+                )
+                .unwrap();
+                images.add(image)
+            }));
+
             commands.insert_resource(NoiseTexture(handles));
         };
 
@@ -141,7 +191,7 @@ impl Plugin for HikariPlugin {
             .add_plugin(PrepassPlugin)
             .add_plugin(LightPlugin)
             .add_plugin(OverlayPlugin)
-            .add_startup_system(load_system);
+            .add_startup_system(noise_load_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
@@ -193,3 +243,6 @@ impl Plugin for HikariPlugin {
         }
     }
 }
+
+#[derive(Clone, Deref, DerefMut)]
+pub struct NoiseTexture(pub Vec<Handle<Image>>);
