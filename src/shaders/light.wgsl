@@ -647,16 +647,16 @@ fn input_radiance(
     if (info.instance_index == U32_MAX) {
         // Ray hits nothing, input radiance could be either directional or ambient
         ambient = 1.0;
+        radiance = lights.ambient_color.rgb;
 
         if (directional_index < lights.n_directional_lights) {
             let directional = lights.directional_lights[directional_index];
             let cos_angle = dot(ray.direction, directional.direction_to_light);
             let cos_solar_angle = cos(SOLAR_ANGLE);
 
-            let directional_condition = saturate(sign(cos_angle - cos_solar_angle));
+            ambient = saturate(sign(cos_solar_angle - cos_angle));
             radiance = directional.color.rgb / (TAU * (1.0 - cos_solar_angle));
-            radiance *= directional_condition;
-            ambient = 1.0 - directional_condition;
+            radiance *= 1.0 - ambient;
         }
     } else {
         // Input radiance is emissive, but bounced radiance is not added here
@@ -666,7 +666,7 @@ fn input_radiance(
         }
     }
 
-    return vec4<f32>(radiance, ambient);
+    return vec4<f32>(radiance, 1.0 - ambient);
 }
 
 fn shading(
@@ -687,7 +687,7 @@ fn shading(
 
     let lit_radiance = lit(input_radiance.rgb, diffuse_color, roughness, F0, L, N, V);
     let ambient_radiance = ambient(diffuse_color, roughness, occlusion, F0, N, V);
-    return mix(lit_radiance, ambient_radiance, input_radiance.a);
+    return mix(lit_radiance, ambient_radiance, 1.0 - input_radiance.a);
 }
 
 @compute @workgroup_size(8, 8, 1)
