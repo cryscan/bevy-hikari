@@ -94,7 +94,11 @@ fn setup(
 <img src="assets/screenshots/city.png">
 <img src="assets/screenshots/scene.png">
 <img src="assets/screenshots/scene-box.png">
-<img src="assets/screenshots/dissection/composed.jpg">
+<img src="assets/screenshots/dissection/final.png">
+<p float="left">
+    <img src="assets/screenshots/dissection/direct-shading-gamma.png" width=400>
+    <img src="assets/screenshots/dissection/indirect-shading-gamma.png" width=400>
+</p>
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
