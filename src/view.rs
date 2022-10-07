@@ -2,7 +2,7 @@ use crate::transform::PreviousGlobalTransform;
 use bevy::{
     prelude::*,
     render::{
-        render_resource::{DynamicUniformBuffer, ShaderType},
+        render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         view::ExtractedView,
         RenderApp, RenderStage,
@@ -15,7 +15,10 @@ impl Plugin for ViewPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<PreviousViewUniforms>()
-                .add_system_to_stage(RenderStage::Prepare, prepare_view_uniforms);
+                .init_resource::<FrameCounter>()
+                .init_resource::<FrameUniform>()
+                .add_system_to_stage(RenderStage::Prepare, prepare_view_uniforms)
+                .add_system_to_stage(RenderStage::Prepare, prepare_frame_uniform);
         }
     }
 }
@@ -62,4 +65,50 @@ fn prepare_view_uniforms(
     view_uniforms
         .uniforms
         .write_buffer(&render_device, &render_queue);
+}
+
+#[derive(Default)]
+pub struct FrameCounter(pub usize);
+
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuFrame {
+    pub number: u32,
+    pub kernel: [Vec3; 25],
+}
+
+#[derive(Default)]
+pub struct FrameUniform {
+    pub buffer: UniformBuffer<GpuFrame>,
+}
+
+fn prepare_frame_uniform(
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    mut uniform: ResMut<FrameUniform>,
+    mut counter: ResMut<FrameCounter>,
+) {
+    let mut kernel = [Vec3::ZERO; 25];
+    for i in 0..5 {
+        for j in 0..5 {
+            let offset = IVec2::new(i - 2, j - 2);
+            let index = (i + 5 * j) as usize;
+            let value = match (offset.x.abs(), offset.y.abs()) {
+                (0, 0) => 9.0 / 64.0,
+                (0, 1) | (1, 0) => 3.0 / 32.0,
+                (1, 1) => 1.0 / 16.0,
+                (0, 2) | (2, 0) => 3.0 / 128.0,
+                (1, 2) | (2, 1) => 1.0 / 64.0,
+                (2, 2) => 1.0 / 256.0,
+                _ => 0.0,
+            };
+            kernel[index] = Vec3::new(offset.x as f32, offset.y as f32, value);
+        }
+    }
+
+    uniform.buffer.set(GpuFrame {
+        number: counter.0 as u32,
+        kernel,
+    });
+    uniform.buffer.write_buffer(&render_device, &render_queue);
+    counter.0 += 1;
 }

@@ -1,4 +1,8 @@
-use crate::{light::LightPassTarget, OVERLAY_SHADER_HANDLE, QUAD_HANDLE};
+use crate::{
+    light::{LightPassTarget, LightPipeline, SetDeferredBindGroup},
+    view::FrameCounter,
+    OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
+};
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
     ecs::system::{
@@ -51,6 +55,7 @@ fn setup(mut meshes: ResMut<Assets<Mesh>>) {
 
 pub struct OverlayPipeline {
     pub overlay_layout: BindGroupLayout,
+    pub deferred_layout: BindGroupLayout,
 }
 
 impl FromWorld for OverlayPipeline {
@@ -94,7 +99,13 @@ impl FromWorld for OverlayPipeline {
             ],
         });
 
-        Self { overlay_layout }
+        let light_pipeline = world.resource::<LightPipeline>();
+        let deferred_layout = light_pipeline.deferred_layout.clone();
+
+        Self {
+            overlay_layout,
+            deferred_layout,
+        }
     }
 }
 
@@ -108,7 +119,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let vertex_attributes = vec![Mesh::ATTRIBUTE_POSITION.at_shader_location(0)];
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
-        let bind_group_layout = vec![self.overlay_layout.clone()];
+        let bind_group_layout = vec![self.overlay_layout.clone(), self.deferred_layout.clone()];
 
         Ok(RenderPipelineDescriptor {
             label: None,
@@ -166,11 +177,13 @@ pub struct OverlayBindGroup(pub BindGroup);
 
 fn queue_overlay_bind_groups(
     mut commands: Commands,
+    counter: Res<FrameCounter>,
     render_device: Res<RenderDevice>,
     pipeline: Res<OverlayPipeline>,
     query: Query<(Entity, &LightPassTarget)>,
 ) {
     for (entity, target) in &query {
+        let current_id = counter.0 % 2;
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.overlay_layout,
@@ -178,22 +191,26 @@ fn queue_overlay_bind_groups(
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &target.direct_render_texture.texture_view,
+                        &target.direct_denoised_textures[current_id].texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&target.direct_render_texture.sampler),
+                    resource: BindingResource::Sampler(
+                        &target.direct_denoised_textures[current_id].sampler,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 2,
                     resource: BindingResource::TextureView(
-                        &target.indirect_render_texture.texture_view,
+                        &target.indirect_denoised_textures[current_id].texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&target.indirect_render_texture.sampler),
+                    resource: BindingResource::Sampler(
+                        &target.indirect_denoised_textures[current_id].sampler,
+                    ),
                 },
             ],
         });
@@ -273,7 +290,12 @@ impl CachedRenderPipelinePhaseItem for Overlay {
     }
 }
 
-type DrawOverlay = (SetItemPipeline, SetOverlayBindGroup<0>, DrawMesh);
+type DrawOverlay = (
+    SetItemPipeline,
+    SetOverlayBindGroup<0>,
+    SetDeferredBindGroup<1>,
+    DrawMesh,
+);
 
 pub struct SetOverlayBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetOverlayBindGroup<I> {

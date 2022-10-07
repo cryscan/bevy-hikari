@@ -2,7 +2,10 @@ use crate::{
     mesh_material::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
-    view::{PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
+    view::{
+        FrameUniform, GpuFrame, PreviousViewUniform, PreviousViewUniformOffset,
+        PreviousViewUniforms,
+    },
     PREPASS_SHADER_HANDLE,
 };
 use bevy::{
@@ -85,6 +88,16 @@ impl FromWorld for PrepassPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
                         min_binding_size: Some(PreviousViewUniform::min_size()),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuFrame::min_size()),
                     },
                     count: None,
                 },
@@ -372,17 +385,20 @@ fn queue_prepass_bind_group(
     previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
     instance_render_assets: Res<InstanceRenderAssets>,
     view_uniforms: Res<ViewUniforms>,
+    frame_uniform: Res<FrameUniform>,
     previous_view_uniforms: Res<PreviousViewUniforms>,
 ) {
     if let (
         Some(view_binding),
         Some(previous_view_binding),
+        Some(frame_binding),
         Some(mesh_binding),
         Some(previous_mesh_binding),
         Some(instance_indices_binding),
     ) = (
         view_uniforms.uniforms.binding(),
         previous_view_uniforms.uniforms.binding(),
+        frame_uniform.buffer.binding(),
         mesh_uniforms.binding(),
         previous_mesh_uniforms.binding(),
         instance_render_assets.instance_indices.binding(),
@@ -398,6 +414,10 @@ fn queue_prepass_bind_group(
                 BindGroupEntry {
                     binding: 1,
                     resource: previous_view_binding,
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: frame_binding,
                 },
             ],
         });

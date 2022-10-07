@@ -16,10 +16,17 @@ struct InstanceIndex {
     material: u32
 };
 
+struct Frame {
+    number: u32,
+    kernel: array<vec3<f32>, 25>,
+};
+
 @group(0) @binding(0)
 var<uniform> view: View;
 @group(0) @binding(1)
 var<uniform> previous_view: PreviousView;
+@group(0) @binding(2)
+var<uniform> frame: Frame;
 
 @group(1) @binding(0)
 var<uniform> mesh: Mesh;
@@ -44,16 +51,40 @@ struct VertexOutput {
     @location(3) uv: vec2<f32>,
 };
 
+// https://en.wikipedia.org/wiki/Halton_sequence#Implementation_in_pseudocode
+fn halton(base: u32, index: u32) -> f32
+{
+	var result = 0.;
+	var f = 1.;
+	for (var id = index; id > 0u; id /= base)
+	{
+		f = f / f32(base);
+		result += f * f32(id % base);
+	}
+	return result;
+}
+
+fn frame_jitter() -> vec2<f32> {
+    let index = frame.number % 64u;
+    let delta = vec2<f32>(halton(2u, index), halton(3u, index)) - vec2<f32>(0.5);
+    return delta;
+}
+
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
-    let model = mesh.model;
+    var model = mesh.model;
     let vertex_position = vec4<f32>(vertex.position, 1.0);
+
+    var projection = view.projection;
+    let jitter = frame_jitter();
+    projection[3][0] += 16.0 * jitter.x / view.width;
+    projection[3][1] += 16.0 * jitter.y / view.height;
 
     var out: VertexOutput;
     out.world_position = mesh_position_local_to_world(model, vertex_position);
     out.previous_world_position = mesh_position_local_to_world(previous_mesh.model, vertex_position);
     out.world_normal = mesh_normal_local_to_world(vertex.normal);
-    out.clip_position = view.view_proj * out.world_position;
+    out.clip_position = projection * view.inverse_view * out.world_position;
     out.uv = vertex.uv;
 
     return out;

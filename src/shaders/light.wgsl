@@ -38,7 +38,7 @@ var previous_denoised_sampler: sampler;
 @group(5) @binding(2)
 var output_denoised_texture: texture_storage_2d<rgba16float, write>;
 @group(5) @binding(3)
-var render_texture: texture_storage_2d<rgba16float, write>;
+var render_texture: texture_storage_2d<rgba16float, read_write>;
 
 @group(6) @binding(0)
 var reservoir_texture: texture_storage_2d<rgba32float, read_write>;
@@ -746,7 +746,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var s = empty_sample();
 
-    let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
+    let deferred_coords = vec2<i32>(uv * vec2<f32>(textureDimensions(position_texture)));
+    let position = textureLoad(position_texture, deferred_coords, 0);
     if (position.w < 0.5) {
         var r: Reservoir;
         set_reservoir(&r, s, 0.0);
@@ -760,14 +761,13 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let depth = ndc.z / ndc.w;
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
-    let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
-    let instance_material = textureLoad(instance_material_texture, coords, 0).xy;
-    let object_uv = textureSampleLevel(uv_texture, uv_sampler, uv, 0.0).xy;
-    let velocity = textureSampleLevel(velocity_texture, velocity_sampler, uv, 0.0).xy * 0.0001;
-    var surface: Surface;
+    let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
+    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
+    let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
+    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy * 0.0001;
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
-    let noise_size = textureDimensions(noise_texture[noise_id]).xy;
+    let noise_size = textureDimensions(noise_texture[noise_id]);
     let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
     s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
     s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
@@ -775,14 +775,14 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     s.visible_position = vec4<f32>(position.xyz, depth);
     s.visible_normal = normal;
 
+    let surface = retreive_surface(instance_material.y, object_uv);
+    textureStore(albedo_texture, coords, surface.base_color);
+
     var ray: Ray;
     var hit: Hit;
     var info: HitInfo;
 
     let candidate = select_light_candidate(s.random, position.xyz, normal, instance_material.x);
-
-    surface = retreive_surface(instance_material.y, object_uv);
-    textureStore(albedo_texture, coords, surface.base_color);
 
     // Direct light sampling
     ray.origin = position.xyz + normal * RAY_BIAS;
@@ -823,7 +823,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     var s = empty_sample();
 
-    let position = textureSampleLevel(position_texture, position_sampler, uv, 0.0);
+    let deferred_coords = vec2<i32>(uv * vec2<f32>(textureDimensions(position_texture)));
+    let position = textureLoad(position_texture, deferred_coords, 0);
     if (position.w < 0.5) {
         var r: Reservoir;
         set_reservoir(&r, s, 0.0);
@@ -835,14 +836,13 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let depth = ndc.z / ndc.w;
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
-    let normal = textureSampleLevel(normal_texture, normal_sampler, uv, 0.0).xyz;
-    let instance_material = textureLoad(instance_material_texture, coords, 0).xy;
-    let object_uv = textureSampleLevel(uv_texture, uv_sampler, uv, 0.0).xy;
-    let velocity = textureSampleLevel(velocity_texture, velocity_sampler, uv, 0.0).xy * 0.0001;
-    var surface: Surface;
+    let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
+    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
+    let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
+    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy * 0.0001;
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
-    let noise_size = textureDimensions(noise_texture[noise_id]).xy;
+    let noise_size = textureDimensions(noise_texture[noise_id]);
     let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
     s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
     s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
@@ -853,6 +853,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var ray: Ray;
     var hit: Hit;
     var info: HitInfo;
+    var surface: Surface;
 
     ray.origin = position.xyz + normal * RAY_BIAS;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
@@ -907,4 +908,74 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     let output_color = r.w * output_radiance;
     textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
+}
+
+// YUV-RGB conversion routine from Hyper3D
+fn encode_pal_yuv(rgb: vec3<f32>) -> vec3<f32> {
+    let srgb = pow(rgb, vec3<f32>(2.2));
+    return vec3<f32>(
+        dot(srgb, vec3<f32>(0.299, 0.587, 0.114)),
+        dot(srgb, vec3<f32>(-0.14713, -0.28886, 0.436)),
+        dot(srgb, vec3<f32>(0.615, -0.51499, -0.10001))
+    );
+}
+
+fn decode_pal_yuv(yuv: vec3<f32>) -> vec3<f32> {
+    let srgb = vec3<f32>(
+        dot(yuv, vec3<f32>(1., 0., 1.13983)),
+        dot(yuv, vec3<f32>(1., -0.39465, -0.58060)),
+        dot(yuv, vec3<f32>(1., 2.03211, 0.))
+    );
+    return pow(srgb, vec3<f32>(1.0 / 2.2));
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn temporal_filter(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let size = textureDimensions(output_denoised_texture);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
+    let coords = vec2<i32>(invocation_id.xy);
+    let velocity = textureSampleLevel(velocity_texture, velocity_sampler, uv, 0.0).xy * 0.0001;
+
+    var in: array<vec3<f32>, 9>;
+    in[0] = textureLoad(render_texture, coords).rgb;
+    in[1] = textureLoad(render_texture, coords + vec2<i32>(1, 0)).rgb;
+    in[2] = textureLoad(render_texture, coords + vec2<i32>(-1, 0)).rgb;
+    in[3] = textureLoad(render_texture, coords + vec2<i32>(0, 1)).rgb;
+    in[4] = textureLoad(render_texture, coords + vec2<i32>(0, -1)).rgb;
+    in[5] = textureLoad(render_texture, coords + vec2<i32>(1, 1)).rgb;
+    in[6] = textureLoad(render_texture, coords + vec2<i32>(-1, 1)).rgb;
+    in[7] = textureLoad(render_texture, coords + vec2<i32>(1, -1)).rgb;
+    in[8] = textureLoad(render_texture, coords + vec2<i32>(-1, -1)).rgb;
+
+    let previous_uv = uv - velocity;
+    let previous_color = textureSampleLevel(previous_denoised_texture, previous_denoised_sampler, previous_uv, 0.0);
+    var antialiased = previous_color.rgb;
+    var mix_rate = min(previous_color.a, 0.5);
+
+    antialiased = mix(antialiased * antialiased, in[0] * in[0], mix_rate);
+    antialiased = sqrt(antialiased);
+
+    // antialiased = encode_pal_yuv(antialiased);
+    // for (var id = 0u; id < 9u; id += 1u) {
+        // in[id] = encode_pal_yuv(in[id]);
+    // }
+    var min_color = min(min(min(in[0], in[1]), min(in[2], in[3])), in[4]);
+    var max_color = max(max(max(in[0], in[1]), max(in[2], in[3])), in[4]);
+    min_color = mix(min_color, min(min(min(in[5], in[6]), min(in[7], in[8])), min_color), 0.5);
+    max_color = mix(max_color, max(max(max(in[5], in[6]), max(in[7], in[8])), max_color), 0.5);
+
+    let preclamping = antialiased;
+    antialiased = clamp(antialiased, min_color, max_color);
+    
+    mix_rate = 1.0 / (1.0 / max(mix_rate, 0.0001) + 1.0);
+    
+    let diff = antialiased - preclamping;
+    let clamp_amount = dot(diff, diff);
+    
+    mix_rate += clamp_amount * 4.0;
+    mix_rate = clamp(mix_rate, 0.05, 0.5);
+    
+    // antialiased = decode_pal_yuv(antialiased);
+
+    textureStore(output_denoised_texture, coords, vec4<f32>(antialiased, mix_rate));
 }

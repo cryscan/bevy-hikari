@@ -1,17 +1,23 @@
 use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::PrepassTarget,
+    view::{FrameCounter, FrameUniform, GpuFrame},
     NoiseTexture, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
+    ecs::system::{
+        lifetimeless::{Read, SQuery},
+        SystemParamItem,
+    },
     pbr::{GpuLights, LightMeta, MeshPipeline, ViewLightsUniformOffset},
     prelude::*,
     render::{
         camera::ExtractedCamera,
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
+        render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
         render_resource::*,
-        renderer::{RenderContext, RenderDevice, RenderQueue},
+        renderer::{RenderContext, RenderDevice},
         texture::{GpuImage, TextureCache},
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms},
         Extract, RenderApp, RenderStage,
@@ -32,13 +38,10 @@ impl Plugin for LightPlugin {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
-                .init_resource::<FrameCounter>()
                 .init_resource::<LightPipeline>()
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
-                .init_resource::<FrameUniform>()
                 .add_system_to_stage(RenderStage::Extract, extract_noise_texture)
                 .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
-                .add_system_to_stage(RenderStage::Prepare, prepare_frame_uniform)
                 .add_system_to_stage(RenderStage::Queue, queue_view_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
@@ -261,7 +264,7 @@ impl FromWorld for LightPipeline {
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RENDER_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -520,56 +523,11 @@ fn prepare_light_pass_targets(
     }
 }
 
-#[derive(Default)]
-pub struct FrameCounter(usize);
-
-#[derive(Debug, Default, Clone, Copy, ShaderType)]
-pub struct GpuFrame {
-    pub number: u32,
-    pub kernel: [Vec3; 25],
-}
-
-#[derive(Default)]
-pub struct FrameUniform {
-    pub buffer: UniformBuffer<GpuFrame>,
-}
-
-fn prepare_frame_uniform(
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    mut uniform: ResMut<FrameUniform>,
-    mut counter: ResMut<FrameCounter>,
-) {
-    let mut kernel = [Vec3::ZERO; 25];
-    for i in 0..5 {
-        for j in 0..5 {
-            let offset = IVec2::new(i - 2, j - 2);
-            let index = (i + 5 * j) as usize;
-            let value = match (offset.x.abs(), offset.y.abs()) {
-                (0, 0) => 9.0 / 64.0,
-                (0, 1) | (1, 0) => 3.0 / 32.0,
-                (1, 1) => 1.0 / 16.0,
-                (0, 2) | (2, 0) => 3.0 / 128.0,
-                (1, 2) | (2, 1) => 1.0 / 64.0,
-                (2, 2) => 1.0 / 256.0,
-                _ => 0.0,
-            };
-            kernel[index] = Vec3::new(offset.x as f32, offset.y as f32, value);
-        }
-    }
-
-    uniform.buffer.set(GpuFrame {
-        number: counter.0 as u32,
-        kernel,
-    });
-    uniform.buffer.write_buffer(&render_device, &render_queue);
-    counter.0 += 1;
-}
-
 #[allow(dead_code)]
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     indirect_lit_ambient: CachedComputePipelineId,
+    temporal_filter: CachedComputePipelineId,
 }
 
 fn queue_light_pipelines(
@@ -599,9 +557,19 @@ fn queue_light_pipelines(
         },
     );
 
+    let temporal_filter = pipelines.specialize(
+        &mut pipeline_cache,
+        &pipeline,
+        LightPipelineKey {
+            entry_point: "temporal_filter".into(),
+            texture_count: layout.texture_count,
+        },
+    );
+
     commands.insert_resource(CachedLightPipelines {
         direct_lit,
         indirect_lit_ambient,
+        temporal_filter,
     })
 }
 
@@ -892,6 +860,23 @@ fn queue_light_bind_groups(
     }
 }
 
+pub struct SetDeferredBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetDeferredBindGroup<I> {
+    type Param = SQuery<Read<LightBindGroup>>;
+
+    fn render<'w>(
+        view: Entity,
+        _item: Entity,
+        query: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let bind_group = query.get_inner(view).unwrap();
+        pass.set_bind_group(I, &bind_group.deferred, &[]);
+
+        RenderCommandResult::Success
+    }
+}
+
 pub struct LightPassNode {
     query: QueryState<(
         &'static ExtractedCamera,
@@ -966,12 +951,28 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
+            pass.set_pipeline(pipeline);
+
+            let size = camera.physical_target_size.unwrap();
+            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            pass.dispatch_workgroups(count.x, count.y, 1);
+        }
+
         pass.set_bind_group(5, &light_bind_group.indirect_render, &[]);
         pass.set_bind_group(6, &light_bind_group.indirect_reservoirs[0], &[]);
         pass.set_bind_group(7, &light_bind_group.indirect_reservoirs[1], &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.indirect_lit_ambient)
         {
+            pass.set_pipeline(pipeline);
+
+            let size = camera.physical_target_size.unwrap();
+            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            pass.dispatch_workgroups(count.x, count.y, 1);
+        }
+
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
             pass.set_pipeline(pipeline);
 
             let size = camera.physical_target_size.unwrap();
