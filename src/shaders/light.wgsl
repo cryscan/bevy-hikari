@@ -116,6 +116,25 @@ fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
     return mat3x3<f32>(t, b, n);
 }
 
+// https://en.wikipedia.org/wiki/Halton_sequence#Implementation_in_pseudocode
+fn halton(base: u32, index: u32) -> f32
+{
+	var result = 0.;
+	var f = 1.;
+	for (var id = index; id > 0u; id /= base)
+	{
+		f = f / f32(base);
+		result += f * f32(id % base);
+	}
+	return result;
+}
+
+fn frame_jitter() -> vec2<f32> {
+    let index = frame.number % 64u;
+    let delta = vec2<f32>(halton(2u, index), halton(3u, index)) - vec2<f32>(0.5);
+    return delta;
+}
+
 struct Ray {
     origin: vec3<f32>,
     direction: vec3<f32>,
@@ -803,7 +822,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     // ReSTIR: Temporal
-    let previous_uv = uv - velocity;
+    var previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
     let output_radiance = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p);
@@ -950,7 +969,7 @@ fn temporal_filter(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_uv = uv - velocity;
     let previous_color = textureSampleLevel(previous_denoised_texture, previous_denoised_sampler, previous_uv, 0.0);
     var antialiased = previous_color.rgb;
-    var mix_rate = min(previous_color.a, 0.5);
+    var mix_rate = min(previous_color.a, 0.9);
 
     antialiased = mix(antialiased * antialiased, in[0] * in[0], mix_rate);
     antialiased = sqrt(antialiased);
@@ -973,7 +992,7 @@ fn temporal_filter(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let clamp_amount = dot(diff, diff);
     
     mix_rate += clamp_amount * 4.0;
-    mix_rate = clamp(mix_rate, 0.05, 0.5);
+    mix_rate = clamp(mix_rate, 0.05, 0.9);
     
     // antialiased = decode_pal_yuv(antialiased);
 
