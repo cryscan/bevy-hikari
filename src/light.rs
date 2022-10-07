@@ -388,15 +388,13 @@ fn prepare_light_pass_targets(
 ) {
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
-            let extent = Extent3d {
-                width: size.x,
-                height: size.y,
-                depth_or_array_layers: 1,
-            };
-            let size = size.as_vec2();
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-
-            let mut create_texture = |texture_format, filter_mode| -> GpuImage {
+            let mut create_texture = |size: UVec2, texture_format, filter_mode| -> GpuImage {
+                let extent = Extent3d {
+                    width: size.x,
+                    height: size.y,
+                    depth_or_array_layers: 1,
+                };
                 let sampler = render_device.create_sampler(&SamplerDescriptor {
                     label: None,
                     address_mode_u: AddressMode::ClampToEdge,
@@ -424,33 +422,39 @@ fn prepare_light_pass_targets(
                     texture_view: texture.default_view,
                     texture_format,
                     sampler,
-                    size,
+                    size: size.as_vec2(),
+                }
+            };
+            let mut create_reservoir = |size| -> Reservoir {
+                Reservoir {
+                    reservoir: create_texture(size, RESERVOIR_TEXTURE_FORMAT, FilterMode::Nearest),
+                    radiance: create_texture(size, RADIANCE_TEXTURE_FORMAT, FilterMode::Nearest),
+                    random: create_texture(size, RANDOM_TEXTURE_FORMAT, FilterMode::Nearest),
+                    visible_position: create_texture(
+                        size,
+                        POSITION_TEXTURE_FORMAT,
+                        FilterMode::Nearest,
+                    ),
+                    visible_normal: create_texture(
+                        size,
+                        NORMAL_TEXTURE_FORMAT,
+                        FilterMode::Nearest,
+                    ),
+                    sample_position: create_texture(
+                        size,
+                        POSITION_TEXTURE_FORMAT,
+                        FilterMode::Nearest,
+                    ),
+                    sample_normal: create_texture(size, NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
                 }
             };
 
-            let direct_reservoir = [(); 2].map(|_| Reservoir {
-                reservoir: create_texture(RESERVOIR_TEXTURE_FORMAT, FilterMode::Nearest),
-                radiance: create_texture(RADIANCE_TEXTURE_FORMAT, FilterMode::Nearest),
-                random: create_texture(RANDOM_TEXTURE_FORMAT, FilterMode::Nearest),
-                visible_position: create_texture(POSITION_TEXTURE_FORMAT, FilterMode::Nearest),
-                visible_normal: create_texture(NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
-                sample_position: create_texture(POSITION_TEXTURE_FORMAT, FilterMode::Nearest),
-                sample_normal: create_texture(NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
-            });
-
-            let indirect_reservoir = [(); 2].map(|_| Reservoir {
-                reservoir: create_texture(RESERVOIR_TEXTURE_FORMAT, FilterMode::Nearest),
-                radiance: create_texture(RADIANCE_TEXTURE_FORMAT, FilterMode::Nearest),
-                random: create_texture(RANDOM_TEXTURE_FORMAT, FilterMode::Nearest),
-                visible_position: create_texture(POSITION_TEXTURE_FORMAT, FilterMode::Nearest),
-                visible_normal: create_texture(NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
-                sample_position: create_texture(POSITION_TEXTURE_FORMAT, FilterMode::Nearest),
-                sample_normal: create_texture(NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
-            });
+            let direct_reservoir = [(); 2].map(|_| create_reservoir(size));
+            let indirect_reservoir = [(); 2].map(|_| create_reservoir(size));
 
             commands.entity(entity).insert(LightPassTarget {
-                direct_render: create_texture(RENDER_TEXTURE_FORMAT, FilterMode::Linear),
-                indirect_render: create_texture(RENDER_TEXTURE_FORMAT, FilterMode::Linear),
+                direct_render: create_texture(size, RENDER_TEXTURE_FORMAT, FilterMode::Linear),
+                indirect_render: create_texture(size, RENDER_TEXTURE_FORMAT, FilterMode::Linear),
                 direct_reservoir,
                 indirect_reservoir,
             });
