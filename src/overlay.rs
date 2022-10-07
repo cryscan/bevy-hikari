@@ -177,19 +177,23 @@ fn queue_overlay_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&target.direct_render.texture_view),
+                    resource: BindingResource::TextureView(
+                        &target.direct_render_texture.texture_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&target.direct_render.sampler),
+                    resource: BindingResource::Sampler(&target.direct_render_texture.sampler),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(&target.indirect_render.texture_view),
+                    resource: BindingResource::TextureView(
+                        &target.indirect_render_texture.texture_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&target.indirect_render.sampler),
+                    resource: BindingResource::Sampler(&target.indirect_render_texture.sampler),
                 },
             ],
         });
