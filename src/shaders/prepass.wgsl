@@ -77,8 +77,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     var projection = view.projection;
     let jitter = frame_jitter();
-    projection[3][0] += 4.0 * jitter.x / view.width;
-    projection[3][1] += 4.0 * jitter.y / view.height;
+    projection[3][0] += jitter.x / view.width;
+    projection[3][1] += jitter.y / view.height;
 
     var out: VertexOutput;
     out.world_position = mesh_position_local_to_world(model, vertex_position);
@@ -109,8 +109,8 @@ fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
 fn fragment(in: VertexOutput) -> FragmentOutput {
     var projection = view.projection;
     let jitter = frame_jitter();
-    projection[3][0] += 4.0 * jitter.x / view.width;
-    projection[3][1] += 4.0 * jitter.y / view.height;
+    projection[3][0] += jitter.x / view.width;
+    projection[3][1] += jitter.y / view.height;
 
     let clip_position = projection * view.inverse_view * in.world_position;
     let previous_clip_position = previous_view.view_proj * in.previous_world_position;

@@ -969,7 +969,7 @@ fn temporal_filter(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_uv = uv - velocity;
     let previous_color = textureSampleLevel(previous_denoised_texture, previous_denoised_sampler, previous_uv, 0.0);
     var antialiased = previous_color.rgb;
-    var mix_rate = min(previous_color.a, 0.9);
+    var mix_rate = min(previous_color.a, 0.5);
 
     antialiased = mix(antialiased * antialiased, in[0] * in[0], mix_rate);
     antialiased = sqrt(antialiased);
@@ -992,7 +992,7 @@ fn temporal_filter(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let clamp_amount = dot(diff, diff);
     
     mix_rate += clamp_amount * 4.0;
-    mix_rate = clamp(mix_rate, 0.05, 0.9);
+    mix_rate = clamp(mix_rate, 0.05, 0.5);
     
     // antialiased = decode_pal_yuv(antialiased);
 
