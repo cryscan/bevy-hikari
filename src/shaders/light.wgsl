@@ -88,7 +88,7 @@ let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let SOLAR_ANGLE: f32 = 0.130899694;
 
-let MAX_TEMPORAL_REUSE_COUNT: f32 = 30.0;
+let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
 
@@ -273,7 +273,7 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     return result;
 }
 
-fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
+fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, slice: Slice, early_distance: f32) -> bool {
     var intersected = false;
     var index = 0u;
     for (; index < slice.node_len;) {
@@ -293,6 +293,10 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
                     (*hit).intersection = intersection;
                     (*hit).primitive_index = primitive_index;
                     intersected = true;
+                
+                    if (intersection.distance < early_distance) {
+                        return intersected;
+                    }
                 }
             }
 
@@ -335,9 +339,8 @@ fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
                 r.direction = instance_direction_world_to_local(instance, ray.direction);
                 r.inv_direction = 1.0 / r.direction;
 
-                if (traverse_bottom(r, instance.slice, &hit)) {
+                if (traverse_bottom(&hit, r, instance.slice, early_distance)) {
                     hit.instance_index = instance_index;
-
                     if (hit.intersection.distance < early_distance) {
                         return hit;
                     }
