@@ -771,7 +771,7 @@ fn temporal_restir(
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5 + frame_jitter()) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -848,7 +848,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 @compute @workgroup_size(8, 8, 1)
 fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5 + frame_jitter()) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();

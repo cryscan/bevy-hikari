@@ -75,16 +75,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var model = mesh.model;
     let vertex_position = vec4<f32>(vertex.position, 1.0);
 
-    var projection = view.projection;
-    let jitter = frame_jitter();
-    projection[3][0] += jitter.x / view.width;
-    projection[3][1] += jitter.y / view.height;
-
     var out: VertexOutput;
     out.world_position = mesh_position_local_to_world(model, vertex_position);
     out.previous_world_position = mesh_position_local_to_world(previous_mesh.model, vertex_position);
     out.world_normal = mesh_normal_local_to_world(vertex.normal);
-    out.clip_position = projection * view.inverse_view * out.world_position;
+    out.clip_position = view.view_proj * out.world_position;
     out.uv = vertex.uv;
 
     return out;
