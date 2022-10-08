@@ -1,6 +1,5 @@
 use crate::{
     light::{LightPassTarget, LightPipeline, SetDeferredBindGroup},
-    view::FrameCounter,
     OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
 };
 use bevy::{
@@ -177,13 +176,11 @@ pub struct OverlayBindGroup(pub BindGroup);
 
 fn queue_overlay_bind_groups(
     mut commands: Commands,
-    counter: Res<FrameCounter>,
     render_device: Res<RenderDevice>,
     pipeline: Res<OverlayPipeline>,
     query: Query<(Entity, &LightPassTarget)>,
 ) {
     for (entity, target) in &query {
-        let current_id = counter.0 % 2;
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.overlay_layout,
@@ -191,26 +188,22 @@ fn queue_overlay_bind_groups(
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &target.direct_denoised_textures[current_id].texture_view,
+                        &target.direct_render_texture.texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(
-                        &target.direct_denoised_textures[current_id].sampler,
-                    ),
+                    resource: BindingResource::Sampler(&target.direct_render_texture.sampler),
                 },
                 BindGroupEntry {
                     binding: 2,
                     resource: BindingResource::TextureView(
-                        &target.indirect_denoised_textures[current_id].texture_view,
+                        &target.indirect_render_texture.texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(
-                        &target.indirect_denoised_textures[current_id].sampler,
-                    ),
+                    resource: BindingResource::Sampler(&target.indirect_render_texture.sampler),
                 },
             ],
         });

@@ -951,13 +951,13 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
-            pass.set_pipeline(pipeline);
+        // if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
+        //     pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
+        //     let size = camera.physical_target_size.unwrap();
+        //     let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+        //     pass.dispatch_workgroups(count.x, count.y, 1);
+        // }
 
         pass.set_bind_group(5, &light_bind_group.indirect_render, &[]);
         pass.set_bind_group(6, &light_bind_group.indirect_reservoirs[0], &[]);
@@ -972,13 +972,13 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
-            pass.set_pipeline(pipeline);
+        // if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
+        //     pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
+        //     let size = camera.physical_target_size.unwrap();
+        //     let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+        //     pass.dispatch_workgroups(count.x, count.y, 1);
+        // }
 
         Ok(())
     }

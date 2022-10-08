@@ -107,12 +107,7 @@ fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
 
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
-    var projection = view.projection;
-    let jitter = frame_jitter();
-    projection[3][0] += jitter.x / view.width;
-    projection[3][1] += jitter.y / view.height;
-
-    let clip_position = projection * view.inverse_view * in.world_position;
+    let clip_position = view.view_proj * in.world_position;
     let previous_clip_position = previous_view.view_proj * in.previous_world_position;
     let velocity = clip_to_uv(clip_position) - clip_to_uv(previous_clip_position);
 

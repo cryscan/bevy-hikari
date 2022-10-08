@@ -88,7 +88,7 @@ let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let SOLAR_ANGLE: f32 = 0.130899694;
 
-let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
+let MAX_TEMPORAL_REUSE_COUNT: f32 = 30.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
 
@@ -178,7 +178,8 @@ struct LightCandidate {
     // Orientation + cos(half_angle)
     cone: vec4<f32>, 
     direction: vec3<f32>,
-    distance: f32,
+    max_distance: f32,
+    min_distance: f32,
     directional_index: u32,
     emissive_index: u32,
     p: f32,
@@ -311,7 +312,7 @@ fn traverse_bottom(ray: Ray, slice: Slice, hit: ptr<function, Hit>) -> bool {
     return intersected;
 }
 
-fn traverse_top(ray: Ray, max_distance: f32) -> Hit {
+fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
     var hit: Hit;
     hit.intersection.distance = max_distance;
     hit.instance_index = U32_MAX;
@@ -336,6 +337,10 @@ fn traverse_top(ray: Ray, max_distance: f32) -> Hit {
 
                 if (traverse_bottom(r, instance.slice, &hit)) {
                     hit.instance_index = instance_index;
+
+                    if (hit.intersection.distance < early_distance) {
+                        return hit;
+                    }
                 }
             }
 
@@ -378,7 +383,8 @@ fn select_light_candidate(
     instance: u32,
 ) -> LightCandidate {
     var candidate: LightCandidate;
-    candidate.distance = F32_MAX;
+    candidate.max_distance = F32_MAX;
+    candidate.min_distance = DISTANCE_MAX;
     candidate.directional_index = 0u;
     candidate.emissive_index = DONT_SAMPLE_EMISSIVE;
 
@@ -414,6 +420,7 @@ fn select_light_candidate(
         let delta = source.position - position;
         let d2 = dot(delta, delta);
         let r2 = source.radius * source.radius;
+        let d = sqrt(d2);
 
         let cone = vec4<f32>(normalize(delta), sqrt(max(d2 - r2, 0.0) / max(d2, 0.0001)));
         let sin = sqrt(1.0 - cone.w * cone.w);
@@ -430,7 +437,8 @@ fn select_light_candidate(
             candidate.emissive_index = source.instance;
             candidate.cone = cone;
             candidate.direction = direction;
-            candidate.distance = sqrt(d2) + source.radius;
+            candidate.max_distance = d + source.radius;
+            candidate.min_distance = d - source.radius;
             selected_flux = flux;
         }
     }
@@ -809,7 +817,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     ray.inv_direction = 1.0 / ray.direction;
 
     if (dot(candidate.direction, normal) > 0.0) {
-        hit = traverse_top(ray, candidate.distance);
+        hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
         info = hit_info(ray, hit);
 
         s.sample_position = info.position;
@@ -879,7 +887,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     ray.inv_direction = 1.0 / ray.direction;
     let p1 = dot(ray.direction, normal);
 
-    hit = traverse_top(ray, F32_MAX);
+    hit = traverse_top(ray, F32_MAX, 0.0);
     info = hit_info(ray, hit);
     s.sample_position = info.position;
     s.sample_normal = info.normal;
@@ -907,7 +915,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         p2 = bounce_candidate.p;
 
         if (dot(bounce_candidate.direction, info.normal) > 0.0) {
-            hit = traverse_top(bounce_ray, bounce_candidate.distance);
+            hit = traverse_top(bounce_ray, bounce_candidate.max_distance, bounce_candidate.min_distance);
             bounce_info = hit_info(bounce_ray, hit);
 
             surface = retreive_surface(info.material_index, info.uv);
