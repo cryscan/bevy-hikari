@@ -49,10 +49,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var uv = 0.5 * in.position.xy + 0.5;
     uv.y = 1.0 - uv.y;
     
-    let position = textureSample(position_texture, position_sampler, uv);
-    let direct_color = textureSample(direct_render_texture, direct_render_sampler, uv).rgb;
-    let indirect_color = textureSample(indirect_render_texture, indirect_render_sampler, uv).rgb;
+    let direct_color = textureSample(direct_render_texture, direct_render_sampler, uv);
+    let indirect_color = textureSample(indirect_render_texture, indirect_render_sampler, uv);
     let color = direct_color + indirect_color;
 
-    return tone_mapping(vec4<f32>(color, position.a));
+    return tone_mapping(color);
 }

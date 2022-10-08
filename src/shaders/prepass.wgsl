@@ -51,25 +51,6 @@ struct VertexOutput {
     @location(3) uv: vec2<f32>,
 };
 
-// https://en.wikipedia.org/wiki/Halton_sequence#Implementation_in_pseudocode
-fn halton(base: u32, index: u32) -> f32
-{
-	var result = 0.;
-	var f = 1.;
-	for (var id = index; id > 0u; id /= base)
-	{
-		f = f / f32(base);
-		result += f * f32(id % base);
-	}
-	return result;
-}
-
-fn frame_jitter() -> vec2<f32> {
-    let index = frame.number % 64u;
-    let delta = vec2<f32>(halton(2u, index), halton(3u, index)) - vec2<f32>(0.5);
-    return delta;
-}
-
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var model = mesh.model;
@@ -88,9 +69,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 struct FragmentOutput {
     @location(0) position: vec4<f32>,
     @location(1) normal: vec4<f32>,
-    @location(2) instance_material: vec2<u32>,
-    @location(3) uv: vec2<f32>,
-    @location(4) velocity: vec2<f32>,
+    @location(2) depth_gradient: vec2<f32>,
+    @location(3) instance_material: vec2<u32>,
+    @location(4) uv: vec2<f32>,
+    @location(5) velocity: vec2<f32>,
 };
 
 fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
@@ -107,10 +89,11 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let velocity = clip_to_uv(clip_position) - clip_to_uv(previous_clip_position);
 
     var out: FragmentOutput;
-    out.position = in.world_position;
+    out.position = vec4<f32>(in.world_position.xyz, in.clip_position.z);
     out.normal = vec4<f32>(in.world_normal, 1.0);
+    out.depth_gradient = vec2<f32>(dpdx(in.clip_position.z), dpdy(in.clip_position.z));
     out.instance_material = vec2<u32>(instance_index.instance, instance_index.material);
     out.uv = in.uv;
-    out.velocity = velocity * 10000.0;
+    out.velocity = velocity;
     return out;
 }

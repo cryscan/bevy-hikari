@@ -199,7 +199,7 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
-                // Noise Texture
+                // Blue Noise Texture
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
@@ -233,29 +233,21 @@ impl FromWorld for LightPipeline {
         let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
-                // Previous Denoised Texture
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadWrite,
+                        format: RENDER_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
                     },
                     count: None,
                 },
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Output Denoised Texture
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
+                        access: StorageTextureAccess::ReadWrite,
                         format: RENDER_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
@@ -263,7 +255,7 @@ impl FromWorld for LightPipeline {
                 },
                 // Render Texture
                 BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 2,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::ReadWrite,
@@ -437,7 +429,7 @@ fn prepare_light_pass_targets(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let mut create_texture = |size: UVec2, texture_format, filter_mode| -> GpuImage {
+            let mut create_texture = |size: UVec2, texture_format| -> GpuImage {
                 let extent = Extent3d {
                     width: size.x,
                     height: size.y,
@@ -448,9 +440,9 @@ fn prepare_light_pass_targets(
                     address_mode_u: AddressMode::ClampToEdge,
                     address_mode_v: AddressMode::ClampToEdge,
                     address_mode_w: AddressMode::ClampToEdge,
-                    mag_filter: filter_mode,
-                    min_filter: filter_mode,
-                    mipmap_filter: filter_mode,
+                    mag_filter: FilterMode::Nearest,
+                    min_filter: FilterMode::Nearest,
+                    mipmap_filter: FilterMode::Nearest,
                     ..Default::default()
                 });
                 let texture = texture_cache.get(
@@ -474,10 +466,9 @@ fn prepare_light_pass_targets(
                 }
             };
 
-            let albedo_texture = create_texture(size, ALBEDO_TEXTURE_FORMAT, FilterMode::Nearest);
+            let albedo_texture = create_texture(size, ALBEDO_TEXTURE_FORMAT);
 
-            let mut create_render_texture =
-                |size| create_texture(size, RENDER_TEXTURE_FORMAT, FilterMode::Nearest);
+            let mut create_render_texture = |size| create_texture(size, RENDER_TEXTURE_FORMAT);
 
             let direct_render_texture = create_render_texture(size);
             let indirect_render_texture = create_render_texture(size >> INDIRECT_LOG_SCALE);
@@ -487,25 +478,13 @@ fn prepare_light_pass_targets(
 
             let mut create_reservoir = |size| -> Reservoir {
                 Reservoir {
-                    reservoir: create_texture(size, RESERVOIR_TEXTURE_FORMAT, FilterMode::Nearest),
-                    radiance: create_texture(size, RADIANCE_TEXTURE_FORMAT, FilterMode::Nearest),
-                    random: create_texture(size, RANDOM_TEXTURE_FORMAT, FilterMode::Nearest),
-                    visible_position: create_texture(
-                        size,
-                        POSITION_TEXTURE_FORMAT,
-                        FilterMode::Nearest,
-                    ),
-                    visible_normal: create_texture(
-                        size,
-                        NORMAL_TEXTURE_FORMAT,
-                        FilterMode::Nearest,
-                    ),
-                    sample_position: create_texture(
-                        size,
-                        POSITION_TEXTURE_FORMAT,
-                        FilterMode::Nearest,
-                    ),
-                    sample_normal: create_texture(size, NORMAL_TEXTURE_FORMAT, FilterMode::Nearest),
+                    reservoir: create_texture(size, RESERVOIR_TEXTURE_FORMAT),
+                    radiance: create_texture(size, RADIANCE_TEXTURE_FORMAT),
+                    random: create_texture(size, RANDOM_TEXTURE_FORMAT),
+                    visible_position: create_texture(size, POSITION_TEXTURE_FORMAT),
+                    visible_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
+                    sample_position: create_texture(size, POSITION_TEXTURE_FORMAT),
+                    sample_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
                 }
             };
 
@@ -529,7 +508,6 @@ fn prepare_light_pass_targets(
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     indirect_lit_ambient: CachedComputePipelineId,
-    temporal_filter: CachedComputePipelineId,
 }
 
 fn queue_light_pipelines(
@@ -559,19 +537,9 @@ fn queue_light_pipelines(
         },
     );
 
-    let temporal_filter = pipelines.specialize(
-        &mut pipeline_cache,
-        &pipeline,
-        LightPipelineKey {
-            entry_point: "temporal_filter".into(),
-            texture_count: layout.texture_count,
-        },
-    );
-
     commands.insert_resource(CachedLightPipelines {
         direct_lit,
         indirect_lit_ambient,
-        temporal_filter,
     })
 }
 
@@ -778,8 +746,6 @@ fn queue_light_bind_groups(
                 })
             };
 
-            let current_id = counter.0 % 2;
-
             let direct_render = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &pipeline.render_layout,
@@ -787,23 +753,17 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 0,
                         resource: BindingResource::TextureView(
-                            &light_pass.direct_denoised_textures[1 - current_id].texture_view,
+                            &light_pass.direct_denoised_textures[0].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::Sampler(
-                            &light_pass.direct_denoised_textures[1 - current_id].sampler,
+                        resource: BindingResource::TextureView(
+                            &light_pass.direct_denoised_textures[1].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 2,
-                        resource: BindingResource::TextureView(
-                            &light_pass.direct_denoised_textures[current_id].texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
                         resource: BindingResource::TextureView(
                             &light_pass.direct_render_texture.texture_view,
                         ),
@@ -817,23 +777,17 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 0,
                         resource: BindingResource::TextureView(
-                            &light_pass.indirect_denoised_textures[1 - current_id].texture_view,
+                            &light_pass.indirect_denoised_textures[0].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::Sampler(
-                            &light_pass.indirect_denoised_textures[1 - current_id].sampler,
+                        resource: BindingResource::TextureView(
+                            &light_pass.indirect_denoised_textures[1].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 2,
-                        resource: BindingResource::TextureView(
-                            &light_pass.indirect_denoised_textures[current_id].texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
                         resource: BindingResource::TextureView(
                             &light_pass.indirect_render_texture.texture_view,
                         ),
@@ -841,13 +795,14 @@ fn queue_light_bind_groups(
                 ],
             });
 
+            let id = counter.0 % 2;
             let direct_reservoirs = [
-                create_reservoir_bind_group(&light_pass.direct_reservoirs[current_id]),
-                create_reservoir_bind_group(&light_pass.direct_reservoirs[1 - current_id]),
+                create_reservoir_bind_group(&light_pass.direct_reservoirs[id]),
+                create_reservoir_bind_group(&light_pass.direct_reservoirs[1 - id]),
             ];
             let indirect_reservoirs = [
-                create_reservoir_bind_group(&light_pass.indirect_reservoirs[current_id]),
-                create_reservoir_bind_group(&light_pass.indirect_reservoirs[1 - current_id]),
+                create_reservoir_bind_group(&light_pass.indirect_reservoirs[id]),
+                create_reservoir_bind_group(&light_pass.indirect_reservoirs[1 - id]),
             ];
 
             commands.entity(entity).insert(LightBindGroup {

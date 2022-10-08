@@ -19,7 +19,7 @@ var samplers: binding_array<sampler>;
 
 struct Frame {
     number: u32,
-    kernel: array<vec3<f32>, 25>,
+    kernel: mat3x3<f32>,
 };
 
 @group(4) @binding(0)
@@ -32,12 +32,10 @@ var noise_sampler: sampler;
 var albedo_texture: texture_storage_2d<rgba8unorm, read_write>;
 
 @group(5) @binding(0)
-var previous_denoised_texture: texture_2d<f32>;
+var denoised_texture_0: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(1)
-var previous_denoised_sampler: sampler;
+var denoised_texture_1: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(2)
-var output_denoised_texture: texture_storage_2d<rgba16float, write>;
-@group(5) @binding(3)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
 
 @group(6) @binding(0)
@@ -117,16 +115,14 @@ fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
 }
 
 // https://en.wikipedia.org/wiki/Halton_sequence#Implementation_in_pseudocode
-fn halton(base: u32, index: u32) -> f32
-{
-	var result = 0.;
-	var f = 1.;
-	for (var id = index; id > 0u; id /= base)
-	{
-		f = f / f32(base);
-		result += f * f32(id % base);
-	}
-	return result;
+fn halton(base: u32, index: u32) -> f32 {
+    var result = 0.;
+    var f = 1.;
+    for (var id = index; id > 0u; id /= base) {
+        f = f / f32(base);
+        result += f * f32(id % base);
+    }
+    return result;
 }
 
 fn frame_jitter() -> vec2<f32> {
@@ -293,7 +289,7 @@ fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, slice: Slice, early_distan
                     (*hit).intersection = intersection;
                     (*hit).primitive_index = primitive_index;
                     intersected = true;
-                
+
                     if (intersection.distance < early_distance) {
                         return intersected;
                     }
@@ -777,8 +773,11 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var s = empty_sample();
 
     let deferred_coords = vec2<i32>(uv * vec2<f32>(textureDimensions(position_texture)));
-    let position = textureLoad(position_texture, deferred_coords, 0);
-    if (position.w < 0.5) {
+    let position_depth = textureLoad(position_texture, deferred_coords, 0);
+    let position = vec4<f32>(position_depth.xyz, 1.0);
+    let depth = position_depth.w;
+
+    if (depth < F32_EPSILON) {
         var r: Reservoir;
         set_reservoir(&r, s, 0.0);
         store_reservoir(coords, r);
@@ -787,14 +786,12 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
-    let ndc = view.view_proj * position;
-    let depth = ndc.z / ndc.w;
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
     let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
     let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
-    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy * 0.0001;
+    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy;
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]);
@@ -854,22 +851,23 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var s = empty_sample();
 
     let deferred_coords = vec2<i32>(uv * vec2<f32>(textureDimensions(position_texture)));
-    let position = textureLoad(position_texture, deferred_coords, 0);
-    if (position.w < 0.5) {
+    let position_depth = textureLoad(position_texture, deferred_coords, 0);
+    let position = vec4<f32>(position_depth.xyz, 1.0);
+    let depth = position_depth.w;
+
+    if (depth < F32_EPSILON) {
         var r: Reservoir;
         set_reservoir(&r, s, 0.0);
         store_reservoir(coords, r);
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
-    let ndc = view.view_proj * position;
-    let depth = ndc.z / ndc.w;
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
     let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
     let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
-    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy * 0.0001;
+    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy;
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]);
@@ -940,72 +938,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
 }
 
-// YUV-RGB conversion routine from Hyper3D
-fn encode_pal_yuv(rgb: vec3<f32>) -> vec3<f32> {
-    let srgb = pow(rgb, vec3<f32>(2.2));
-    return vec3<f32>(
-        dot(srgb, vec3<f32>(0.299, 0.587, 0.114)),
-        dot(srgb, vec3<f32>(-0.14713, -0.28886, 0.436)),
-        dot(srgb, vec3<f32>(0.615, -0.51499, -0.10001))
-    );
-}
-
-fn decode_pal_yuv(yuv: vec3<f32>) -> vec3<f32> {
-    let srgb = vec3<f32>(
-        dot(yuv, vec3<f32>(1., 0., 1.13983)),
-        dot(yuv, vec3<f32>(1., -0.39465, -0.58060)),
-        dot(yuv, vec3<f32>(1., 2.03211, 0.))
-    );
-    return pow(srgb, vec3<f32>(1.0 / 2.2));
-}
-
 @compute @workgroup_size(8, 8, 1)
-fn temporal_filter(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let size = textureDimensions(output_denoised_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
-    let coords = vec2<i32>(invocation_id.xy);
-    let velocity = textureSampleLevel(velocity_texture, velocity_sampler, uv, 0.0).xy * 0.0001;
-
-    var in: array<vec3<f32>, 9>;
-    in[0] = textureLoad(render_texture, coords).rgb;
-    in[1] = textureLoad(render_texture, coords + vec2<i32>(1, 0)).rgb;
-    in[2] = textureLoad(render_texture, coords + vec2<i32>(-1, 0)).rgb;
-    in[3] = textureLoad(render_texture, coords + vec2<i32>(0, 1)).rgb;
-    in[4] = textureLoad(render_texture, coords + vec2<i32>(0, -1)).rgb;
-    in[5] = textureLoad(render_texture, coords + vec2<i32>(1, 1)).rgb;
-    in[6] = textureLoad(render_texture, coords + vec2<i32>(-1, 1)).rgb;
-    in[7] = textureLoad(render_texture, coords + vec2<i32>(1, -1)).rgb;
-    in[8] = textureLoad(render_texture, coords + vec2<i32>(-1, -1)).rgb;
-
-    let previous_uv = uv - velocity;
-    let previous_color = textureSampleLevel(previous_denoised_texture, previous_denoised_sampler, previous_uv, 0.0);
-    var antialiased = previous_color.rgb;
-    var mix_rate = min(previous_color.a, 0.5);
-
-    antialiased = mix(antialiased * antialiased, in[0] * in[0], mix_rate);
-    antialiased = sqrt(antialiased);
-
-    // antialiased = encode_pal_yuv(antialiased);
-    // for (var id = 0u; id < 9u; id += 1u) {
-        // in[id] = encode_pal_yuv(in[id]);
-    // }
-    var min_color = min(min(min(in[0], in[1]), min(in[2], in[3])), in[4]);
-    var max_color = max(max(max(in[0], in[1]), max(in[2], in[3])), in[4]);
-    min_color = mix(min_color, min(min(min(in[5], in[6]), min(in[7], in[8])), min_color), 0.5);
-    max_color = mix(max_color, max(max(max(in[5], in[6]), max(in[7], in[8])), max_color), 0.5);
-
-    let preclamping = antialiased;
-    antialiased = clamp(antialiased, min_color, max_color);
-    
-    mix_rate = 1.0 / (1.0 / max(mix_rate, 0.0001) + 1.0);
-    
-    let diff = antialiased - preclamping;
-    let clamp_amount = dot(diff, diff);
-    
-    mix_rate += clamp_amount * 4.0;
-    mix_rate = clamp(mix_rate, 0.05, 0.5);
-    
-    // antialiased = decode_pal_yuv(antialiased);
-
-    textureStore(output_denoised_texture, coords, vec4<f32>(antialiased, mix_rate));
+fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let render_size = textureDimensions(render_texture);
+    let output_size = textureDimensions(denoised_texture_0);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(output_size);
 }

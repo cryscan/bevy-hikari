@@ -73,7 +73,7 @@ pub struct FrameCounter(pub usize);
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuFrame {
     pub number: u32,
-    pub kernel: [Vec3; 25],
+    pub kernel: Mat3,
 }
 
 #[derive(Default)]
@@ -87,27 +87,31 @@ fn prepare_frame_uniform(
     mut uniform: ResMut<FrameUniform>,
     mut counter: ResMut<FrameCounter>,
 ) {
-    let mut kernel = [Vec3::ZERO; 25];
-    for i in 0..5 {
-        for j in 0..5 {
-            let offset = IVec2::new(i - 2, j - 2);
-            let index = (i + 5 * j) as usize;
-            let value = match (offset.x.abs(), offset.y.abs()) {
-                (0, 0) => 9.0 / 64.0,
-                (0, 1) | (1, 0) => 3.0 / 32.0,
-                (1, 1) => 1.0 / 16.0,
-                (0, 2) | (2, 0) => 3.0 / 128.0,
-                (1, 2) | (2, 1) => 1.0 / 64.0,
-                (2, 2) => 1.0 / 256.0,
-                _ => 0.0,
-            };
-            kernel[index] = Vec3::new(offset.x as f32, offset.y as f32, value);
-        }
-    }
+    // let mut kernel = [Vec3::ZERO; 25];
+    // for i in 0..5 {
+    //     for j in 0..5 {
+    //         let offset = IVec2::new(i - 2, j - 2);
+    //         let index = (i + 5 * j) as usize;
+    //         let value = match (offset.x.abs(), offset.y.abs()) {
+    //             (0, 0) => 9.0 / 64.0,
+    //             (0, 1) | (1, 0) => 3.0 / 32.0,
+    //             (1, 1) => 1.0 / 16.0,
+    //             (0, 2) | (2, 0) => 3.0 / 128.0,
+    //             (1, 2) | (2, 1) => 1.0 / 64.0,
+    //             (2, 2) => 1.0 / 256.0,
+    //             _ => 0.0,
+    //         };
+    //         kernel[index] = Vec3::new(offset.x as f32, offset.y as f32, value);
+    //     }
+    // }
 
     uniform.buffer.set(GpuFrame {
         number: counter.0 as u32,
-        kernel,
+        kernel: Mat3 {
+            x_axis: Vec3::new(0.0625, 0.125, 0.0625),
+            y_axis: Vec3::new(0.125, 0.25, 0.125),
+            z_axis: Vec3::new(0.0625, 0.125, 0.0625),
+        },
     });
     uniform.buffer.write_buffer(&render_device, &render_queue);
     counter.0 += 1;
