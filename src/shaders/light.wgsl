@@ -39,8 +39,6 @@ var denoised_texture_2: texture_storage_2d<rgba16float, read_write>;
 var denoised_texture_3: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(4)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
-@group(5) @binding(5)
-var variance_texture: texture_storage_2d<rg32float, read_write>;
 
 @group(6) @binding(0)
 var reservoir_texture: texture_storage_2d<rgba32float, read_write>;
@@ -53,8 +51,10 @@ var visible_position_texture: texture_storage_2d<rgba32float, read_write>;
 @group(6) @binding(4)
 var visible_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 @group(6) @binding(5)
-var sample_position_texture: texture_storage_2d<rgba32float, read_write>;
+var visible_id_texture: texture_storage_2d<rg32uint, read_write>;
 @group(6) @binding(6)
+var sample_position_texture: texture_storage_2d<rgba32float, read_write>;
+@group(6) @binding(7)
 var sample_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 
 @group(7) @binding(0)
@@ -68,8 +68,10 @@ var previous_visible_position_texture: texture_storage_2d<rgba32float, read_writ
 @group(7) @binding(4)
 var previous_visible_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 @group(7) @binding(5)
-var previous_sample_position_texture: texture_storage_2d<rgba32float, read_write>;
+var previous_visible_id_texture: texture_storage_2d<rg32uint, read_write>;
 @group(7) @binding(6)
+var previous_sample_position_texture: texture_storage_2d<rgba32float, read_write>;
+@group(7) @binding(7)
 var previous_sample_normal_texture: texture_storage_2d<rgba8snorm, read_write>;
 
 let TAU: f32 = 6.283185307;
@@ -190,6 +192,7 @@ struct Sample {
     random: vec4<f32>,
     visible_position: vec4<f32>,
     visible_normal: vec3<f32>,
+    visible_id: vec2<u32>,
     sample_position: vec4<f32>,
     sample_normal: vec3<f32>,
 };
@@ -594,9 +597,10 @@ fn load_previous_reservoir(coords: vec2<i32>) -> Reservoir {
     r.s.radiance = textureLoad(previous_radiance_texture, coords);
     r.s.random = textureLoad(previous_random_texture, coords);
     r.s.visible_position = textureLoad(previous_visible_position_texture, coords);
-    r.s.visible_normal = textureLoad(previous_visible_normal_texture, coords).rgb;
+    r.s.visible_normal = textureLoad(previous_visible_normal_texture, coords).xyz;
+    r.s.visible_id = textureLoad(previous_visible_id_texture, coords).xy;
     r.s.sample_position = textureLoad(previous_sample_position_texture, coords);
-    r.s.sample_normal = textureLoad(previous_sample_normal_texture, coords).rgb;
+    r.s.sample_normal = textureLoad(previous_sample_normal_texture, coords).xyz;
 
     return r;
 }
@@ -609,6 +613,7 @@ fn store_reservoir(coords: vec2<i32>, r: Reservoir) {
     textureStore(random_texture, coords, r.s.random);
     textureStore(visible_position_texture, coords, r.s.visible_position);
     textureStore(visible_normal_texture, coords, vec4<f32>(r.s.visible_normal, 0.0));
+    textureStore(visible_id_texture, coords, vec4<u32>(r.s.visible_id, 0u, 0u));
     textureStore(sample_position_texture, coords, r.s.sample_position);
     textureStore(sample_normal_texture, coords, vec4<f32>(r.s.sample_normal, 0.0));
 }
@@ -775,9 +780,13 @@ fn temporal_restir(
     let w_new = luminance(out.radiance) / pdf;
 
     let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
-    let depth_miss = abs((*r).s.visible_position.w / s.visible_position.w - 1.0) > 0.1;
+
+    let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
+    let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
+
+    let instance_miss = any((*r).s.visible_id != s.visible_id);
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
-    if (uv_miss || depth_miss || normal_miss) {
+    if (uv_miss || depth_miss || instance_miss || normal_miss) {
         set_reservoir(r, s, w_new);
     } else {
         update_reservoir(r, s, w_new);
@@ -821,7 +830,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
-        textureStore(variance_texture, coords, vec4<f32>(0.0));
 
         return;
     }
@@ -840,6 +848,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     s.visible_position = vec4<f32>(position.xyz, depth);
     s.visible_normal = normal;
+    s.visible_id = instance_material;
 
     let surface = retreive_surface(instance_material.y, object_uv);
     textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
@@ -872,7 +881,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
-    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, MAX_TEMPORAL_REUSE_COUNT);
+    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, 4.0 * MAX_TEMPORAL_REUSE_COUNT);
     store_reservoir(coords, r);
 
     var output_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
@@ -903,7 +912,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         store_reservoir(coords, r);
 
         textureStore(render_texture, coords, vec4<f32>(0.0));
-        textureStore(variance_texture, coords, vec4<f32>(0.0));
 
         return;
     }
