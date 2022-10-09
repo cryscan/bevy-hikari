@@ -387,6 +387,7 @@ impl FromWorld for LightPipeline {
 pub struct LightPipelineKey {
     pub entry_point: String,
     pub texture_count: usize,
+    pub denoiser_level: usize,
 }
 
 impl SpecializedComputePipeline for LightPipeline {
@@ -397,6 +398,7 @@ impl SpecializedComputePipeline for LightPipeline {
         if key.texture_count < 1 {
             shader_defs.push("NO_TEXTURE".into());
         }
+        shader_defs.push(format!("DENOISER_LEVEL_{}", key.denoiser_level).into());
 
         ComputePipelineDescriptor {
             label: None,
@@ -536,7 +538,7 @@ fn prepare_light_pass_targets(
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     indirect_lit_ambient: CachedComputePipelineId,
-    denoise: CachedComputePipelineId,
+    denoise: [CachedComputePipelineId; 4],
 }
 
 fn queue_light_pipelines(
@@ -554,6 +556,7 @@ fn queue_light_pipelines(
         LightPipelineKey {
             entry_point: "direct_lit".into(),
             texture_count: layout.texture_count,
+            denoiser_level: 0,
         },
     );
 
@@ -563,17 +566,21 @@ fn queue_light_pipelines(
         LightPipelineKey {
             entry_point: "indirect_lit_ambient".into(),
             texture_count: layout.texture_count,
+            denoiser_level: 0,
         },
     );
 
-    let denoise = pipelines.specialize(
-        &mut pipeline_cache,
-        &pipeline,
-        LightPipelineKey {
-            entry_point: "denoise_atrous".into(),
-            texture_count: layout.texture_count,
-        },
-    );
+    let denoise = [0, 1, 2, 3].map(|level| {
+        pipelines.specialize(
+            &mut pipeline_cache,
+            &pipeline,
+            LightPipelineKey {
+                entry_point: "denoise_atrous".into(),
+                texture_count: layout.texture_count,
+                denoiser_level: level,
+            },
+        )
+    });
 
     commands.insert_resource(CachedLightPipelines {
         direct_lit,
@@ -973,12 +980,14 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise) {
-            pass.set_pipeline(pipeline);
+        for id in 0..4 {
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise[id]) {
+                pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
+                let size = camera.physical_target_size.unwrap();
+                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
+            }
         }
 
         pass.set_bind_group(5, &light_bind_group.indirect_render, &[]);
@@ -994,12 +1003,14 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise) {
-            pass.set_pipeline(pipeline);
+        for id in 0..4 {
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise[id]) {
+                pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
+                let size = camera.physical_target_size.unwrap();
+                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
+            }
         }
 
         Ok(())

@@ -1024,20 +1024,21 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     irradiance *= max(sign(albedo.rgb - vec3<f32>(0.01)), vec3<f32>(0.0));
     let lum = luminance(irradiance);
 
-    // Pass 0, stride 8
     var irradiance_sum = vec3<f32>(0.0);
     var w_sum = 0.0;
 
+#ifdef DENOISER_LEVEL_0
+    // Pass 0, stride 8
     for (var y = -1; y <= 1; y += 1) {
         for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y) * 8;
-            let sample_coords = output_coords + offset;
+            let offset = vec2<i32>(x, y);
+            let sample_coords = output_coords + offset * 8;
             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
                 continue;
             }
 
             let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
-            var irradiance = textureLoad(render_texture, sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
+            irradiance = textureLoad(render_texture, sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
             irradiance *= max(sign(sample_albedo - vec3<f32>(0.01)), vec3<f32>(0.0));
 
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
@@ -1058,21 +1059,19 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     w_sum = max(w_sum, 0.0001);
     textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
-    storageBarrier();
+#endif
 
+#ifdef DENOISER_LEVEL_1
     // Pass 1, stride 4
-    irradiance_sum = vec3<f32>(0.0);
-    w_sum = 0.0;
-
     for (var y = -1; y <= 1; y += 1) {
         for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y) * 4;
-            let sample_coords = output_coords + offset;
+            let offset = vec2<i32>(x, y);
+            let sample_coords = output_coords + offset * 4;
             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
                 continue;
             }
 
-            var irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
+            irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
@@ -1091,21 +1090,19 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     w_sum = max(w_sum, 0.0001);
     textureStore(denoised_texture_1, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
-    storageBarrier();
+#endif
 
+#ifdef DENOISER_LEVEL_2
     // Pass 2, stride 2
-    irradiance_sum = vec3<f32>(0.0);
-    w_sum = 0.0;
-
     for (var y = -1; y <= 1; y += 1) {
         for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y) * 2;
-            let sample_coords = output_coords + offset;
+            let offset = vec2<i32>(x, y);
+            let sample_coords = output_coords + offset * 2;
             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
                 continue;
             }
 
-            var irradiance = textureLoad(denoised_texture_1, sample_coords).rgb;
+            irradiance = textureLoad(denoised_texture_1, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
@@ -1124,21 +1121,19 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     w_sum = max(w_sum, 0.0001);
     textureStore(denoised_texture_2, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
-    storageBarrier();
+#endif
 
+#ifdef DENOISER_LEVEL_3
     // Pass 3, stride 1
-    irradiance_sum = vec3<f32>(0.0);
-    w_sum = 0.0;
-
     for (var y = -1; y <= 1; y += 1) {
         for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y) * 1;
-            let sample_coords = output_coords + offset;
+            let offset = vec2<i32>(x, y);
+            let sample_coords = output_coords + offset * 1;
             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
                 continue;
             }
 
-            var irradiance = textureLoad(denoised_texture_2, sample_coords).rgb;
+            irradiance = textureLoad(denoised_texture_2, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
@@ -1158,4 +1153,5 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     w_sum = max(w_sum, 0.0001);
     let color = vec4<f32>(albedo.rgb * irradiance_sum / w_sum, albedo.a);
     textureStore(denoised_texture_3, output_coords, color);
+#endif
 }
