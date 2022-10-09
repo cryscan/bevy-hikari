@@ -800,7 +800,7 @@ fn temporal_restir(
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + vec2<f32>(0.5)) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -883,7 +883,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 @compute @workgroup_size(8, 8, 1)
 fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + vec2<f32>(0.5)) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -972,7 +972,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords);
-    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, 4.0 * MAX_TEMPORAL_REUSE_COUNT);
+    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
     store_reservoir(coords, r);
 
     let output_color = restir.output;
