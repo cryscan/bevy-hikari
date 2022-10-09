@@ -25,15 +25,16 @@ use bevy::{
 };
 use std::num::NonZeroU32;
 
-pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
+pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const VARIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg32Float;
 pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const RADIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const POSITION_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const RANDOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
-pub const INDIRECT_LOG_SCALE: u32 = 1;
+pub const INDIRECT_LOG_SCALE: u32 = 0;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -258,7 +259,7 @@ impl FromWorld for LightPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::ReadWrite,
-                        format: RENDER_TEXTURE_FORMAT,
+                        format: VARIANCE_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -467,15 +468,18 @@ fn prepare_light_pass_targets(
 
             let albedo_texture = create_texture(size, ALBEDO_TEXTURE_FORMAT);
 
-            let mut create_render_texture = |size| create_texture(size, RENDER_TEXTURE_FORMAT);
+            let direct_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+            let direct_variance_texture = create_texture(size, VARIANCE_TEXTURE_FORMAT);
 
-            let direct_render_texture = create_render_texture(size);
-            let direct_variance_texture = create_render_texture(size);
-            let indirect_render_texture = create_render_texture(size >> INDIRECT_LOG_SCALE);
-            let indirect_variance_texture = create_render_texture(size >> INDIRECT_LOG_SCALE);
+            let indirect_render_texture =
+                create_texture(size >> INDIRECT_LOG_SCALE, RENDER_TEXTURE_FORMAT);
+            let indirect_variance_texture =
+                create_texture(size >> INDIRECT_LOG_SCALE, VARIANCE_TEXTURE_FORMAT);
 
-            let direct_denoised_textures = [(); 2].map(|_| create_render_texture(size));
-            let indirect_denoised_textures = [(); 2].map(|_| create_render_texture(size));
+            let direct_denoised_textures =
+                [(); 2].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
+            let indirect_denoised_textures =
+                [(); 2].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
 
             let mut create_reservoir = |size| -> Reservoir {
                 Reservoir {
@@ -511,6 +515,7 @@ fn prepare_light_pass_targets(
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     indirect_lit_ambient: CachedComputePipelineId,
+    denoise: CachedComputePipelineId,
 }
 
 fn queue_light_pipelines(
@@ -540,9 +545,19 @@ fn queue_light_pipelines(
         },
     );
 
+    let denoise = pipelines.specialize(
+        &mut pipeline_cache,
+        &pipeline,
+        LightPipelineKey {
+            entry_point: "denoise_atrous".into(),
+            texture_count: layout.texture_count,
+        },
+    );
+
     commands.insert_resource(CachedLightPipelines {
         direct_lit,
         indirect_lit_ambient,
+        denoise,
     })
 }
 
@@ -913,13 +928,13 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        // if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
-        //     pass.set_pipeline(pipeline);
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise) {
+            pass.set_pipeline(pipeline);
 
-        //     let size = camera.physical_target_size.unwrap();
-        //     let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-        //     pass.dispatch_workgroups(count.x, count.y, 1);
-        // }
+            let size = camera.physical_target_size.unwrap();
+            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            pass.dispatch_workgroups(count.x, count.y, 1);
+        }
 
         pass.set_bind_group(5, &light_bind_group.indirect_render, &[]);
         pass.set_bind_group(6, &light_bind_group.indirect_reservoirs[0], &[]);
@@ -934,13 +949,13 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        // if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.temporal_filter) {
-        //     pass.set_pipeline(pipeline);
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise) {
+            pass.set_pipeline(pipeline);
 
-        //     let size = camera.physical_target_size.unwrap();
-        //     let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-        //     pass.dispatch_workgroups(count.x, count.y, 1);
-        // }
+            let size = camera.physical_target_size.unwrap();
+            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            pass.dispatch_workgroups(count.x, count.y, 1);
+        }
 
         Ok(())
     }

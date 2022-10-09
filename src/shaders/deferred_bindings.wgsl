@@ -13,4 +13,4 @@ var velocity_texture: texture_2d<f32>;
 @group(1) @binding(5)
 var instance_material_texture: texture_2d<u32>;
 @group(1) @binding(6)
-var albedo_texture: texture_storage_2d<rgba8unorm, read_write>;
+var albedo_texture: texture_storage_2d<rgba16float, read_write>;
