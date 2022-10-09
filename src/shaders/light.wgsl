@@ -1043,7 +1043,8 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
     }
 
-    textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / max(w_sum, 0.01), w_sum));
+    w_sum = max(w_sum, 0.0001);
+    textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
     storageBarrier();
 
     // Pass 1, stride 4
@@ -1072,7 +1073,8 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
     }
 
-    textureStore(denoised_texture_1, output_coords, vec4<f32>(irradiance_sum / max(w_sum, 0.01), w_sum));
+    w_sum = max(w_sum, 0.0001);
+    textureStore(denoised_texture_1, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
     storageBarrier();
 
     // Pass 2, stride 2
@@ -1101,7 +1103,8 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
     }
 
-    textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / max(w_sum, 0.01), w_sum));
+    w_sum = max(w_sum, 0.0001);
+    textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
     storageBarrier();
 
     // Pass 3, stride 1
@@ -1130,7 +1133,8 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
     }
 
+    w_sum = max(w_sum, 0.0001);
     let albedo = textureLoad(albedo_texture, output_coords);
-    let color = vec4<f32>(albedo.rgb * irradiance_sum / max(w_sum, 0.01), albedo.a);
+    let color = vec4<f32>(albedo.rgb * irradiance_sum / w_sum, albedo.a);
     textureStore(denoised_texture_1, output_coords, color);
 }
