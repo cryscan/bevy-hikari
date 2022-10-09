@@ -995,7 +995,7 @@ fn normal_weight(n0: vec3<f32>, n1: vec3<f32>) -> f32 {
 
 // Depth-weighting function (4.4.2)
 fn depth_weight(d0: f32, d1: f32, gradient: vec2<f32>, offset: vec2<i32>) -> f32 {
-    let eps = 0.0001;
+    let eps = 0.001;
     return exp((-abs(d0 - d1)) / (abs(dot(gradient, vec2<f32>(offset))) + eps));
 }
 
