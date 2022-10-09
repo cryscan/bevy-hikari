@@ -2,7 +2,10 @@ use crate::{
     mesh_material::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
-    view::{PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
+    view::{
+        FrameUniform, GpuFrame, PreviousViewUniform, PreviousViewUniformOffset,
+        PreviousViewUniforms,
+    },
     PREPASS_SHADER_HANDLE,
 };
 use bevy::{
@@ -34,6 +37,7 @@ use bevy::{
 
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
+pub const DEPTH_GRADIENT_FORMAT: TextureFormat = TextureFormat::Rg32Float;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
 pub const UV_FORMAT: TextureFormat = TextureFormat::Rg16Unorm;
 pub const VELOCITY_FORMAT: TextureFormat = TextureFormat::Rg32Float;
@@ -85,6 +89,16 @@ impl FromWorld for PrepassPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
                         min_binding_size: Some(PreviousViewUniform::min_size()),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuFrame::min_size()),
                     },
                     count: None,
                 },
@@ -175,6 +189,11 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                         write_mask: ColorWrites::ALL,
                     }),
                     Some(ColorTargetState {
+                        format: DEPTH_GRADIENT_FORMAT,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
                         format: INSTANCE_MATERIAL_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
@@ -238,6 +257,7 @@ fn extract_prepass_camera_phases(
 pub struct PrepassTarget {
     pub position: GpuImage,
     pub normal: GpuImage,
+    pub depth_gradient: GpuImage,
     pub instance_material: GpuImage,
     pub uv: GpuImage,
     pub velocity: GpuImage,
@@ -294,6 +314,7 @@ fn prepare_prepass_targets(
 
             let position = create_texture(POSITION_FORMAT);
             let normal = create_texture(NORMAL_FORMAT);
+            let depth_gradient = create_texture(DEPTH_GRADIENT_FORMAT);
             let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
             let uv = create_texture(UV_FORMAT);
             let velocity = create_texture(VELOCITY_FORMAT);
@@ -302,6 +323,7 @@ fn prepare_prepass_targets(
             commands.entity(entity).insert(PrepassTarget {
                 position,
                 normal,
+                depth_gradient,
                 instance_material,
                 uv,
                 velocity,
@@ -372,17 +394,20 @@ fn queue_prepass_bind_group(
     previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
     instance_render_assets: Res<InstanceRenderAssets>,
     view_uniforms: Res<ViewUniforms>,
+    frame_uniform: Res<FrameUniform>,
     previous_view_uniforms: Res<PreviousViewUniforms>,
 ) {
     if let (
         Some(view_binding),
         Some(previous_view_binding),
+        Some(frame_binding),
         Some(mesh_binding),
         Some(previous_mesh_binding),
         Some(instance_indices_binding),
     ) = (
         view_uniforms.uniforms.binding(),
         previous_view_uniforms.uniforms.binding(),
+        frame_uniform.buffer.binding(),
         mesh_uniforms.binding(),
         previous_mesh_uniforms.binding(),
         instance_render_assets.instance_indices.binding(),
@@ -398,6 +423,10 @@ fn queue_prepass_bind_group(
                 BindGroupEntry {
                     binding: 1,
                     resource: previous_view_binding,
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: frame_binding,
                 },
             ],
         });
@@ -583,6 +612,11 @@ impl Node for PrepassNode {
                     }),
                     Some(RenderPassColorAttachment {
                         view: &target.normal.texture_view,
+                        resolve_target: None,
+                        ops,
+                    }),
+                    Some(RenderPassColorAttachment {
+                        view: &target.depth_gradient.texture_view,
                         resolve_target: None,
                         ops,
                     }),

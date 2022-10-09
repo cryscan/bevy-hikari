@@ -16,10 +16,17 @@ struct InstanceIndex {
     material: u32
 };
 
+struct Frame {
+    number: u32,
+    kernel: array<vec3<f32>, 25>,
+};
+
 @group(0) @binding(0)
 var<uniform> view: View;
 @group(0) @binding(1)
 var<uniform> previous_view: PreviousView;
+@group(0) @binding(2)
+var<uniform> frame: Frame;
 
 @group(1) @binding(0)
 var<uniform> mesh: Mesh;
@@ -46,7 +53,7 @@ struct VertexOutput {
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
-    let model = mesh.model;
+    var model = mesh.model;
     let vertex_position = vec4<f32>(vertex.position, 1.0);
 
     var out: VertexOutput;
@@ -62,9 +69,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 struct FragmentOutput {
     @location(0) position: vec4<f32>,
     @location(1) normal: vec4<f32>,
-    @location(2) instance_material: vec2<u32>,
-    @location(3) uv: vec2<f32>,
-    @location(4) velocity: vec2<f32>,
+    @location(2) depth_gradient: vec2<f32>,
+    @location(3) instance_material: vec2<u32>,
+    @location(4) uv: vec2<f32>,
+    @location(5) velocity: vec2<f32>,
 };
 
 fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
@@ -81,10 +89,11 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let velocity = clip_to_uv(clip_position) - clip_to_uv(previous_clip_position);
 
     var out: FragmentOutput;
-    out.position = in.world_position;
+    out.position = vec4<f32>(in.world_position.xyz, in.clip_position.z);
     out.normal = vec4<f32>(in.world_normal, 1.0);
+    out.depth_gradient = vec2<f32>(dpdx(in.clip_position.z), dpdy(in.clip_position.z));
     out.instance_material = vec2<u32>(instance_index.instance, instance_index.material);
     out.uv = in.uv;
-    out.velocity = velocity * 10000.0;
+    out.velocity = velocity;
     return out;
 }
