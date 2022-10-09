@@ -1002,7 +1002,7 @@ fn depth_weight(d0: f32, d1: f32, gradient: vec2<f32>, offset: vec2<i32>) -> f32
 // Luminance-weighting function (4.4.3)
 fn luminance_weight(l0: f32, l1: f32, variance: f32) -> f32 {
     let strictness = 4.0;
-    let eps = 0.01;
+    let eps = 0.001;
     return exp((-abs(l0 - l1)) / (strictness * variance + eps));
 }
 
@@ -1043,7 +1043,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
@@ -1074,7 +1074,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
@@ -1105,7 +1105,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             irradiance = textureLoad(denoised_texture_1, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
@@ -1136,7 +1136,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             irradiance = textureLoad(denoised_texture_2, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
