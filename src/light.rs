@@ -398,7 +398,7 @@ impl SpecializedComputePipeline for LightPipeline {
         if key.texture_count < 1 {
             shader_defs.push("NO_TEXTURE".into());
         }
-        shader_defs.push(format!("DENOISER_LEVEL_{}", key.denoiser_level).into());
+        shader_defs.push(format!("DENOISER_LEVEL_{}", key.denoiser_level));
 
         ComputePipelineDescriptor {
             label: None,
