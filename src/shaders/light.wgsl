@@ -1014,6 +1014,12 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let depth_gradient = textureLoad(depth_gradient_texture, output_coords, 0).xy;
     let normal = textureLoad(normal_texture, output_coords, 0).xyz;
 
+    let albedo = textureLoad(albedo_texture, output_coords);
+    var irradiance = textureLoad(render_texture, output_coords).rgb;
+    irradiance /= max(albedo.rgb, vec3<f32>(0.01));
+    irradiance *= max(sign(albedo.rgb - vec3<f32>(0.01)), vec3<f32>(0.0));
+    let lum = luminance(irradiance);
+
     // Pass 0, stride 8
     var irradiance_sum = vec3<f32>(0.0);
     var w_sum = 0.0;
@@ -1026,17 +1032,20 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
                 continue;
             }
 
-            let albedo = textureLoad(albedo_texture, sample_coords).rgb;
-            var irradiance = textureLoad(render_texture, sample_coords).rgb / max(albedo, vec3<f32>(0.01));
-            irradiance *= max(sign(albedo - vec3<f32>(0.01)), vec3<f32>(0.0));
+            let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
+            var irradiance = textureLoad(render_texture, sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
+            irradiance *= max(sign(sample_albedo - vec3<f32>(0.01)), vec3<f32>(0.0));
 
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
 
-            let w = w_normal * w_depth * frame.kernel[y + 1][x + 1];
+            let w = saturate(w_normal * w_depth * w_luminance) * frame.kernel[y + 1][x + 1];
 
             irradiance_sum += irradiance * w;
             w_sum += w;
@@ -1062,11 +1071,14 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             var irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
 
-            let w = w_normal * w_depth * frame.kernel[y + 1][x + 1];
+            let w = saturate(w_normal * w_depth * w_luminance) * frame.kernel[y + 1][x + 1];
 
             irradiance_sum += irradiance * w;
             w_sum += w;
@@ -1092,11 +1104,14 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             var irradiance = textureLoad(denoised_texture_1, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
 
-            let w = w_normal * w_depth * frame.kernel[y + 1][x + 1];
+            let w = saturate(w_normal * w_depth * w_luminance) * frame.kernel[y + 1][x + 1];
 
             irradiance_sum += irradiance * w;
             w_sum += w;
@@ -1122,11 +1137,14 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             var irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+            let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
+            let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
 
-            let w = w_normal * w_depth * frame.kernel[y + 1][x + 1];
+            let w = saturate(w_normal * w_depth * w_luminance) * frame.kernel[y + 1][x + 1];
 
             irradiance_sum += irradiance * w;
             w_sum += w;
@@ -1134,7 +1152,6 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     w_sum = max(w_sum, 0.0001);
-    let albedo = textureLoad(albedo_texture, output_coords);
     let color = vec4<f32>(albedo.rgb * irradiance_sum / w_sum, albedo.a);
     textureStore(denoised_texture_1, output_coords, color);
 }
