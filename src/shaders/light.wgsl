@@ -880,8 +880,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
 
-    let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / r.count;
-    textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
+    // let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / r.count;
+    // textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -983,8 +983,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
 
     // According to the ReSTIR PT papar, the variance of ReSTIR estimation is proportional to the variance of average w
-    let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / max(1.0, r.count);
-    textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
+    // let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / max(1.0, r.count);
+    // textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
 }
 
 // Normal-weighting function (4.4.1)
