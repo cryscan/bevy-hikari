@@ -28,8 +28,6 @@ var<uniform> frame: Frame;
 var noise_texture: binding_array<texture_2d<f32>>;
 @group(4) @binding(2)
 var noise_sampler: sampler;
-@group(4) @binding(3)
-var albedo_texture: texture_storage_2d<rgba8unorm, read_write>;
 
 @group(5) @binding(0)
 var denoised_texture_0: texture_storage_2d<rgba16float, read_write>;
@@ -37,6 +35,8 @@ var denoised_texture_0: texture_storage_2d<rgba16float, read_write>;
 var denoised_texture_1: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(2)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
+@group(5) @binding(3)
+var variance_texture: texture_storage_2d<rgba16float, read_write>;
 
 @group(6) @binding(0)
 var reservoir_texture: texture_storage_2d<rgba32float, read_write>;
@@ -126,8 +126,8 @@ fn halton(base: u32, index: u32) -> f32 {
 }
 
 fn frame_jitter() -> vec2<f32> {
-    let index = frame.number % 64u;
-    let delta = vec2<f32>(halton(2u, index), halton(3u, index)) - vec2<f32>(0.5);
+    let index = frame.number % 16u + 7u;
+    let delta = vec2<f32>(halton(2u, index), halton(3u, index));
     return delta;
 }
 
@@ -767,7 +767,7 @@ fn temporal_restir(
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5 + frame_jitter()) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -845,7 +845,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 @compute @workgroup_size(8, 8, 1)
 fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5 + frame_jitter()) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -938,9 +938,38 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
 }
 
+// Normal-weighting function (4.4.1)
+fn normal_weight(n0: vec3<f32>, n1: vec3<f32>) -> f32 {
+    let exponent = 64.0;
+    return pow(max(0.0, dot(n0, n1)), exponent);
+}
+
+// Depth-weighting function (4.4.2)
+fn depth_weight(d0: f32, d1: f32, gradient: vec2<f32>, offset: vec2<f32>) -> f32 {
+    let eps = 0.005;
+    return exp((-abs(d0 - d1)) / (abs(dot(gradient, offset)) + eps));
+}
+
+// Luminance-weighting function (4.4.3)
+fn luminance_weight(l0: f32, l1: f32, variance: f32) -> f32 {
+    let strictness = 4.0;
+    let eps = 0.01;
+    return exp((-abs(l0 - l1))/ (strictness * variance + eps));
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let render_size = textureDimensions(render_texture);
     let output_size = textureDimensions(denoised_texture_0);
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(output_size);
+
+    let output_uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(output_size);
+    let output_coords = vec2<i32>(invocation_id.xy);
+
+    let render_coords = (output_coords - vec2<i32>(frame_jitter()) * (output_size / render_size)) * (render_size / output_size);
+
+    let deferred_coords = vec2<i32>(output_uv * vec2<f32>(textureDimensions(position_texture)));
+    let depth_gradient = textureLoad(depth_gradient_texture, deferred_coords, 0);
+
+    var irradiance = 0.0;
+    var w_sum = 0.0;
 }

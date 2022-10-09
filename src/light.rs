@@ -114,13 +114,18 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
+                // Normal Buffer
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
-                // Normal-velocity Buffer
+                // Depth Gradient Buffer
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::all(),
@@ -131,13 +136,18 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
+                // UV Buffer
                 BindGroupLayoutEntry {
                     binding: 3,
                     visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
-                // UV Buffer
+                // Velocity Buffer
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::all(),
@@ -148,37 +158,25 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-                // Velocity Buffer
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
                 // Instance-material Buffer
                 BindGroupLayoutEntry {
-                    binding: 8,
+                    binding: 5,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Uint,
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
+                    },
+                    count: None,
+                },
+                // Albedo Texture
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadWrite,
+                        format: ALBEDO_TEXTURE_FORMAT,
+                        view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
                 },
@@ -216,23 +214,13 @@ impl FromWorld for LightPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
                 },
-                // Albedo Texture
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: ALBEDO_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
             ],
         });
 
         let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
+                // Denoised Textures
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
@@ -256,6 +244,17 @@ impl FromWorld for LightPipeline {
                 // Render Texture
                 BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadWrite,
+                        format: RENDER_TEXTURE_FORMAT,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Variance Texture
+                BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::ReadWrite,
@@ -410,12 +409,12 @@ pub struct Reservoir {
 #[derive(Component)]
 pub struct LightPassTarget {
     pub albedo_texture: GpuImage,
-
     pub direct_render_texture: GpuImage,
+    pub direct_variance_texture: GpuImage,
     pub direct_denoised_textures: [GpuImage; 2],
     pub direct_reservoirs: [Reservoir; 2],
-
     pub indirect_render_texture: GpuImage,
+    pub indirect_variance_texture: GpuImage,
     pub indirect_denoised_textures: [GpuImage; 2],
     pub indirect_reservoirs: [Reservoir; 2],
 }
@@ -471,7 +470,9 @@ fn prepare_light_pass_targets(
             let mut create_render_texture = |size| create_texture(size, RENDER_TEXTURE_FORMAT);
 
             let direct_render_texture = create_render_texture(size);
+            let direct_variance_texture = create_render_texture(size);
             let indirect_render_texture = create_render_texture(size >> INDIRECT_LOG_SCALE);
+            let indirect_variance_texture = create_render_texture(size >> INDIRECT_LOG_SCALE);
 
             let direct_denoised_textures = [(); 2].map(|_| create_render_texture(size));
             let indirect_denoised_textures = [(); 2].map(|_| create_render_texture(size));
@@ -494,10 +495,12 @@ fn prepare_light_pass_targets(
             commands.entity(entity).insert(LightPassTarget {
                 albedo_texture,
                 direct_render_texture,
-                indirect_render_texture,
+                direct_variance_texture,
                 direct_denoised_textures,
-                indirect_denoised_textures,
                 direct_reservoirs,
+                indirect_render_texture,
+                indirect_variance_texture,
+                indirect_denoised_textures,
                 indirect_reservoirs,
             });
         }
@@ -637,36 +640,32 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::Sampler(&prepass.position.sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
                         resource: BindingResource::TextureView(&prepass.normal.texture_view),
                     },
                     BindGroupEntry {
-                        binding: 3,
-                        resource: BindingResource::Sampler(&prepass.normal.sampler),
+                        binding: 2,
+                        resource: BindingResource::TextureView(
+                            &prepass.depth_gradient.texture_view,
+                        ),
                     },
                     BindGroupEntry {
-                        binding: 4,
+                        binding: 3,
                         resource: BindingResource::TextureView(&prepass.uv.texture_view),
                     },
                     BindGroupEntry {
-                        binding: 5,
-                        resource: BindingResource::Sampler(&prepass.uv.sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 6,
+                        binding: 4,
                         resource: BindingResource::TextureView(&prepass.velocity.texture_view),
                     },
                     BindGroupEntry {
-                        binding: 7,
-                        resource: BindingResource::Sampler(&prepass.velocity.sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 8,
+                        binding: 5,
                         resource: BindingResource::TextureView(
                             &prepass.instance_material.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 6,
+                        resource: BindingResource::TextureView(
+                            &light_pass.albedo_texture.texture_view,
                         ),
                     },
                 ],
@@ -687,12 +686,6 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::Sampler(&noise_sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: BindingResource::TextureView(
-                            &light_pass.albedo_texture.texture_view,
-                        ),
                     },
                 ],
             });
@@ -768,6 +761,12 @@ fn queue_light_bind_groups(
                             &light_pass.direct_render_texture.texture_view,
                         ),
                     },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: BindingResource::TextureView(
+                            &light_pass.direct_variance_texture.texture_view,
+                        ),
+                    },
                 ],
             });
             let indirect_render = render_device.create_bind_group(&BindGroupDescriptor {
@@ -790,6 +789,12 @@ fn queue_light_bind_groups(
                         binding: 2,
                         resource: BindingResource::TextureView(
                             &light_pass.indirect_render_texture.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: BindingResource::TextureView(
+                            &light_pass.indirect_variance_texture.texture_view,
                         ),
                     },
                 ],
