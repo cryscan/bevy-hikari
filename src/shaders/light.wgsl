@@ -34,8 +34,12 @@ var denoised_texture_0: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(1)
 var denoised_texture_1: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(2)
-var render_texture: texture_storage_2d<rgba16float, read_write>;
+var denoised_texture_2: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(3)
+var denoised_texture_3: texture_storage_2d<rgba16float, read_write>;
+@group(5) @binding(4)
+var render_texture: texture_storage_2d<rgba16float, read_write>;
+@group(5) @binding(5)
 var variance_texture: texture_storage_2d<rg32float, read_write>;
 
 @group(6) @binding(0)
@@ -1119,7 +1123,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     w_sum = max(w_sum, 0.0001);
-    textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
+    textureStore(denoised_texture_2, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
     storageBarrier();
 
     // Pass 3, stride 1
@@ -1134,7 +1138,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
                 continue;
             }
 
-            var irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
+            var irradiance = textureLoad(denoised_texture_2, sample_coords).rgb;
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_variance = 1.0 / clamp(textureLoad(reservoir_texture, sample_coords).z, 0.1, 10.0);
@@ -1153,5 +1157,5 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     w_sum = max(w_sum, 0.0001);
     let color = vec4<f32>(albedo.rgb * irradiance_sum / w_sum, albedo.a);
-    textureStore(denoised_texture_1, output_coords, color);
+    textureStore(denoised_texture_3, output_coords, color);
 }

@@ -242,7 +242,6 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
-                // Render Texture
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::COMPUTE,
@@ -253,9 +252,30 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
-                // Variance Texture
                 BindGroupLayoutEntry {
                     binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadWrite,
+                        format: RENDER_TEXTURE_FORMAT,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Render Texture
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadWrite,
+                        format: RENDER_TEXTURE_FORMAT,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Variance Texture
+                BindGroupLayoutEntry {
+                    binding: 5,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::ReadWrite,
@@ -409,14 +429,15 @@ pub struct Reservoir {
 
 #[derive(Component)]
 pub struct LightPassTarget {
+    pub denoise_textures: [GpuImage; 3],
     pub albedo_texture: GpuImage,
     pub direct_render_texture: GpuImage,
     pub direct_variance_texture: GpuImage,
-    pub direct_denoised_textures: [GpuImage; 2],
+    pub direct_denoised_texture: GpuImage,
     pub direct_reservoirs: [Reservoir; 2],
     pub indirect_render_texture: GpuImage,
     pub indirect_variance_texture: GpuImage,
-    pub indirect_denoised_textures: [GpuImage; 2],
+    pub indirect_denoised_texture: GpuImage,
     pub indirect_reservoirs: [Reservoir; 2],
 }
 
@@ -476,10 +497,9 @@ fn prepare_light_pass_targets(
             let indirect_variance_texture =
                 create_texture(size >> INDIRECT_LOG_SCALE, VARIANCE_TEXTURE_FORMAT);
 
-            let direct_denoised_textures =
-                [(); 2].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
-            let indirect_denoised_textures =
-                [(); 2].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
+            let denoise_textures = [(); 3].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
+            let direct_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+            let indirect_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
 
             let mut create_reservoir = |size| -> Reservoir {
                 Reservoir {
@@ -498,13 +518,14 @@ fn prepare_light_pass_targets(
 
             commands.entity(entity).insert(LightPassTarget {
                 albedo_texture,
+                denoise_textures,
                 direct_render_texture,
                 direct_variance_texture,
-                direct_denoised_textures,
+                direct_denoised_texture,
                 direct_reservoirs,
                 indirect_render_texture,
                 indirect_variance_texture,
-                indirect_denoised_textures,
+                indirect_denoised_texture,
                 indirect_reservoirs,
             });
         }
@@ -761,23 +782,35 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 0,
                         resource: BindingResource::TextureView(
-                            &light_pass.direct_denoised_textures[0].texture_view,
+                            &light_pass.denoise_textures[0].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 1,
                         resource: BindingResource::TextureView(
-                            &light_pass.direct_denoised_textures[1].texture_view,
+                            &light_pass.denoise_textures[1].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &light_pass.direct_render_texture.texture_view,
+                            &light_pass.denoise_textures[2].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 3,
+                        resource: BindingResource::TextureView(
+                            &light_pass.direct_denoised_texture.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 4,
+                        resource: BindingResource::TextureView(
+                            &light_pass.direct_render_texture.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 5,
                         resource: BindingResource::TextureView(
                             &light_pass.direct_variance_texture.texture_view,
                         ),
@@ -791,23 +824,35 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 0,
                         resource: BindingResource::TextureView(
-                            &light_pass.indirect_denoised_textures[0].texture_view,
+                            &light_pass.denoise_textures[0].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 1,
                         resource: BindingResource::TextureView(
-                            &light_pass.indirect_denoised_textures[1].texture_view,
+                            &light_pass.denoise_textures[1].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &light_pass.indirect_render_texture.texture_view,
+                            &light_pass.denoise_textures[2].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 3,
+                        resource: BindingResource::TextureView(
+                            &light_pass.indirect_denoised_texture.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 4,
+                        resource: BindingResource::TextureView(
+                            &light_pass.indirect_render_texture.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 5,
                         resource: BindingResource::TextureView(
                             &light_pass.indirect_variance_texture.texture_view,
                         ),

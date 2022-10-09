@@ -188,24 +188,22 @@ fn queue_overlay_bind_groups(
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &target.direct_denoised_textures[1].texture_view,
+                        &target.direct_denoised_texture.texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&target.direct_denoised_textures[1].sampler),
+                    resource: BindingResource::Sampler(&target.direct_denoised_texture.sampler),
                 },
                 BindGroupEntry {
                     binding: 2,
                     resource: BindingResource::TextureView(
-                        &target.indirect_denoised_textures[1].texture_view,
+                        &target.indirect_denoised_texture.texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(
-                        &target.indirect_denoised_textures[1].sampler,
-                    ),
+                    resource: BindingResource::Sampler(&target.indirect_denoised_texture.sampler),
                 },
             ],
         });
