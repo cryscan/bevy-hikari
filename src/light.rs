@@ -1,7 +1,7 @@
 use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::PrepassTarget,
-    view::{FrameCounter, FrameUniform, GpuFrame},
+    view::{FrameUniform, GpuFrame},
     NoiseTexture, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
@@ -17,11 +17,12 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
         render_resource::*,
-        renderer::{RenderContext, RenderDevice},
+        renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{GpuImage, TextureCache},
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms},
         Extract, RenderApp, RenderStage,
     },
+    utils::HashMap,
 };
 use std::num::NonZeroU32;
 
@@ -41,6 +42,7 @@ impl Plugin for LightPlugin {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                .init_resource::<ReservoirCache>()
                 .init_resource::<LightPipeline>()
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
                 .add_system_to_stage(RenderStage::Extract, extract_noise_texture)
@@ -55,6 +57,29 @@ impl Plugin for LightPlugin {
 fn extract_noise_texture(mut commands: Commands, noise_texture: Extract<Res<NoiseTexture>>) {
     commands.insert_resource(noise_texture.clone());
 }
+
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuPackedReservoir {
+    pub radiance: UVec2,
+    pub random: UVec2,
+    pub visible_position: Vec4,
+    pub sample_position: Vec4,
+    pub visible_normal: u32,
+    pub sample_normal: u32,
+    pub reservoir: UVec2,
+}
+
+#[derive(Default, Clone, ShaderType)]
+pub struct GpuReservoirBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuPackedReservoir>,
+}
+
+#[derive(Default, Deref, DerefMut)]
+pub struct ReservoirBuffer(Vec<StorageBuffer<GpuReservoirBuffer>>);
+
+#[derive(Default, Deref, DerefMut)]
+pub struct ReservoirCache(HashMap<Entity, ReservoirBuffer>);
 
 pub struct LightPipeline {
     pub view_layout: BindGroupLayout,
@@ -279,91 +304,25 @@ impl FromWorld for LightPipeline {
         let reservoir_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
-                // Reservoir
+                // Previous Reservoir
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: RESERVOIR_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
                     },
                     count: None,
                 },
-                // Reservoir Radiance
+                // Current Reservoir
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: RADIANCE_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Reservoir Random
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: RANDOM_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Reservoir Visible Position
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: POSITION_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Reservoir Visible Normal
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: NORMAL_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Reservoir Visible Id
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: ID_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Reservoir Sample Position
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: POSITION_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Reservoir Sample Normal
-                BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: NORMAL_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
                     },
                     count: None,
                 },
@@ -387,7 +346,7 @@ impl FromWorld for LightPipeline {
 pub struct LightPipelineKey {
     pub entry_point: String,
     pub texture_count: usize,
-    pub denoiser_level: usize,
+    pub filter_level: usize,
 }
 
 impl SpecializedComputePipeline for LightPipeline {
@@ -398,7 +357,7 @@ impl SpecializedComputePipeline for LightPipeline {
         if key.texture_count < 1 {
             shader_defs.push("NO_TEXTURE".into());
         }
-        shader_defs.push(format!("DENOISER_LEVEL_{}", key.denoiser_level));
+        shader_defs.push(format!("DENOISER_LEVEL_{}", key.filter_level));
 
         ComputePipelineDescriptor {
             label: None,
@@ -410,7 +369,6 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.frame_layout.clone(),
                 self.render_layout.clone(),
                 self.reservoir_layout.clone(),
-                self.reservoir_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs,
@@ -419,33 +377,22 @@ impl SpecializedComputePipeline for LightPipeline {
     }
 }
 
-pub struct Reservoir {
-    pub reservoir: GpuImage,
-    pub radiance: GpuImage,
-    pub random: GpuImage,
-    pub visible_position: GpuImage,
-    pub visible_normal: GpuImage,
-    pub visible_id: GpuImage,
-    pub sample_position: GpuImage,
-    pub sample_normal: GpuImage,
-}
-
 #[derive(Component)]
 pub struct LightPassTarget {
     pub denoise_textures: [GpuImage; 3],
     pub albedo_texture: GpuImage,
     pub direct_render_texture: GpuImage,
     pub direct_denoised_texture: GpuImage,
-    pub direct_reservoirs: [Reservoir; 2],
     pub indirect_render_texture: GpuImage,
     pub indirect_denoised_texture: GpuImage,
-    pub indirect_reservoirs: [Reservoir; 2],
 }
 
 fn prepare_light_pass_targets(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
     mut texture_cache: ResMut<TextureCache>,
+    mut reservoir_cache: ResMut<ReservoirCache>,
     cameras: Query<(Entity, &ExtractedCamera)>,
 ) {
     for (entity, camera) in &cameras {
@@ -490,38 +437,67 @@ fn prepare_light_pass_targets(
 
             let albedo_texture = create_texture(size, ALBEDO_TEXTURE_FORMAT);
             let direct_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
-            let indirect_render_texture =
-                create_texture(size >> INDIRECT_LOG_SCALE, RENDER_TEXTURE_FORMAT);
+            let indirect_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
 
             let denoise_textures = [(); 3].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
             let direct_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
             let indirect_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
 
-            let mut create_reservoir = |size| -> Reservoir {
-                Reservoir {
-                    reservoir: create_texture(size, RESERVOIR_TEXTURE_FORMAT),
-                    radiance: create_texture(size, RADIANCE_TEXTURE_FORMAT),
-                    random: create_texture(size, RANDOM_TEXTURE_FORMAT),
-                    visible_position: create_texture(size, POSITION_TEXTURE_FORMAT),
-                    visible_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
-                    visible_id: create_texture(size, ID_TEXTURE_FORMAT),
-                    sample_position: create_texture(size, POSITION_TEXTURE_FORMAT),
-                    sample_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
-                }
-            };
+            // let mut create_reservoir = |size| -> Reservoir {
+            //     Reservoir {
+            //         reservoir: create_texture(size, RESERVOIR_TEXTURE_FORMAT),
+            //         radiance: create_texture(size, RADIANCE_TEXTURE_FORMAT),
+            //         random: create_texture(size, RANDOM_TEXTURE_FORMAT),
+            //         visible_position: create_texture(size, POSITION_TEXTURE_FORMAT),
+            //         visible_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
+            //         visible_id: create_texture(size, ID_TEXTURE_FORMAT),
+            //         sample_position: create_texture(size, POSITION_TEXTURE_FORMAT),
+            //         sample_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
+            //     }
+            // };
 
-            let direct_reservoirs = [(); 2].map(|_| create_reservoir(size));
-            let indirect_reservoirs = [(); 2].map(|_| create_reservoir(size >> INDIRECT_LOG_SCALE));
+            // let direct_reservoirs = [(); 2].map(|_| create_reservoir(size));
+            // let indirect_reservoirs = [(); 2].map(|_| create_reservoir(size >> INDIRECT_LOG_SCALE));
+
+            if match reservoir_cache.get(&entity) {
+                Some(reservoirs) => {
+                    let len = (size.x * size.y) as usize;
+                    reservoirs
+                        .iter()
+                        .any(|buffer| buffer.get().data.len() != len)
+                }
+                None => true,
+            } {
+                // Reservoirs of this entity should be updated.
+                let len = (size.x * size.y) as usize;
+                let buffer = GpuReservoirBuffer {
+                    data: vec![GpuPackedReservoir::default(); len],
+                };
+                let mut reservoirs = ReservoirBuffer(vec![
+                    StorageBuffer::from(buffer.clone()),
+                    StorageBuffer::from(buffer.clone()),
+                    StorageBuffer::from(buffer.clone()),
+                    StorageBuffer::from(buffer),
+                ]);
+                for buffer in reservoirs.iter_mut() {
+                    buffer.write_buffer(&render_device, &render_queue);
+                }
+                reservoir_cache.insert(entity, reservoirs);
+            }
+
+            // Swap the double buffers.
+            if let Some(reservoirs) = reservoir_cache.get_mut(&entity) {
+                reservoirs.swap(0, 1);
+                reservoirs.swap(2, 3);
+            }
 
             commands.entity(entity).insert(LightPassTarget {
                 albedo_texture,
                 denoise_textures,
                 direct_render_texture,
                 direct_denoised_texture,
-                direct_reservoirs,
                 indirect_render_texture,
                 indirect_denoised_texture,
-                indirect_reservoirs,
             });
         }
     }
@@ -549,7 +525,7 @@ fn queue_light_pipelines(
         LightPipelineKey {
             entry_point: "direct_lit".into(),
             texture_count: layout.texture_count,
-            denoiser_level: 0,
+            filter_level: 0,
         },
     );
 
@@ -559,7 +535,7 @@ fn queue_light_pipelines(
         LightPipelineKey {
             entry_point: "indirect_lit_ambient".into(),
             texture_count: layout.texture_count,
-            denoiser_level: 0,
+            filter_level: 0,
         },
     );
 
@@ -570,7 +546,7 @@ fn queue_light_pipelines(
             LightPipelineKey {
                 entry_point: "denoise_atrous".into(),
                 texture_count: layout.texture_count,
-                denoiser_level: level,
+                filter_level: level,
             },
         )
     });
@@ -625,10 +601,10 @@ pub struct LightBindGroup {
     pub frame: BindGroup,
 
     pub direct_render: BindGroup,
-    pub direct_reservoirs: [BindGroup; 2],
+    pub direct_reservoir: BindGroup,
 
     pub indirect_render: BindGroup,
-    pub indirect_reservoirs: [BindGroup; 2],
+    pub indirect_reservoir: BindGroup,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -636,11 +612,11 @@ fn queue_light_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
-    counter: Res<FrameCounter>,
     frame_uniform: Res<FrameUniform>,
     noise_texture: Res<NoiseTexture>,
     images: Res<RenderAssets<Image>>,
-    query: Query<(Entity, &PrepassTarget, &LightPassTarget)>,
+    reservoir_cache: Res<ReservoirCache>,
+    query: Query<(Entity, &PrepassTarget, &LightPassTarget), With<ExtractedCamera>>,
 ) {
     let mut noise_texture_views = vec![];
     for handle in noise_texture.iter() {
@@ -665,7 +641,20 @@ fn queue_light_bind_groups(
     });
 
     for (entity, prepass, light_pass) in &query {
-        if let Some(frame_binding) = frame_uniform.buffer.binding() {
+        let reservoirs = reservoir_cache.get(&entity).unwrap();
+        if let (
+            Some(frame_binding),
+            Some(reservoir_binding_0),
+            Some(reservoir_binding_1),
+            Some(reservoir_binding_2),
+            Some(reservoir_binding_3),
+        ) = (
+            frame_uniform.buffer.binding(),
+            reservoirs[0].binding(),
+            reservoirs[1].binding(),
+            reservoirs[2].binding(),
+            reservoirs[3].binding(),
+        ) {
             let deferred = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &pipeline.deferred_layout,
@@ -725,61 +714,6 @@ fn queue_light_bind_groups(
                     },
                 ],
             });
-
-            let create_reservoir_bind_group = |reservoir: &Reservoir| {
-                render_device.create_bind_group(&BindGroupDescriptor {
-                    label: None,
-                    layout: &pipeline.reservoir_layout,
-                    entries: &[
-                        BindGroupEntry {
-                            binding: 0,
-                            resource: BindingResource::TextureView(
-                                &reservoir.reservoir.texture_view,
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 1,
-                            resource: BindingResource::TextureView(
-                                &reservoir.radiance.texture_view,
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 2,
-                            resource: BindingResource::TextureView(&reservoir.random.texture_view),
-                        },
-                        BindGroupEntry {
-                            binding: 3,
-                            resource: BindingResource::TextureView(
-                                &reservoir.visible_position.texture_view,
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 4,
-                            resource: BindingResource::TextureView(
-                                &reservoir.visible_normal.texture_view,
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 5,
-                            resource: BindingResource::TextureView(
-                                &reservoir.visible_id.texture_view,
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 6,
-                            resource: BindingResource::TextureView(
-                                &reservoir.sample_position.texture_view,
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 7,
-                            resource: BindingResource::TextureView(
-                                &reservoir.sample_normal.texture_view,
-                            ),
-                        },
-                    ],
-                })
-            };
 
             let direct_render = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
@@ -854,23 +788,42 @@ fn queue_light_bind_groups(
                 ],
             });
 
-            let id = counter.0 % 2;
-            let direct_reservoirs = [
-                create_reservoir_bind_group(&light_pass.direct_reservoirs[id]),
-                create_reservoir_bind_group(&light_pass.direct_reservoirs[1 - id]),
-            ];
-            let indirect_reservoirs = [
-                create_reservoir_bind_group(&light_pass.indirect_reservoirs[id]),
-                create_reservoir_bind_group(&light_pass.indirect_reservoirs[1 - id]),
-            ];
+            let direct_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &pipeline.reservoir_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: reservoir_binding_0,
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: reservoir_binding_1,
+                    },
+                ],
+            });
+            let indirect_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &pipeline.reservoir_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: reservoir_binding_2,
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: reservoir_binding_3,
+                    },
+                ],
+            });
 
             commands.entity(entity).insert(LightBindGroup {
                 deferred,
                 frame,
                 direct_render,
-                direct_reservoirs,
+                direct_reservoir,
                 indirect_render,
-                indirect_reservoirs,
+                indirect_reservoir,
             });
         }
     }
@@ -956,8 +909,7 @@ impl Node for LightPassNode {
         pass.set_bind_group(4, &light_bind_group.frame, &[]);
 
         pass.set_bind_group(5, &light_bind_group.direct_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.direct_reservoirs[0], &[]);
-        pass.set_bind_group(7, &light_bind_group.direct_reservoirs[1], &[]);
+        pass.set_bind_group(6, &light_bind_group.direct_reservoir, &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
             pass.set_pipeline(pipeline);
@@ -978,8 +930,7 @@ impl Node for LightPassNode {
         }
 
         pass.set_bind_group(5, &light_bind_group.indirect_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.indirect_reservoirs[0], &[]);
-        pass.set_bind_group(7, &light_bind_group.indirect_reservoirs[1], &[]);
+        pass.set_bind_group(6, &light_bind_group.indirect_reservoir, &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.indirect_lit_ambient)
         {
