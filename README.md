@@ -12,7 +12,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 | `bevy` | `bevy-hikari` |
 | ------ | ------------- |
 | 0.6    | 0.1           |
-| 0.8    | In Progress   |
+| 0.8    | 0.2           |
 
 ## Progress
 - [x] Extraction and preparation of mesh assets and instances
@@ -89,6 +89,9 @@ fn setup(
 ```
 
 ## Effects
+You can check the video [here](https://youtu.be/TabdNrI0OuM).
+
+### Screenshots
 <img src="assets/screenshots/rt-gi.png" />
 <img src="assets/screenshots/rt-gi-2.png" />
 <img src="assets/screenshots/city.png">
