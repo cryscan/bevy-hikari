@@ -139,7 +139,7 @@ fn instance_event_system<M: IntoStandardMaterial>(
         Query<
             (Entity, &Handle<Mesh>, &Handle<M>),
             Or<(
-                Changed<Transform>,
+                Changed<GlobalTransform>,
                 Changed<Handle<Mesh>>,
                 Changed<Handle<M>>,
             )>,
