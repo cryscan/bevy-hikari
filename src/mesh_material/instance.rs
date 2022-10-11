@@ -125,8 +125,8 @@ pub struct GpuInstances(BTreeMap<Entity, GpuInstance>);
 pub struct GpuLightSources(BTreeMap<Entity, GpuLightSource>);
 
 pub enum InstanceEvent<M: IntoStandardMaterial> {
-    Created(Entity, Handle<Mesh>, Handle<M>),
-    Modified(Entity, Handle<Mesh>, Handle<M>),
+    Created(Entity, Handle<Mesh>, Handle<M>, Option<Visibility>),
+    Modified(Entity, Handle<Mesh>, Handle<M>, Option<Visibility>),
     Removed(Entity),
 }
 
@@ -135,13 +135,17 @@ fn instance_event_system<M: IntoStandardMaterial>(
     mut events: EventWriter<InstanceEvent<M>>,
     removed: RemovedComponents<Handle<Mesh>>,
     mut set: ParamSet<(
-        Query<(Entity, &Handle<Mesh>, &Handle<M>), Or<(Added<Handle<Mesh>>, Added<Handle<M>>)>>,
         Query<
-            (Entity, &Handle<Mesh>, &Handle<M>),
+            (Entity, &Handle<Mesh>, &Handle<M>, Option<&Visibility>),
+            Or<(Added<Handle<Mesh>>, Added<Handle<M>>)>,
+        >,
+        Query<
+            (Entity, &Handle<Mesh>, &Handle<M>, Option<&Visibility>),
             Or<(
                 Changed<GlobalTransform>,
                 Changed<Handle<Mesh>>,
                 Changed<Handle<M>>,
+                Changed<Visibility>,
             )>,
         >,
     )>,
@@ -149,18 +153,20 @@ fn instance_event_system<M: IntoStandardMaterial>(
     for entity in removed.iter() {
         events.send(InstanceEvent::Removed(entity));
     }
-    for (entity, mesh, material) in &set.p0() {
+    for (entity, mesh, material, visibility) in &set.p0() {
         events.send(InstanceEvent::Created(
             entity,
             mesh.clone_weak(),
             material.clone_weak(),
+            visibility.cloned(),
         ));
     }
-    for (entity, mesh, material) in &set.p1() {
+    for (entity, mesh, material, visibility) in &set.p1() {
         events.send(InstanceEvent::Modified(
             entity,
             mesh.clone_weak(),
             material.clone_weak(),
+            visibility.cloned(),
         ));
     }
 }
@@ -181,16 +187,22 @@ fn extract_instances<M: IntoStandardMaterial>(
 
     for event in events.iter() {
         match event {
-            InstanceEvent::Created(entity, mesh, material)
-            | InstanceEvent::Modified(entity, mesh, material) => {
+            InstanceEvent::Created(entity, mesh, material, visibility)
+            | InstanceEvent::Modified(entity, mesh, material, visibility) => {
+                let is_visible = visibility.as_ref().map(|v| v.is_visible).unwrap_or(true);
+
                 if let Ok((aabb, transform)) = query.get(*entity) {
-                    extracted.push((
-                        *entity,
-                        aabb.clone(),
-                        *transform,
-                        mesh.clone_weak(),
-                        material.clone_weak(),
-                    ));
+                    if is_visible {
+                        extracted.push((
+                            *entity,
+                            aabb.clone(),
+                            *transform,
+                            mesh.clone_weak(),
+                            material.clone_weak(),
+                        ));
+                    } else {
+                        removed.push(*entity);
+                    }
                 }
             }
             InstanceEvent::Removed(entity) => removed.push(*entity),
