@@ -1063,11 +1063,14 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             bounce_info = hit_info(bounce_ray, hit);
 
             surface = retreive_surface(info.material_index, info.uv);
+            surface.roughness = 1.0;
             let radiance = input_radiance(bounce_ray, bounce_info, bounce_candidate.directional_index, bounce_candidate.emissive_index);
             s.radiance += vec4<f32>(shading(-ray.direction, info.normal, bounce_ray.direction, surface, radiance), 0.0);
         }
     }
 
+    // Radiance clamping
+    // s.radiance = s.radiance / max(luminance(s.radiance.xyz), MAX_LUMINANCE) * MAX_LUMINANCE;
     surface = retreive_surface(instance_material.y, object_uv);
 
     // ReSTIR: Temporal
