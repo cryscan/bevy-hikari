@@ -628,8 +628,8 @@ fn unpack_reservoir(packed: PackedReservoir) -> Reservoir {
     r.s.visible_position = packed.visible_position;
     r.s.sample_position = packed.sample_position;
 
-    r.s.visible_normal = unpack4x8snorm(packed.visible_normal).xyz;
-    r.s.sample_normal = unpack4x8snorm(packed.sample_normal).xyz;
+    r.s.visible_normal = normalize(unpack4x8snorm(packed.visible_normal).xyz);
+    r.s.sample_normal = normalize(unpack4x8snorm(packed.sample_normal).xyz);
 
     r.s.visible_instance = ((packed.visible_normal >> 24u) & 0xFFu) << 8u;
     r.s.visible_instance |= (packed.sample_normal >> 24u) & 0xFFu;
@@ -979,7 +979,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     }
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
-    let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
+    let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
     let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
     let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy;
@@ -1091,7 +1091,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let depth = textureLoad(position_texture, output_coords, 0).w;
     let depth_gradient = textureLoad(depth_gradient_texture, output_coords, 0).xy;
-    let normal = textureLoad(normal_texture, output_coords, 0).xyz;
+    let normal = normalize(textureLoad(normal_texture, output_coords, 0).xyz);
     let instance = textureLoad(instance_material_texture, output_coords, 0).x;
 
     let albedo = textureLoad(albedo_texture, output_coords);
