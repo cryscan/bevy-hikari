@@ -35,7 +35,7 @@ pub const NORMAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const ID_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
 pub const RANDOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
-pub const INDIRECT_LOG_SCALE: u32 = 0;
+pub const INDIRECT_LOG_SCALE: u32 = 1;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -437,7 +437,8 @@ fn prepare_light_pass_targets(
 
             let albedo_texture = create_texture(size, ALBEDO_TEXTURE_FORMAT);
             let direct_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
-            let indirect_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+            let indirect_render_texture =
+                create_texture(size >> INDIRECT_LOG_SCALE, RENDER_TEXTURE_FORMAT);
 
             let denoise_textures = [(); 3].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
             let direct_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);

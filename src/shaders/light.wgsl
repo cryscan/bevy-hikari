@@ -68,7 +68,8 @@ let BVH_LEAF_FLAG: u32 = 0x80000000u;
 
 let RAY_BIAS: f32 = 0.02;
 let DISTANCE_MAX: f32 = 65535.0;
-let VALIDATION_INTERVAL: u32 = 16u;
+let VALIDATION_INTERVAL: u32 = 4u;
+let INDIRECT_SCALE: u32 = 2u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
 
@@ -849,7 +850,7 @@ fn temporal_restir(
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
-    if (uv_miss || depth_miss || instance_miss || normal_miss) {
+    if (depth_miss || instance_miss || normal_miss) {
         set_reservoir(r, s, out.w_new);
     } else {
         update_reservoir(r, s, out.w_new);
@@ -977,7 +978,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 @compute @workgroup_size(8, 8, 1)
 fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(size);
+    let reservoir_size = size * i32(INDIRECT_SCALE);
+
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -990,7 +993,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     if (depth < F32_EPSILON) {
         var r: Reservoir;
         set_reservoir(&r, s, 0.0);
-        store_reservoir(coords.x + size.x * coords.y, r);
+        store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
         textureStore(render_texture, coords, vec4<f32>(0.0));
 
@@ -1065,9 +1068,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     // ReSTIR: Temporal
     let previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
-    var r = load_previous_reservoir(previous_coords.x + size.x * previous_coords.y);
+    var r = load_previous_reservoir(previous_coords.x + reservoir_size.x * previous_coords.y);
     let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
-    store_reservoir(coords.x + size.x * coords.y, r);
+    store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
     let output_color = restir.output;
     textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
@@ -1107,6 +1110,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let output_uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(output_size);
     let output_coords = vec2<i32>(invocation_id.xy);
+    let render_coords = vec2<i32>(output_uv * vec2<f32>(render_size));
 
     let depth = textureLoad(position_texture, output_coords, 0).w;
     let depth_gradient = textureLoad(depth_gradient_texture, output_coords, 0).xy;
@@ -1114,11 +1118,11 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let instance = textureLoad(instance_material_texture, output_coords, 0).x;
 
     let albedo = textureLoad(albedo_texture, output_coords);
-    var irradiance = textureLoad(render_texture, output_coords).rgb / max(albedo.rgb, vec3<f32>(0.01));
+    var irradiance = textureLoad(render_texture, render_coords).rgb / max(albedo.rgb, vec3<f32>(0.01));
     irradiance *= max(sign(albedo.rgb - vec3<f32>(0.01)), vec3<f32>(0.0));
     let lum = luminance(irradiance);
 
-    let r = load_reservoir(output_coords.x + output_size.x * output_coords.y);
+    let r = load_reservoir(render_coords.x + output_size.x * render_coords.y);
 
     var irradiance_sum = vec3<f32>(0.0);
     var w_sum = 0.0;
@@ -1129,12 +1133,13 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         for (var x = -1; x <= 1; x += 1) {
             let offset = vec2<i32>(x, y);
             let sample_coords = output_coords + offset * 8;
+            let render_sample_coords = render_coords + offset * 8 / i32(INDIRECT_SCALE);
             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
                 continue;
             }
 
             let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
-            irradiance = textureLoad(render_texture, sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
+            irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
             irradiance *= max(sign(sample_albedo - vec3<f32>(0.01)), vec3<f32>(0.0));
 
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
