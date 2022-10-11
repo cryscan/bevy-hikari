@@ -79,6 +79,7 @@ let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let SOLAR_ANGLE: f32 = 0.130899694;
 
+let OVERSAMPLE_THRESHOLD: f32 = 16.0;
 let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
@@ -1029,7 +1030,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     ray.origin = position.xyz + normal * RAY_BIAS;
     ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
     ray.inv_direction = 1.0 / ray.direction;
-    let p1 = dot(ray.direction, normal);
+    var p1 = dot(ray.direction, normal);
 
     hit = traverse_top(ray, F32_MAX, 0.0);
     info = hit_info(ray, hit);
@@ -1077,7 +1078,58 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
     var r = load_previous_reservoir(previous_uv, render_size, reservoir_size);
-    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
+    var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
+
+    if (r.count < OVERSAMPLE_THRESHOLD) {
+        // Oversample
+        for (var i = 0u; i < 3u; i += 1u) {
+            s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
+
+            ray.origin = position.xyz + normal * RAY_BIAS;
+            ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
+            ray.inv_direction = 1.0 / ray.direction;
+            p1 = dot(ray.direction, normal);
+
+            hit = traverse_top(ray, F32_MAX, 0.0);
+            info = hit_info(ray, hit);
+            s.sample_position = info.position;
+            s.sample_normal = info.normal;
+
+            s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
+
+            p2 = 0.5;
+            bounce_radiance = vec3<f32>(0.0);
+            if (hit.instance_index != U32_MAX) {
+                let bounce_candidate = select_light_candidate(
+                    s.random,
+                    info.position.xyz,
+                    info.normal,
+                    info.instance_index
+                );
+
+                var bounce_ray: Ray;
+                var bounce_info: HitInfo;
+
+                bounce_ray.origin = info.position.xyz + info.normal * RAY_BIAS;
+                bounce_ray.direction = bounce_candidate.direction;
+                bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
+                p2 = bounce_candidate.p;
+
+                if (dot(bounce_candidate.direction, info.normal) > 0.0) {
+                    hit = traverse_top(bounce_ray, bounce_candidate.max_distance, bounce_candidate.min_distance);
+                    bounce_info = hit_info(bounce_ray, hit);
+
+                    var bounce_surface = retreive_surface(info.material_index, info.uv);
+                    bounce_surface.roughness = 1.0;
+                    let radiance = input_radiance(bounce_ray, bounce_info, bounce_candidate.directional_index, bounce_candidate.emissive_index);
+                    s.radiance += vec4<f32>(shading(-ray.direction, info.normal, bounce_ray.direction, bounce_surface, radiance), 0.0);
+                }
+            }
+
+            restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
+        }
+    }
+
     store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
     let output_color = restir.output;
