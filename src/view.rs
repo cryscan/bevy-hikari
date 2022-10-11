@@ -1,4 +1,4 @@
-use crate::transform::PreviousGlobalTransform;
+use crate::transform::GlobalTransformQueue;
 use bevy::{
     prelude::*,
     render::{
@@ -44,13 +44,13 @@ fn prepare_view_uniforms(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut view_uniforms: ResMut<PreviousViewUniforms>,
-    views: Query<(Entity, &ExtractedView, &PreviousGlobalTransform)>,
+    views: Query<(Entity, &ExtractedView, &GlobalTransformQueue)>,
 ) {
     view_uniforms.uniforms.clear();
-    for (entity, camera, transform) in &views {
+    for (entity, camera, queue) in &views {
         let projection = camera.projection;
         let inverse_projection = projection.inverse();
-        let view = transform.compute_matrix();
+        let view = queue[1];
         let inverse_view = view.inverse();
         let view_uniforms = PreviousViewUniformOffset {
             offset: view_uniforms.uniforms.push(PreviousViewUniform {

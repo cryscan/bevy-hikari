@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
-    transform::PreviousGlobalTransform,
+    transform::GlobalTransformQueue,
 };
 use bevy::{
     math::{Vec3A, Vec4Swizzles},
@@ -106,10 +106,10 @@ pub struct PreviousMeshUniform {
 #[allow(clippy::type_complexity)]
 fn extract_mesh_transforms(
     mut commands: Commands,
-    query: Extract<Query<(Entity, &PreviousGlobalTransform), With<Handle<Mesh>>>>,
+    query: Extract<Query<(Entity, &GlobalTransformQueue), With<Handle<Mesh>>>>,
 ) {
-    for (entity, transform) in query.iter() {
-        let transform = transform.compute_matrix();
+    for (entity, queue) in query.iter() {
+        let transform = queue[1];
         let uniform = PreviousMeshUniform {
             transform,
             inverse_transpose_model: transform.inverse().transpose(),
