@@ -639,10 +639,15 @@ fn unpack_reservoir(packed: PackedReservoir) -> Reservoir {
     return r;
 }
 
-fn load_previous_reservoir(index: i32) -> Reservoir {
+fn load_previous_reservoir(uv: vec2<f32>, render_size: vec2<i32>, reservoir_size: vec2<i32>) -> Reservoir {
     var r: Reservoir;
-    let packed = previous_reservoir_buffer.data[index];
-    return unpack_reservoir(packed);
+    if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
+        let coords = vec2<i32>(uv * vec2<f32>(render_size));
+        let index = coords.x + reservoir_size.x * coords.y;
+        let packed = previous_reservoir_buffer.data[index];
+        r = unpack_reservoir(packed);
+    }
+    return r;
 }
 
 fn load_reservoir(index: i32) -> Reservoir {
@@ -944,7 +949,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // ReSTIR: Temporal
     var previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
-    var r = load_previous_reservoir(previous_coords.x + size.x * previous_coords.y);
+    var r = load_previous_reservoir(previous_uv, size, size);
     let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, MAX_TEMPORAL_REUSE_COUNT);
 
     // Sample validation
@@ -977,10 +982,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
 @compute @workgroup_size(8, 8, 1)
 fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let size = textureDimensions(render_texture);
-    let reservoir_size = size * i32(INDIRECT_SCALE);
+    let render_size = textureDimensions(render_texture);
+    let reservoir_size = render_size * i32(INDIRECT_SCALE);
 
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -1067,8 +1072,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity;
-    let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
-    var r = load_previous_reservoir(previous_coords.x + reservoir_size.x * previous_coords.y);
+    let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
+    var r = load_previous_reservoir(previous_uv, render_size, reservoir_size);
     let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
     store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
