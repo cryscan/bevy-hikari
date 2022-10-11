@@ -194,6 +194,7 @@ struct Reservoir {
 struct RestirOutput {
     radiance: vec3<f32>,
     output: vec3<f32>,
+    w_new: f32,
 };
 
 fn instance_position_world_to_local(instance: Instance, world_position: vec3<f32>) -> vec3<f32> {
@@ -838,7 +839,7 @@ fn temporal_restir(
         surface,
         s.radiance
     );
-    let w_new = luminance(out.radiance) / pdf;
+    out.w_new = luminance(out.radiance) / pdf;
 
     let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
 
@@ -849,9 +850,9 @@ fn temporal_restir(
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
     if (uv_miss || depth_miss || instance_miss || normal_miss) {
-        set_reservoir(r, s, w_new);
+        set_reservoir(r, s, out.w_new);
     } else {
-        update_reservoir(r, s, w_new);
+        update_reservoir(r, s, out.w_new);
     }
 
     // Clamp...
@@ -943,7 +944,25 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_coords.x + size.x * previous_coords.y);
-    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, 4.0 * MAX_TEMPORAL_REUSE_COUNT);
+    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, MAX_TEMPORAL_REUSE_COUNT);
+
+    // Sample validation
+    if (frame.number % VALIDATION_INTERVAL == 0u) {
+        let sample_distance = distance(r.s.visible_position.xyz, r.s.sample_position.xyz);
+        ray.origin = r.s.visible_position.xyz + r.s.visible_normal * RAY_BIAS;
+        ray.direction = normalize(r.s.sample_position.xyz - ray.origin);
+        ray.inv_direction = 1.0 / ray.direction;
+
+        hit = traverse_top(ray, sample_distance + 0.1, sample_distance - 0.1);
+        info = hit_info(ray, hit);
+
+        let validation_radiance = input_radiance(ray, info, 0u, SAMPLE_ALL_EMISSIVE);
+        let luminance_ratio = luminance(validation_radiance.rgb) / luminance(r.s.radiance.rgb);
+        if (luminance_ratio > 1.25 || luminance_ratio < 0.8) {
+            set_reservoir(&r, s, restir.w_new);
+        }
+    }
+
     store_reservoir(coords.x + size.x * coords.y, r);
 
     var output_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
@@ -1158,7 +1177,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
-            let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);            
+            let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
             let w_instance = instance_weight(instance, sample_instance);
             let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
 
