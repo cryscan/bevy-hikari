@@ -78,7 +78,7 @@ let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
-let OVERSAMPLE_THRESHOLD: f32 = 16.0;
+let OVERSAMPLE_THRESHOLD: f32 = 4.0;
 let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
@@ -1032,7 +1032,7 @@ fn indirect_lit_ambient(
     var pdf = 1.0 - second_bounce_chance;
 
     let workgroup_index = workgroup_id.x + num_workgroups.x * workgroup_id.y;
-    if (random_float(hash(workgroup_index) ^ hash(frame.number)) < second_bounce_chance) {
+    if (random_float(hash(workgroup_index) ^ hash(frame.number)) <= second_bounce_chance) {
         var ray: Ray;
         var hit: Hit;
         var info: HitInfo;
