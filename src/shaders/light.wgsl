@@ -18,8 +18,11 @@ var samplers: binding_array<sampler>;
 #endif
 
 struct Frame {
-    number: u32,
     kernel: mat3x3<f32>,
+    number: u32,
+    validation_interval: u32,
+    second_bounce_chance: f32,
+    solar_angle: f32,
 };
 
 @group(4) @binding(0)
@@ -68,16 +71,12 @@ let BVH_LEAF_FLAG: u32 = 0x80000000u;
 
 let RAY_BIAS: f32 = 0.02;
 let DISTANCE_MAX: f32 = 65535.0;
-let VALIDATION_INTERVAL: u32 = 4u;
-let INDIRECT_SCALE: u32 = 2u;
 let NOISE_TEXTURE_COUNT: u32 = 64u;
 let GOLDEN_RATIO: f32 = 1.618033989;
 
 let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
-
-let SOLAR_ANGLE: f32 = 0.130899694;
 
 let OVERSAMPLE_THRESHOLD: f32 = 16.0;
 let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
@@ -390,7 +389,7 @@ fn select_light_candidate(
     candidate.emissive_index = DONT_SAMPLE_EMISSIVE;
 
     var directional = lights.directional_lights[0];
-    let cone = vec4<f32>(directional.direction_to_light, cos(SOLAR_ANGLE));
+    let cone = vec4<f32>(directional.direction_to_light, cos(frame.solar_angle));
     let direction = normal_basis(cone.xyz) * sample_uniform_cone(rand.zw, cone.w);
 
     candidate.cone = cone;
@@ -771,7 +770,7 @@ fn input_radiance(
         if (directional_index < lights.n_directional_lights) {
             let directional = lights.directional_lights[directional_index];
             let cos_angle = dot(ray.direction, directional.direction_to_light);
-            let cos_solar_angle = cos(SOLAR_ANGLE);
+            let cos_solar_angle = cos(frame.solar_angle);
 
             ambient = saturate(sign(cos_solar_angle - cos_angle));
             radiance = directional.color.rgb / (TAU * (1.0 - cos_solar_angle));
@@ -954,7 +953,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, MAX_TEMPORAL_REUSE_COUNT);
 
     // Sample validation
-    if (frame.number % VALIDATION_INTERVAL == 0u) {
+    if (frame.number % frame.validation_interval == 0u) {
         let sample_distance = distance(r.s.visible_position.xyz, r.s.sample_position.xyz);
         ray.origin = r.s.visible_position.xyz + r.s.visible_normal * RAY_BIAS;
         ray.direction = normalize(r.s.sample_position.xyz - ray.origin);
@@ -982,11 +981,15 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+fn indirect_lit_ambient(
+    @builtin(global_invocation_id) invocation_id: vec3<u32>, 
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
     let render_size = textureDimensions(render_texture);
-    let reservoir_size = render_size * i32(INDIRECT_SCALE);
+    let reservoir_size = render_size;
 
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(render_size);
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -1043,7 +1046,15 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     // Second bounce: from sample position
     var p2 = 0.5;
     var bounce_radiance = vec3<f32>(0.0);
-    if (hit.instance_index != U32_MAX) {
+
+    var second_bounce_chance = frame.second_bounce_chance;
+    if (r.count < OVERSAMPLE_THRESHOLD) {
+        second_bounce_chance = 1.0;
+    }
+
+    let workgroup_index = workgroup_id.x + num_workgroups.x * workgroup_id.y;
+    let enable_second_bounce = (random_float(hash(workgroup_index) ^ hash(frame.number)) < second_bounce_chance);
+    if (enable_second_bounce && hit.instance_index != U32_MAX) {
         let bounce_candidate = select_light_candidate(
             s.random,
             info.position.xyz,
@@ -1057,7 +1068,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         bounce_ray.origin = info.position.xyz + info.normal * RAY_BIAS;
         bounce_ray.direction = bounce_candidate.direction;
         bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-        p2 = bounce_candidate.p;
+        p2 = bounce_candidate.p * second_bounce_chance;
 
         if (dot(bounce_candidate.direction, info.normal) > 0.0) {
             hit = traverse_top(bounce_ray, bounce_candidate.max_distance, bounce_candidate.min_distance);
@@ -1079,57 +1090,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
     var r = load_previous_reservoir(previous_uv, render_size, reservoir_size);
     var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
-
-    if (r.count < OVERSAMPLE_THRESHOLD) {
-        // Oversample
-        for (var i = 0u; i < 3u; i += 1u) {
-            s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
-
-            ray.origin = position.xyz + normal * RAY_BIAS;
-            ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
-            ray.inv_direction = 1.0 / ray.direction;
-            p1 = dot(ray.direction, normal);
-
-            hit = traverse_top(ray, F32_MAX, 0.0);
-            info = hit_info(ray, hit);
-            s.sample_position = info.position;
-            s.sample_normal = info.normal;
-
-            s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
-
-            p2 = 0.5;
-            bounce_radiance = vec3<f32>(0.0);
-            if (hit.instance_index != U32_MAX) {
-                let bounce_candidate = select_light_candidate(
-                    s.random,
-                    info.position.xyz,
-                    info.normal,
-                    info.instance_index
-                );
-
-                var bounce_ray: Ray;
-                var bounce_info: HitInfo;
-
-                bounce_ray.origin = info.position.xyz + info.normal * RAY_BIAS;
-                bounce_ray.direction = bounce_candidate.direction;
-                bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-                p2 = bounce_candidate.p;
-
-                if (dot(bounce_candidate.direction, info.normal) > 0.0) {
-                    hit = traverse_top(bounce_ray, bounce_candidate.max_distance, bounce_candidate.min_distance);
-                    bounce_info = hit_info(bounce_ray, hit);
-
-                    var bounce_surface = retreive_surface(info.material_index, info.uv);
-                    bounce_surface.roughness = 1.0;
-                    let radiance = input_radiance(bounce_ray, bounce_info, bounce_candidate.directional_index, bounce_candidate.emissive_index);
-                    s.radiance += vec4<f32>(shading(-ray.direction, info.normal, bounce_ray.direction, bounce_surface, radiance), 0.0);
-                }
-            }
-
-            restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
-        }
-    }
-
     store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
     let output_color = restir.output;
@@ -1193,7 +1153,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         for (var x = -1; x <= 1; x += 1) {
             let offset = vec2<i32>(x, y);
             let sample_coords = output_coords + offset * 8;
-            let render_sample_coords = render_coords + offset * 8 / i32(INDIRECT_SCALE);
+            let render_sample_coords = render_coords + offset * 8;
             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
                 continue;
             }

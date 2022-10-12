@@ -1,4 +1,4 @@
-use crate::transform::GlobalTransformQueue;
+use crate::{transform::GlobalTransformQueue, HikariConfig};
 use bevy::{
     prelude::*,
     render::{
@@ -72,8 +72,11 @@ pub struct FrameCounter(pub usize);
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuFrame {
-    pub number: u32,
     pub kernel: Mat3,
+    pub number: u32,
+    pub validation_interval: u32,
+    pub second_bounce_chance: f32,
+    pub solar_angle: f32,
 }
 
 #[derive(Default)]
@@ -84,6 +87,7 @@ pub struct FrameUniform {
 fn prepare_frame_uniform(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    config: Res<HikariConfig>,
     mut uniform: ResMut<FrameUniform>,
     mut counter: ResMut<FrameCounter>,
 ) {
@@ -105,13 +109,20 @@ fn prepare_frame_uniform(
     //     }
     // }
 
+    let validation_interval = config.validation_interval as u32;
+    let second_bounce_chance = config.second_bounce_chance;
+    let solar_angle = config.solar_angle;
+
     uniform.buffer.set(GpuFrame {
-        number: counter.0 as u32,
         kernel: Mat3 {
             x_axis: Vec3::new(0.0625, 0.125, 0.0625),
             y_axis: Vec3::new(0.125, 0.25, 0.125),
             z_axis: Vec3::new(0.0625, 0.125, 0.0625),
         },
+        number: counter.0 as u32,
+        validation_interval,
+        second_bounce_chance,
+        solar_angle,
     });
     uniform.buffer.write_buffer(&render_device, &render_queue);
     counter.0 += 1;

@@ -1,3 +1,11 @@
+use crate::{
+    light::{LightPassNode, LightPlugin},
+    mesh_material::MeshMaterialPlugin,
+    overlay::{OverlayPassNode, OverlayPlugin},
+    prepass::{PrepassNode, PrepassPlugin},
+    transform::TransformPlugin,
+    view::ViewPlugin,
+};
 use bevy::{
     asset::load_internal_asset,
     core_pipeline::core_3d::MainPass3dNode,
@@ -6,15 +14,10 @@ use bevy::{
     render::{
         render_graph::{RenderGraph, SlotInfo, SlotType},
         texture::{CompressedImageFormats, ImageType},
-        RenderApp,
+        Extract, RenderApp, RenderStage,
     },
 };
-use light::{LightPassNode, LightPlugin};
-use mesh_material::MeshMaterialPlugin;
-use overlay::{OverlayPassNode, OverlayPlugin};
-use prepass::{PrepassNode, PrepassPlugin};
-use transform::TransformPlugin;
-use view::ViewPlugin;
+use std::f32::consts::PI;
 
 pub mod light;
 pub mod mesh_material;
@@ -58,7 +61,6 @@ pub const QUAD_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 
 pub struct HikariPlugin;
-
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(
@@ -185,7 +187,8 @@ impl Plugin for HikariPlugin {
             commands.insert_resource(NoiseTexture(handles));
         };
 
-        app.add_plugin(TransformPlugin)
+        app.init_resource::<HikariConfig>()
+            .add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshMaterialPlugin)
             .add_plugin(PrepassPlugin)
@@ -194,6 +197,8 @@ impl Plugin for HikariPlugin {
             .add_startup_system(noise_load_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.add_system_to_stage(RenderStage::Extract, extract_config);
+
             let prepass_node = PrepassNode::new(&mut render_app.world);
             let light_pass_node = LightPassNode::new(&mut render_app.world);
             let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
@@ -242,6 +247,30 @@ impl Plugin for HikariPlugin {
             graph.add_sub_graph(graph::NAME, hikari_graph);
         }
     }
+}
+
+#[derive(Clone)]
+pub struct HikariConfig {
+    /// The interval of frames between sample validation passes.
+    pub validation_interval: usize,
+    /// Chance for the indirect rays to bounce again after first hit.
+    pub second_bounce_chance: f32,
+    /// Half angle of the solar cone apex in radians.
+    pub solar_angle: f32,
+}
+
+impl Default for HikariConfig {
+    fn default() -> Self {
+        Self {
+            validation_interval: 4,
+            second_bounce_chance: 0.25,
+            solar_angle: PI / 36.0,
+        }
+    }
+}
+
+fn extract_config(mut commands: Commands, config: Extract<Res<HikariConfig>>) {
+    commands.insert_resource(config.clone());
 }
 
 #[derive(Clone, Deref, DerefMut)]
