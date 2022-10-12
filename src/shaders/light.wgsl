@@ -1,4 +1,5 @@
-#import bevy_pbr::mesh_view_bindings
+#import bevy_hikari::mesh_view_bindings
+#import bevy_hikari::utils
 #import bevy_pbr::utils
 #import bevy_pbr::lighting
 
@@ -17,19 +18,9 @@ var textures: binding_array<texture_2d<f32>>;
 var samplers: binding_array<sampler>;
 #endif
 
-struct Frame {
-    kernel: mat3x3<f32>,
-    number: u32,
-    validation_interval: u32,
-    second_bounce_chance: f32,
-    solar_angle: f32,
-};
-
 @group(4) @binding(0)
-var<uniform> frame: Frame;
-@group(4) @binding(1)
 var noise_texture: binding_array<texture_2d<f32>>;
-@group(4) @binding(2)
+@group(4) @binding(1)
 var noise_sampler: sampler;
 
 @group(5) @binding(0)
@@ -82,47 +73,6 @@ let OVERSAMPLE_THRESHOLD: f32 = 4.0;
 let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
-
-fn hash(value: u32) -> u32 {
-    var state = value;
-    state = state ^ 2747636419u;
-    state = state * 2654435769u;
-    state = state ^ state >> 16u;
-    state = state * 2654435769u;
-    state = state ^ state >> 16u;
-    state = state * 2654435769u;
-    return state;
-}
-
-fn random_float(value: u32) -> f32 {
-    return f32(hash(value)) / 4294967295.0;
-}
-
-fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
-    let s = min(sign(n.z) * 2.0 + 1.0, 1.0);
-    let u = -1.0 / (s + n.z);
-    let v = n.x * n.y * u;
-    let t = vec3<f32>(1.0 + s * n.x * n.x * u, s * v, -s * n.x);
-    let b = vec3<f32>(v, s + n.y * n.y * u, -n.y);
-    return mat3x3<f32>(t, b, n);
-}
-
-// https://en.wikipedia.org/wiki/Halton_sequence#Implementation_in_pseudocode
-fn halton(base: u32, index: u32) -> f32 {
-    var result = 0.;
-    var f = 1.;
-    for (var id = index; id > 0u; id /= base) {
-        f = f / f32(base);
-        result += f * f32(id % base);
-    }
-    return result;
-}
-
-fn frame_jitter() -> vec2<f32> {
-    let index = frame.number % 16u + 7u;
-    let delta = vec2<f32>(halton(2u, index), halton(3u, index));
-    return delta;
-}
 
 struct Ray {
     origin: vec3<f32>,
@@ -882,7 +832,7 @@ fn temporal_restir(
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(size);
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter(frame.number)) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();
@@ -989,7 +939,7 @@ fn indirect_lit_ambient(
     let render_size = textureDimensions(render_texture);
     let reservoir_size = render_size;
 
-    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter()) / vec2<f32>(render_size);
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter(frame.number)) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
 
     var s = empty_sample();

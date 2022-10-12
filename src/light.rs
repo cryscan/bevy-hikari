@@ -1,7 +1,7 @@
 use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
-    prepass::PrepassTarget,
-    view::{FrameUniform, GpuFrame},
+    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTarget},
+    view::PreviousViewUniformOffset,
     NoiseTexture, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
@@ -9,7 +9,7 @@ use bevy::{
         lifetimeless::{Read, SQuery},
         SystemParamItem,
     },
-    pbr::{GpuLights, LightMeta, MeshPipeline, ViewLightsUniformOffset},
+    pbr::{MeshPipeline, ViewLightsUniformOffset},
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -19,7 +19,7 @@ use bevy::{
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{GpuImage, TextureCache},
-        view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms},
+        view::ViewUniformOffset,
         Extract, RenderApp, RenderStage,
     },
     utils::HashMap,
@@ -45,7 +45,6 @@ impl Plugin for LightPlugin {
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
                 .add_system_to_stage(RenderStage::Extract, extract_noise_texture)
                 .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
-                .add_system_to_stage(RenderStage::Queue, queue_view_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
         }
@@ -84,7 +83,7 @@ pub struct LightPipeline {
     pub deferred_layout: BindGroupLayout,
     pub mesh_material_layout: BindGroupLayout,
     pub texture_layout: Option<BindGroupLayout>,
-    pub frame_layout: BindGroupLayout,
+    pub noise_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
     pub reservoir_layout: BindGroupLayout,
     pub dummy_white_gpu_image: GpuImage,
@@ -95,34 +94,7 @@ impl FromWorld for LightPipeline {
         let render_device = world.resource::<RenderDevice>();
         let mesh_pipeline = world.resource::<MeshPipeline>();
         let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
-
-        let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            entries: &[
-                // View
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: Some(ViewUniform::min_size()),
-                    },
-                    count: None,
-                },
-                // Lights
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: Some(GpuLights::min_size()),
-                    },
-                    count: None,
-                },
-            ],
-            label: None,
-        });
+        let view_layout = world.resource::<PrepassPipeline>().view_layout.clone();
 
         let deferred_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -207,23 +179,12 @@ impl FromWorld for LightPipeline {
             ],
         });
 
-        let frame_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        let noise_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[
-                // Frame Uniform
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuFrame::min_size()),
-                    },
-                    count: None,
-                },
                 // Blue Noise Texture
                 BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 0,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Float { filterable: false },
@@ -233,7 +194,7 @@ impl FromWorld for LightPipeline {
                     count: NonZeroU32::new(NOISE_TEXTURE_COUNT as u32),
                 },
                 BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 1,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
                     count: None,
@@ -332,7 +293,7 @@ impl FromWorld for LightPipeline {
             deferred_layout,
             mesh_material_layout,
             texture_layout: None,
-            frame_layout,
+            noise_layout,
             render_layout,
             reservoir_layout,
             dummy_white_gpu_image: mesh_pipeline.dummy_white_gpu_image.clone(),
@@ -364,7 +325,7 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.deferred_layout.clone(),
                 self.mesh_material_layout.clone(),
                 self.texture_layout.clone().unwrap(),
-                self.frame_layout.clone(),
+                self.noise_layout.clone(),
                 self.render_layout.clone(),
                 self.reservoir_layout.clone(),
             ]),
@@ -440,22 +401,6 @@ fn prepare_light_pass_targets(
             let denoise_textures = [(); 3].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
             let direct_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
             let indirect_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
-
-            // let mut create_reservoir = |size| -> Reservoir {
-            //     Reservoir {
-            //         reservoir: create_texture(size, RESERVOIR_TEXTURE_FORMAT),
-            //         radiance: create_texture(size, RADIANCE_TEXTURE_FORMAT),
-            //         random: create_texture(size, RANDOM_TEXTURE_FORMAT),
-            //         visible_position: create_texture(size, POSITION_TEXTURE_FORMAT),
-            //         visible_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
-            //         visible_id: create_texture(size, ID_TEXTURE_FORMAT),
-            //         sample_position: create_texture(size, POSITION_TEXTURE_FORMAT),
-            //         sample_normal: create_texture(size, NORMAL_TEXTURE_FORMAT),
-            //     }
-            // };
-
-            // let direct_reservoirs = [(); 2].map(|_| create_reservoir(size));
-            // let indirect_reservoirs = [(); 2].map(|_| create_reservoir(size >> INDIRECT_LOG_SCALE));
 
             if match reservoir_cache.get(&entity) {
                 Some(reservoirs) => {
@@ -556,47 +501,10 @@ fn queue_light_pipelines(
     })
 }
 
-#[derive(Component)]
-pub struct ViewBindGroup(pub BindGroup);
-
-#[allow(clippy::too_many_arguments)]
-pub fn queue_view_bind_groups(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    pipeline: Res<LightPipeline>,
-    light_meta: Res<LightMeta>,
-    view_uniforms: Res<ViewUniforms>,
-    views: Query<Entity, With<ExtractedView>>,
-) {
-    if let (Some(view_binding), Some(light_binding)) = (
-        view_uniforms.uniforms.binding(),
-        light_meta.view_gpu_lights.binding(),
-    ) {
-        for entity in &views {
-            let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: view_binding.clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: light_binding.clone(),
-                    },
-                ],
-                label: None,
-                layout: &pipeline.view_layout,
-            });
-
-            commands.entity(entity).insert(ViewBindGroup(bind_group));
-        }
-    }
-}
-
 #[derive(Component, Clone)]
 pub struct LightBindGroup {
     pub deferred: BindGroup,
-    pub frame: BindGroup,
+    pub noise: BindGroup,
 
     pub direct_render: BindGroup,
     pub direct_reservoir: BindGroup,
@@ -610,7 +518,6 @@ fn queue_light_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
-    frame_uniform: Res<FrameUniform>,
     noise_texture: Res<NoiseTexture>,
     images: Res<RenderAssets<Image>>,
     reservoir_cache: Res<ReservoirCache>,
@@ -641,13 +548,11 @@ fn queue_light_bind_groups(
     for (entity, prepass, light_pass) in &query {
         let reservoirs = reservoir_cache.get(&entity).unwrap();
         if let (
-            Some(frame_binding),
             Some(reservoir_binding_0),
             Some(reservoir_binding_1),
             Some(reservoir_binding_2),
             Some(reservoir_binding_3),
         ) = (
-            frame_uniform.buffer.binding(),
             reservoirs[0].binding(),
             reservoirs[1].binding(),
             reservoirs[2].binding(),
@@ -694,20 +599,16 @@ fn queue_light_bind_groups(
                 ],
             });
 
-            let frame = render_device.create_bind_group(&BindGroupDescriptor {
+            let noise = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
-                layout: &pipeline.frame_layout,
+                layout: &pipeline.noise_layout,
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: frame_binding,
-                    },
-                    BindGroupEntry {
-                        binding: 1,
                         resource: BindingResource::TextureViewArray(&noise_texture_views),
                     },
                     BindGroupEntry {
-                        binding: 2,
+                        binding: 1,
                         resource: BindingResource::Sampler(&noise_sampler),
                     },
                 ],
@@ -817,7 +718,7 @@ fn queue_light_bind_groups(
 
             commands.entity(entity).insert(LightBindGroup {
                 deferred,
-                frame,
+                noise,
                 direct_render,
                 direct_reservoir,
                 indirect_render,
@@ -848,8 +749,8 @@ pub struct LightPassNode {
     query: QueryState<(
         &'static ExtractedCamera,
         &'static ViewUniformOffset,
+        &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
-        &'static ViewBindGroup,
         &'static LightBindGroup,
     )>,
 }
@@ -880,11 +781,15 @@ impl Node for LightPassNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (camera, view_uniform, view_lights, view_bind_group, light_bind_group) =
+        let (camera, view_uniform, previous_view_uniform, view_lights, light_bind_group) =
             match self.query.get_manual(world, entity) {
                 Ok(query) => query,
                 Err(_) => return Ok(()),
             };
+        let view_bind_group = match world.get_resource::<PrepassBindGroup>() {
+            Some(bind_group) => &bind_group.view,
+            None => return Ok(()),
+        };
         let mesh_material_bind_group = match world.get_resource::<MeshMaterialBindGroup>() {
             Some(bind_group) => bind_group,
             None => return Ok(()),
@@ -898,13 +803,17 @@ impl Node for LightPassNode {
 
         pass.set_bind_group(
             0,
-            &view_bind_group.0,
-            &[view_uniform.offset, view_lights.offset],
+            view_bind_group,
+            &[
+                view_uniform.offset,
+                previous_view_uniform.offset,
+                view_lights.offset,
+            ],
         );
         pass.set_bind_group(1, &light_bind_group.deferred, &[]);
         pass.set_bind_group(2, &mesh_material_bind_group.mesh_material, &[]);
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
-        pass.set_bind_group(4, &light_bind_group.frame, &[]);
+        pass.set_bind_group(4, &light_bind_group.noise, &[]);
 
         pass.set_bind_group(5, &light_bind_group.direct_render, &[]);
         pass.set_bind_group(6, &light_bind_group.direct_reservoir, &[]);

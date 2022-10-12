@@ -16,7 +16,7 @@ impl Plugin for ViewPlugin {
             render_app
                 .init_resource::<PreviousViewUniforms>()
                 .init_resource::<FrameCounter>()
-                .init_resource::<FrameUniform>()
+                .init_resource::<FrameUniformBuffer>()
                 .add_system_to_stage(RenderStage::Prepare, prepare_view_uniforms)
                 .add_system_to_stage(RenderStage::Prepare, prepare_frame_uniform);
         }
@@ -71,7 +71,7 @@ fn prepare_view_uniforms(
 pub struct FrameCounter(pub usize);
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
-pub struct GpuFrame {
+pub struct FrameUniform {
     pub kernel: Mat3,
     pub number: u32,
     pub validation_interval: u32,
@@ -80,15 +80,15 @@ pub struct GpuFrame {
 }
 
 #[derive(Default)]
-pub struct FrameUniform {
-    pub buffer: UniformBuffer<GpuFrame>,
+pub struct FrameUniformBuffer {
+    pub buffer: UniformBuffer<FrameUniform>,
 }
 
 fn prepare_frame_uniform(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     config: Res<HikariConfig>,
-    mut uniform: ResMut<FrameUniform>,
+    mut uniform: ResMut<FrameUniformBuffer>,
     mut counter: ResMut<FrameCounter>,
 ) {
     // let mut kernel = [Vec3::ZERO; 25];
@@ -113,7 +113,7 @@ fn prepare_frame_uniform(
     let second_bounce_chance = config.second_bounce_chance;
     let solar_angle = config.solar_angle;
 
-    uniform.buffer.set(GpuFrame {
+    uniform.buffer.set(FrameUniform {
         kernel: Mat3 {
             x_axis: Vec3::new(0.0625, 0.125, 0.0625),
             y_axis: Vec3::new(0.125, 0.25, 0.125),

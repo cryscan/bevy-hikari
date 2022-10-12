@@ -43,6 +43,10 @@ pub mod graph {
 pub const WORKGROUP_SIZE: u32 = 8;
 pub const NOISE_TEXTURE_COUNT: usize = 64;
 
+pub const UTILS_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4462033275253590181);
+pub const MESH_VIEW_TYPES_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10086770709483722043);
 pub const MESH_VIEW_BINDINGS_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 8835349515886344623);
 pub const MESH_MATERIAL_TYPES_HANDLE: HandleUntyped =
@@ -63,6 +67,18 @@ pub const QUAD_HANDLE: HandleUntyped =
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            UTILS_SHADER_HANDLE,
+            "shaders/utils.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            MESH_VIEW_TYPES_HANDLE,
+            "shaders/mesh_view_types.wgsl",
+            Shader::from_wgsl
+        );
         load_internal_asset!(
             app,
             MESH_VIEW_BINDINGS_HANDLE,

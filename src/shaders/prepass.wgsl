@@ -1,32 +1,6 @@
-#import bevy_pbr::mesh_view_types
+#import bevy_hikari::mesh_view_bindings
+#import bevy_hikari::utils
 #import bevy_pbr::mesh_types
-
-struct PreviousView {
-    view_proj: mat4x4<f32>,
-    inverse_view_proj: mat4x4<f32>,
-};
-
-struct PreviousMesh {
-    model: mat4x4<f32>,
-    inverse_transpose_model: mat4x4<f32>,
-};
-
-struct InstanceIndex {
-    instance: u32,
-    material: u32
-};
-
-struct Frame {
-    number: u32,
-    kernel: array<vec3<f32>, 25>,
-};
-
-@group(0) @binding(0)
-var<uniform> view: View;
-@group(0) @binding(1)
-var<uniform> previous_view: PreviousView;
-@group(0) @binding(2)
-var<uniform> frame: Frame;
 
 @group(1) @binding(0)
 var<uniform> mesh: Mesh;

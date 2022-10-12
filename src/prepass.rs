@@ -3,7 +3,7 @@ use crate::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
     view::{
-        FrameUniform, GpuFrame, PreviousViewUniform, PreviousViewUniformOffset,
+        FrameUniform, FrameUniformBuffer, PreviousViewUniform, PreviousViewUniformOffset,
         PreviousViewUniforms,
     },
     PREPASS_SHADER_HANDLE,
@@ -13,7 +13,10 @@ use bevy::{
         lifetimeless::{Read, SQuery, SRes},
         SystemParamItem,
     },
-    pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SHADOW_FORMAT},
+    pbr::{
+        DrawMesh, GpuLights, LightMeta, MeshPipelineKey, MeshUniform, ViewLightsUniformOffset,
+        SHADOW_FORMAT,
+    },
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -74,7 +77,17 @@ impl FromWorld for PrepassPipeline {
             entries: &[
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(FrameUniform::min_size()),
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
@@ -83,8 +96,8 @@ impl FromWorld for PrepassPipeline {
                     count: None,
                 },
                 BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    binding: 2,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
@@ -93,12 +106,12 @@ impl FromWorld for PrepassPipeline {
                     count: None,
                 },
                 BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    binding: 3,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuFrame::min_size()),
+                        has_dynamic_offset: true,
+                        min_binding_size: Some(GpuLights::min_size()),
                     },
                     count: None,
                 },
@@ -394,13 +407,15 @@ fn queue_prepass_bind_group(
     previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
     instance_render_assets: Res<InstanceRenderAssets>,
     view_uniforms: Res<ViewUniforms>,
-    frame_uniform: Res<FrameUniform>,
+    frame_uniform: Res<FrameUniformBuffer>,
+    light_meta: Res<LightMeta>,
     previous_view_uniforms: Res<PreviousViewUniforms>,
 ) {
     if let (
         Some(view_binding),
         Some(previous_view_binding),
         Some(frame_binding),
+        Some(light_binding),
         Some(mesh_binding),
         Some(previous_mesh_binding),
         Some(instance_indices_binding),
@@ -408,6 +423,7 @@ fn queue_prepass_bind_group(
         view_uniforms.uniforms.binding(),
         previous_view_uniforms.uniforms.binding(),
         frame_uniform.buffer.binding(),
+        light_meta.view_gpu_lights.binding(),
         mesh_uniforms.binding(),
         previous_mesh_uniforms.binding(),
         instance_render_assets.instance_indices.binding(),
@@ -418,15 +434,19 @@ fn queue_prepass_bind_group(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: view_binding,
+                    resource: frame_binding,
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: previous_view_binding,
+                    resource: view_binding,
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: frame_binding,
+                    resource: previous_view_binding,
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: light_binding,
                 },
             ],
         });
@@ -498,7 +518,11 @@ pub struct SetPrepassViewBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetPrepassViewBindGroup<I> {
     type Param = (
         SRes<PrepassBindGroup>,
-        SQuery<(Read<ViewUniformOffset>, Read<PreviousViewUniformOffset>)>,
+        SQuery<(
+            Read<ViewUniformOffset>,
+            Read<PreviousViewUniformOffset>,
+            Read<ViewLightsUniformOffset>,
+        )>,
     );
 
     fn render<'w>(
@@ -507,11 +531,16 @@ impl<const I: usize> EntityRenderCommand for SetPrepassViewBindGroup<I> {
         (bind_group, view_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (view_uniform, previous_view_uniform) = view_query.get_inner(view).unwrap();
+        let (view_uniform, previous_view_uniform, view_lights) =
+            view_query.get_inner(view).unwrap();
         pass.set_bind_group(
             I,
             &bind_group.into_inner().view,
-            &[view_uniform.offset, previous_view_uniform.offset],
+            &[
+                view_uniform.offset,
+                previous_view_uniform.offset,
+                view_lights.offset,
+            ],
         );
 
         RenderCommandResult::Success
