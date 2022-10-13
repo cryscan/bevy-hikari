@@ -821,8 +821,8 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        for id in 0..4 {
-            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise[id]) {
+        for pipeline in pipelines.denoise {
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
                 pass.set_pipeline(pipeline);
 
                 let size = camera.physical_target_size.unwrap();
@@ -843,8 +843,8 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        for id in 0..4 {
-            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.denoise[id]) {
+        for pipeline in pipelines.denoise {
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
                 pass.set_pipeline(pipeline);
 
                 let size = camera.physical_target_size.unwrap();

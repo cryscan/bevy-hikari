@@ -52,14 +52,45 @@ fn vertex(@location(0) position: vec3<f32>) -> VertexOutput {
     return out;
 }
 
+fn fetch_previous_color(uv: vec2<f32>) -> vec4<f32> {
+    let direct = textureSample(previous_direct_render_texture, previous_direct_render_sampler, uv);
+    let indirect = textureSample(previous_indirect_render_texture, previous_indirect_render_sampler, uv);
+    return tone_mapping(direct + indirect);
+    
+}
+
+fn fetch_color(coords: vec2<i32>) -> vec4<f32> {
+    let direct = textureLoad(direct_render_texture, coords, 0);
+    let indirect = textureLoad(indirect_render_texture, coords, 0);
+    return tone_mapping(direct + indirect);
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var uv = 0.5 * in.position.xy + 0.5;
     uv.y = 1.0 - uv.y;
-    
-    let direct_color = textureSample(direct_render_texture, direct_render_sampler, uv);
-    let indirect_color = textureSample(indirect_render_texture, indirect_render_sampler, uv);
-    let color = direct_color + indirect_color;
+    let coords = vec2<i32>(in.clip_position.xy);
 
-    return tone_mapping(color);
+    let velocity = textureLoad(velocity_texture, coords, 0).xy;
+    let previous_uv = uv - velocity;
+    let previous_color = fetch_previous_color(previous_uv);
+
+    var antialiased = previous_color.rgb;
+    var mix_rate = min(previous_color.w, 0.5);
+
+    var colors: array<vec3<f32>, 9>;
+    colors[0] = fetch_color(coords).rgb;
+    antialiased = sqrt(mix(antialiased * antialiased, colors[0] * colors[0], mix_rate));
+
+    colors[1] = fetch_color(coords + vec2<i32>(1, 0)).rgb;
+    colors[2] = fetch_color(coords + vec2<i32>(-1, 0)).rgb;
+    colors[3] = fetch_color(coords + vec2<i32>(0, 1)).rgb;
+    colors[4] = fetch_color(coords + vec2<i32>(0, -1)).rgb;
+    colors[5] = fetch_color(coords + vec2<i32>(1, 1)).rgb;
+    colors[6] = fetch_color(coords + vec2<i32>(-1, 1)).rgb;
+    colors[7] = fetch_color(coords + vec2<i32>(1, -1)).rgb;
+    colors[8] = fetch_color(coords + vec2<i32>(-1, -1)).rgb;
+
+    var color = vec4<f32>(0.0);
+    return color;
 }
