@@ -28,12 +28,7 @@ use std::num::NonZeroU32;
 
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const RESERVOIR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
-pub const RADIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const POSITION_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
-pub const NORMAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
-pub const ID_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
-pub const RANDOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const OVERLAY_RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -340,12 +335,13 @@ impl SpecializedComputePipeline for LightPipeline {
 pub struct LightPassTarget {
     /// Index of the current frame's output denoised texture.
     pub current_id: usize,
-    pub common_denoised_textures: Vec<GpuImage>,
+    pub common_denoised_textures: [GpuImage; 3],
     pub albedo_texture: GpuImage,
     pub direct_render_texture: GpuImage,
-    pub direct_denoised_textures: Vec<GpuImage>,
+    pub direct_denoised_texture: GpuImage,
     pub indirect_render_texture: GpuImage,
-    pub indirect_denoised_textures: Vec<GpuImage>,
+    pub indirect_denoised_texture: GpuImage,
+    pub overlay_render_textures: [GpuImage; 2],
 }
 
 fn prepare_light_pass_targets(
@@ -401,9 +397,18 @@ fn prepare_light_pass_targets(
             let direct_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
             let indirect_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
 
-            let common_denoised_textures = vec![create_texture(size, RENDER_TEXTURE_FORMAT); 3];
-            let direct_denoised_textures = vec![create_texture(size, RENDER_TEXTURE_FORMAT); 2];
-            let indirect_denoised_textures = vec![create_texture(size, RENDER_TEXTURE_FORMAT); 2];
+            let common_denoised_textures = [
+                create_texture(size, RENDER_TEXTURE_FORMAT),
+                create_texture(size, RENDER_TEXTURE_FORMAT),
+                create_texture(size, RENDER_TEXTURE_FORMAT),
+            ];
+            let direct_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+            let indirect_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+
+            let overlay_render_textures = [
+                create_texture(size, OVERLAY_RENDER_TEXTURE_FORMAT),
+                create_texture(size, OVERLAY_RENDER_TEXTURE_FORMAT),
+            ];
 
             if match reservoir_cache.get(&entity) {
                 Some(reservoirs) => {
@@ -436,9 +441,10 @@ fn prepare_light_pass_targets(
                 albedo_texture,
                 common_denoised_textures,
                 direct_render_texture,
-                direct_denoised_textures,
+                direct_denoised_texture,
                 indirect_render_texture,
-                indirect_denoised_textures,
+                indirect_denoised_texture,
+                overlay_render_textures,
             });
         }
     }
@@ -634,7 +640,7 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 3,
                         resource: BindingResource::TextureView(
-                            &light_pass.direct_denoised_textures[current_id].texture_view,
+                            &light_pass.direct_denoised_texture.texture_view,
                         ),
                     },
                     BindGroupEntry {
@@ -670,7 +676,7 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 3,
                         resource: BindingResource::TextureView(
-                            &light_pass.indirect_denoised_textures[current_id].texture_view,
+                            &light_pass.indirect_denoised_texture.texture_view,
                         ),
                     },
                     BindGroupEntry {

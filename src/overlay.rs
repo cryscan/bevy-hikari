@@ -1,5 +1,5 @@
 use crate::{
-    light::{LightPassTarget, LightPipeline, SetDeferredBindGroup},
+    light::{LightPassTarget, LightPipeline, SetDeferredBindGroup, OVERLAY_RENDER_TEXTURE_FORMAT},
     OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
 };
 use bevy::{
@@ -76,7 +76,11 @@ impl FromWorld for OverlayPipeline {
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
                 BindGroupLayoutEntry {
@@ -98,33 +102,11 @@ impl FromWorld for OverlayPipeline {
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: OVERLAY_RENDER_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -222,49 +204,31 @@ fn queue_overlay_bind_groups(
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &target.direct_denoised_textures[current_id].texture_view,
+                        &target.direct_denoised_texture.texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(
-                        &target.direct_denoised_textures[current_id].sampler,
+                    resource: BindingResource::TextureView(
+                        &target.indirect_denoised_texture.texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 2,
                     resource: BindingResource::TextureView(
-                        &target.indirect_denoised_textures[current_id].texture_view,
+                        &target.overlay_render_textures[previous_id].texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 3,
                     resource: BindingResource::Sampler(
-                        &target.indirect_denoised_textures[current_id].sampler,
+                        &target.overlay_render_textures[previous_id].sampler,
                     ),
                 },
                 BindGroupEntry {
                     binding: 4,
                     resource: BindingResource::TextureView(
-                        &target.direct_denoised_textures[previous_id].texture_view,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::Sampler(
-                        &target.direct_denoised_textures[previous_id].sampler,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 6,
-                    resource: BindingResource::TextureView(
-                        &target.indirect_denoised_textures[previous_id].texture_view,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 7,
-                    resource: BindingResource::Sampler(
-                        &target.indirect_denoised_textures[previous_id].sampler,
+                        &target.overlay_render_textures[current_id].texture_view,
                     ),
                 },
             ],

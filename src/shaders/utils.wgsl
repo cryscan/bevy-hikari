@@ -36,7 +36,7 @@ fn halton(base: u32, index: u32) -> f32 {
 }
 
 fn frame_jitter(index: u32) -> vec2<f32> {
-    let id = index % 16u + 7u;
+    let id = index % 64u + 7u;
     let delta = vec2<f32>(halton(2u, id), halton(3u, id));
     return delta;
 }
