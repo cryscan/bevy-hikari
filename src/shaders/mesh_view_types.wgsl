@@ -2,6 +2,7 @@
 
 struct Frame {
     kernel: mat3x3<f32>,
+    clear_color: vec4<f32>,
     number: u32,
     validation_interval: u32,
     second_bounce_chance: f32,

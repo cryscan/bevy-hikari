@@ -73,6 +73,7 @@ pub struct FrameCounter(pub usize);
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct FrameUniform {
     pub kernel: Mat3,
+    pub clear_color: Vec4,
     pub number: u32,
     pub validation_interval: u32,
     pub second_bounce_chance: f32,
@@ -88,6 +89,7 @@ fn prepare_frame_uniform(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     config: Res<HikariConfig>,
+    clear_color: Res<ClearColor>,
     mut uniform: ResMut<FrameUniformBuffer>,
     mut counter: ResMut<FrameCounter>,
 ) {
@@ -119,6 +121,7 @@ fn prepare_frame_uniform(
             y_axis: Vec3::new(0.125, 0.25, 0.125),
             z_axis: Vec3::new(0.0625, 0.125, 0.0625),
         },
+        clear_color: clear_color.0.into(),
         number: counter.0 as u32,
         validation_interval,
         second_bounce_chance,

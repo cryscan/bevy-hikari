@@ -1,5 +1,6 @@
 use crate::{
     light::{LightPassTarget, LightPipeline, SetDeferredBindGroup, OVERLAY_RENDER_TEXTURE_FORMAT},
+    prepass::{PrepassPipeline, SetViewBindGroup},
     OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
 };
 use bevy::{
@@ -53,12 +54,16 @@ fn setup(mut meshes: ResMut<Assets<Mesh>>) {
 }
 
 pub struct OverlayPipeline {
-    pub overlay_layout: BindGroupLayout,
+    pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
+    pub overlay_layout: BindGroupLayout,
 }
 
 impl FromWorld for OverlayPipeline {
     fn from_world(world: &mut World) -> Self {
+        let view_layout = world.resource::<PrepassPipeline>().view_layout.clone();
+        let deferred_layout = world.resource::<LightPipeline>().deferred_layout.clone();
+
         let render_device = world.resource::<RenderDevice>();
         let overlay_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -112,11 +117,10 @@ impl FromWorld for OverlayPipeline {
             ],
         });
 
-        let deferred_layout = world.resource::<LightPipeline>().deferred_layout.clone();
-
         Self {
-            overlay_layout,
+            view_layout,
             deferred_layout,
+            overlay_layout,
         }
     }
 }
@@ -131,7 +135,11 @@ impl SpecializedMeshPipeline for OverlayPipeline {
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let vertex_attributes = vec![Mesh::ATTRIBUTE_POSITION.at_shader_location(0)];
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
-        let bind_group_layout = vec![self.overlay_layout.clone(), self.deferred_layout.clone()];
+        let bind_group_layout = vec![
+            self.view_layout.clone(),
+            self.deferred_layout.clone(),
+            self.overlay_layout.clone(),
+        ];
 
         Ok(RenderPipelineDescriptor {
             label: None,
@@ -311,8 +319,9 @@ impl CachedRenderPipelinePhaseItem for Overlay {
 
 type DrawOverlay = (
     SetItemPipeline,
-    SetOverlayBindGroup<0>,
+    SetViewBindGroup<0>,
     SetDeferredBindGroup<1>,
+    SetOverlayBindGroup<2>,
     DrawMesh,
 );
 

@@ -1,16 +1,17 @@
-@group(0) @binding(0)
-var direct_texture: texture_2d<f32>;
-@group(0) @binding(1)
-var indirect_texture: texture_2d<f32>;
-@group(0) @binding(2)
-var previous_render_texture: texture_2d<f32>;
-@group(0) @binding(3)
-var previous_render_sampler: sampler;
-@group(0) @binding(4)
-var temporal_texture: texture_storage_2d<rgba8unorm, write>;
-
+#import bevy_hikari::mesh_view_bindings
 #import bevy_hikari::deferred_bindings
 #import bevy_hikari::utils
+
+@group(2) @binding(0)
+var direct_texture: texture_2d<f32>;
+@group(2) @binding(1)
+var indirect_texture: texture_2d<f32>;
+@group(2) @binding(2)
+var previous_render_texture: texture_2d<f32>;
+@group(2) @binding(3)
+var previous_render_sampler: sampler;
+@group(2) @binding(4)
+var temporal_texture: texture_storage_2d<rgba8unorm, write>;
 
 // luminance coefficients from Rec. 709.
 // https://en.wikipedia.org/wiki/Rec._709
@@ -34,10 +35,14 @@ fn tone_mapping(in: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(reinhard_luminance(in.rgb), in.a);
 }
 
-fn fetch_color(coords: vec2<i32>) -> vec4<f32> {
+fn fetch_color(coords: vec2<i32>) -> vec3<f32> {
+    let alpha = clamp(textureLoad(normal_texture, coords, 0).a, 0.0, 1.0);
     let direct = textureLoad(direct_texture, coords, 0);
     let indirect = textureLoad(indirect_texture, coords, 0);
-    return tone_mapping(direct + indirect);
+    var color = tone_mapping(direct + indirect);
+    var color = clamp(color, vec4<f32>(0.0), vec4<f32>(1.0));
+    // return mix(frame.clear_color.rgb, color.rgb, alpha);
+    return frame.clear_color.rgb * (1.0 - alpha) + color.rgb * alpha;
 }
 
 struct VertexOutput {
@@ -73,9 +78,9 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     var antialiased = previous_color.rgb;
     var mix_rate = min(previous_color.a, 0.5);
 
-    var colors: array<vec4<f32>, 9>;
+    var colors: array<vec3<f32>, 9>;
     colors[0] = fetch_color(coords);
-    antialiased = sqrt(mix(antialiased * antialiased, colors[0].rgb * colors[0].rgb, mix_rate));
+    antialiased = sqrt(mix(antialiased * antialiased, colors[0] * colors[0], mix_rate));
 
     colors[1] = fetch_color(coords + vec2<i32>(1, 0));
     colors[2] = fetch_color(coords + vec2<i32>(-1, 0));
@@ -87,15 +92,15 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     colors[8] = fetch_color(coords + vec2<i32>(-1, -1));
 
     antialiased = encode_pal_yuv(antialiased);
-    colors[0] = vec4<f32>(encode_pal_yuv(colors[0].rgb), colors[0].a);
-    colors[1] = vec4<f32>(encode_pal_yuv(colors[1].rgb), colors[1].a);
-    colors[2] = vec4<f32>(encode_pal_yuv(colors[2].rgb), colors[2].a);
-    colors[3] = vec4<f32>(encode_pal_yuv(colors[3].rgb), colors[3].a);
-    colors[4] = vec4<f32>(encode_pal_yuv(colors[4].rgb), colors[4].a);
-    colors[5] = vec4<f32>(encode_pal_yuv(colors[5].rgb), colors[5].a);
-    colors[6] = vec4<f32>(encode_pal_yuv(colors[6].rgb), colors[6].a);
-    colors[7] = vec4<f32>(encode_pal_yuv(colors[7].rgb), colors[7].a);
-    colors[8] = vec4<f32>(encode_pal_yuv(colors[8].rgb), colors[8].a);
+    colors[0] = encode_pal_yuv(colors[0]);
+    colors[1] = encode_pal_yuv(colors[1]);
+    colors[2] = encode_pal_yuv(colors[2]);
+    colors[3] = encode_pal_yuv(colors[3]);
+    colors[4] = encode_pal_yuv(colors[4]);
+    colors[5] = encode_pal_yuv(colors[5]);
+    colors[6] = encode_pal_yuv(colors[6]);
+    colors[7] = encode_pal_yuv(colors[7]);
+    colors[8] = encode_pal_yuv(colors[8]);
 
     var min_color = min(min(min(colors[0], colors[1]), min(colors[2], colors[3])), colors[4]);
     var max_color = max(max(max(colors[0], colors[1]), max(colors[2], colors[3])), colors[4]);
@@ -114,8 +119,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     mix_rate = clamp(mix_rate, 0.05, 0.5);
 
     antialiased = decode_pal_yuv(antialiased);
-    out.color = vec4<f32>(antialiased, colors[0].a);
-    // out.temporal = vec4<f32>(antialiased, mix_rate);
+    out.color = vec4<f32>(antialiased, 1.0);
 
     textureStore(temporal_texture, coords, vec4<f32>(antialiased, mix_rate));
 

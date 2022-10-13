@@ -509,13 +509,13 @@ impl CachedRenderPipelinePhaseItem for Prepass {
 
 type DrawPrepass = (
     SetItemPipeline,
-    SetPrepassViewBindGroup<0>,
-    SetPrepassMeshBindGroup<1>,
+    SetViewBindGroup<0>,
+    SetMeshBindGroup<1>,
     DrawMesh,
 );
 
-pub struct SetPrepassViewBindGroup<const I: usize>;
-impl<const I: usize> EntityRenderCommand for SetPrepassViewBindGroup<I> {
+pub struct SetViewBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
     type Param = (
         SRes<PrepassBindGroup>,
         SQuery<(
@@ -547,8 +547,8 @@ impl<const I: usize> EntityRenderCommand for SetPrepassViewBindGroup<I> {
     }
 }
 
-pub struct SetPrepassMeshBindGroup<const I: usize>;
-impl<const I: usize> EntityRenderCommand for SetPrepassMeshBindGroup<I> {
+pub struct SetMeshBindGroup<const I: usize>;
+impl<const I: usize> EntityRenderCommand for SetMeshBindGroup<I> {
     type Param = (
         SRes<PrepassBindGroup>,
         SQuery<(
