@@ -1096,6 +1096,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let lum = luminance(irradiance);
 
     let r = load_reservoir(render_coords.x + output_size.x * render_coords.y);
+    let variance = 1.0 / clamp(r.w2_sum, 1.0, 10.0);
 
     var irradiance_sum = vec3<f32>(0.0);
     var w_sum = 0.0;
@@ -1118,13 +1119,12 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_variance = 1.0 / clamp(r.w2_sum, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
             let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
+            let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
@@ -1151,13 +1151,12 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_variance = 1.0 / clamp(r.w2_sum, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
             let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
+            let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
@@ -1184,13 +1183,12 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_variance = 1.0 / clamp(r.w2_sum, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
             let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
+            let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
@@ -1217,13 +1215,12 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_variance = 1.0 / clamp(r.w2_sum, 1.0, 10.0);
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
             let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, sample_variance);
+            let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 

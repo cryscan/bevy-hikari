@@ -34,8 +34,7 @@ pub mod graph {
     }
     pub mod node {
         pub const PREPASS: &str = "prepass";
-        pub const LIGHT_DIRECT_PASS: &str = "light_direct_pass";
-        pub const LIGHT_INDIRECT_PASS: &str = "light_indirect_pass";
+        pub const LIGHT_PASS: &str = "light_pass";
         pub const OVERLAY_PASS: &str = "overlay_pass";
     }
 }
@@ -224,7 +223,7 @@ impl Plugin for HikariPlugin {
 
             let mut hikari_graph = RenderGraph::default();
             hikari_graph.add_node(graph::node::PREPASS, prepass_node);
-            hikari_graph.add_node(graph::node::LIGHT_DIRECT_PASS, light_pass_node);
+            hikari_graph.add_node(graph::node::LIGHT_PASS, light_pass_node);
             hikari_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
             let input_node_id = hikari_graph.set_input(vec![SlotInfo::new(
                 graph::input::VIEW_ENTITY,
@@ -242,12 +241,12 @@ impl Plugin for HikariPlugin {
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
-                    graph::node::LIGHT_DIRECT_PASS,
+                    graph::node::LIGHT_PASS,
                     LightPassNode::IN_VIEW,
                 )
                 .unwrap();
             hikari_graph
-                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_DIRECT_PASS)
+                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_PASS)
                 .unwrap();
             hikari_graph
                 .add_slot_edge(
@@ -258,7 +257,7 @@ impl Plugin for HikariPlugin {
                 )
                 .unwrap();
             hikari_graph
-                .add_node_edge(graph::node::LIGHT_DIRECT_PASS, graph::node::OVERLAY_PASS)
+                .add_node_edge(graph::node::LIGHT_PASS, graph::node::OVERLAY_PASS)
                 .unwrap();
             graph.add_sub_graph(graph::NAME, hikari_graph);
         }

@@ -95,11 +95,42 @@ impl FromWorld for OverlayPipeline {
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
-        let light_pipeline = world.resource::<LightPipeline>();
-        let deferred_layout = light_pipeline.deferred_layout.clone();
+        let deferred_layout = world.resource::<LightPipeline>().deferred_layout.clone();
 
         Self {
             overlay_layout,
@@ -181,6 +212,9 @@ fn queue_overlay_bind_groups(
     query: Query<(Entity, &LightPassTarget)>,
 ) {
     for (entity, target) in &query {
+        let current_id = target.current_id;
+        let previous_id = 1 - current_id;
+
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.overlay_layout,
@@ -188,22 +222,50 @@ fn queue_overlay_bind_groups(
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &target.direct_denoised_texture.texture_view,
+                        &target.direct_denoised_textures[current_id].texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&target.direct_denoised_texture.sampler),
+                    resource: BindingResource::Sampler(
+                        &target.direct_denoised_textures[current_id].sampler,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 2,
                     resource: BindingResource::TextureView(
-                        &target.indirect_denoised_texture.texture_view,
+                        &target.indirect_denoised_textures[current_id].texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&target.indirect_denoised_texture.sampler),
+                    resource: BindingResource::Sampler(
+                        &target.indirect_denoised_textures[current_id].sampler,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(
+                        &target.direct_denoised_textures[previous_id].texture_view,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::Sampler(
+                        &target.direct_denoised_textures[previous_id].sampler,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(
+                        &target.indirect_denoised_textures[previous_id].texture_view,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: BindingResource::Sampler(
+                        &target.indirect_denoised_textures[previous_id].sampler,
+                    ),
                 },
             ],
         });

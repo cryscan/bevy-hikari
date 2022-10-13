@@ -6,6 +6,14 @@ var direct_render_sampler: sampler;
 var indirect_render_texture: texture_2d<f32>;
 @group(0) @binding(3)
 var indirect_render_sampler: sampler;
+@group(0) @binding(4)
+var previous_direct_render_texture: texture_2d<f32>;
+@group(0) @binding(5)
+var previous_direct_render_sampler: sampler;
+@group(0) @binding(6)
+var previous_indirect_render_texture: texture_2d<f32>;
+@group(0) @binding(7)
+var previous_indirect_render_sampler: sampler;
 
 #import bevy_hikari::deferred_bindings
 

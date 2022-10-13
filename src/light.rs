@@ -1,7 +1,7 @@
 use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTarget},
-    view::PreviousViewUniformOffset,
+    view::{FrameCounter, PreviousViewUniformOffset},
     NoiseTexture, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
@@ -338,18 +338,21 @@ impl SpecializedComputePipeline for LightPipeline {
 
 #[derive(Component)]
 pub struct LightPassTarget {
-    pub denoise_textures: [GpuImage; 3],
+    /// Index of the current frame's output denoised texture.
+    pub current_id: usize,
+    pub common_denoised_textures: Vec<GpuImage>,
     pub albedo_texture: GpuImage,
     pub direct_render_texture: GpuImage,
-    pub direct_denoised_texture: GpuImage,
+    pub direct_denoised_textures: Vec<GpuImage>,
     pub indirect_render_texture: GpuImage,
-    pub indirect_denoised_texture: GpuImage,
+    pub indirect_denoised_textures: Vec<GpuImage>,
 }
 
 fn prepare_light_pass_targets(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    frame_counter: Res<FrameCounter>,
     mut texture_cache: ResMut<TextureCache>,
     mut reservoir_cache: ResMut<ReservoirCache>,
     cameras: Query<(Entity, &ExtractedCamera)>,
@@ -398,9 +401,9 @@ fn prepare_light_pass_targets(
             let direct_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
             let indirect_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
 
-            let denoise_textures = [(); 3].map(|_| create_texture(size, RENDER_TEXTURE_FORMAT));
-            let direct_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
-            let indirect_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+            let common_denoised_textures = vec![create_texture(size, RENDER_TEXTURE_FORMAT); 3];
+            let direct_denoised_textures = vec![create_texture(size, RENDER_TEXTURE_FORMAT); 2];
+            let indirect_denoised_textures = vec![create_texture(size, RENDER_TEXTURE_FORMAT); 2];
 
             if match reservoir_cache.get(&entity) {
                 Some(reservoirs) => {
@@ -428,19 +431,14 @@ fn prepare_light_pass_targets(
                 reservoir_cache.insert(entity, reservoirs);
             }
 
-            // Swap the double buffers.
-            if let Some(reservoirs) = reservoir_cache.get_mut(&entity) {
-                reservoirs.swap(0, 1);
-                reservoirs.swap(2, 3);
-            }
-
             commands.entity(entity).insert(LightPassTarget {
+                current_id: frame_counter.0 % 2,
                 albedo_texture,
-                denoise_textures,
+                common_denoised_textures,
                 direct_render_texture,
-                direct_denoised_texture,
+                direct_denoised_textures,
                 indirect_render_texture,
-                indirect_denoised_texture,
+                indirect_denoised_textures,
             });
         }
     }
@@ -547,17 +545,14 @@ fn queue_light_bind_groups(
 
     for (entity, prepass, light_pass) in &query {
         let reservoirs = reservoir_cache.get(&entity).unwrap();
-        if let (
-            Some(reservoir_binding_0),
-            Some(reservoir_binding_1),
-            Some(reservoir_binding_2),
-            Some(reservoir_binding_3),
-        ) = (
-            reservoirs[0].binding(),
-            reservoirs[1].binding(),
-            reservoirs[2].binding(),
-            reservoirs[3].binding(),
-        ) {
+        if let Some(reservoir_bindings) = reservoirs
+            .iter()
+            .map(|buffer| buffer.binding())
+            .collect::<Option<Vec<_>>>()
+        {
+            let current_id = light_pass.current_id;
+            let previous_id = 1 - current_id;
+
             let deferred = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &pipeline.deferred_layout,
@@ -621,25 +616,25 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 0,
                         resource: BindingResource::TextureView(
-                            &light_pass.denoise_textures[0].texture_view,
+                            &light_pass.common_denoised_textures[0].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 1,
                         resource: BindingResource::TextureView(
-                            &light_pass.denoise_textures[1].texture_view,
+                            &light_pass.common_denoised_textures[1].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &light_pass.denoise_textures[2].texture_view,
+                            &light_pass.common_denoised_textures[2].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 3,
                         resource: BindingResource::TextureView(
-                            &light_pass.direct_denoised_texture.texture_view,
+                            &light_pass.direct_denoised_textures[current_id].texture_view,
                         ),
                     },
                     BindGroupEntry {
@@ -657,25 +652,25 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 0,
                         resource: BindingResource::TextureView(
-                            &light_pass.denoise_textures[0].texture_view,
+                            &light_pass.common_denoised_textures[0].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 1,
                         resource: BindingResource::TextureView(
-                            &light_pass.denoise_textures[1].texture_view,
+                            &light_pass.common_denoised_textures[1].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &light_pass.denoise_textures[2].texture_view,
+                            &light_pass.common_denoised_textures[2].texture_view,
                         ),
                     },
                     BindGroupEntry {
                         binding: 3,
                         resource: BindingResource::TextureView(
-                            &light_pass.indirect_denoised_texture.texture_view,
+                            &light_pass.indirect_denoised_textures[current_id].texture_view,
                         ),
                     },
                     BindGroupEntry {
@@ -693,11 +688,11 @@ fn queue_light_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: reservoir_binding_0,
+                        resource: reservoir_bindings[current_id].clone(),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: reservoir_binding_1,
+                        resource: reservoir_bindings[previous_id].clone(),
                     },
                 ],
             });
@@ -707,11 +702,11 @@ fn queue_light_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: reservoir_binding_2,
+                        resource: reservoir_bindings[2 + current_id].clone(),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: reservoir_binding_3,
+                        resource: reservoir_bindings[2 + previous_id].clone(),
                     },
                 ],
             });
