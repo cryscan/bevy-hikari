@@ -1,10 +1,10 @@
 [package]
 name = "bevy-hikari"
-version = "0.2.8"
+version = "0.2.9"
 edition = "2021"
 authors = ["Zhenyuan Zhang <cryscan@umich.edu>"]
 license = "MIT OR Apache-2.0"
-description = "Voxel Cone Tracing Global Illumination for the Bevy Engine."
+description = "Realtime Path Tracer for the Bevy Engine."
 homepage = "https://github.com/cryscan/bevy-hikari"
 repository = "https://github.com/cryscan/bevy-hikari"
 keywords = ["gamedev", "graphics", "bevy", "3d"]
