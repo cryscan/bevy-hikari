@@ -356,7 +356,7 @@ fn prepare_light_pass_targets(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let mut create_texture = |size: UVec2, texture_format| -> GpuImage {
+            let mut create_texture_sampler = |texture_format, filter_mode| -> GpuImage {
                 let extent = Extent3d {
                     width: size.x,
                     height: size.y,
@@ -367,9 +367,9 @@ fn prepare_light_pass_targets(
                     address_mode_u: AddressMode::ClampToEdge,
                     address_mode_v: AddressMode::ClampToEdge,
                     address_mode_w: AddressMode::ClampToEdge,
-                    mag_filter: FilterMode::Nearest,
-                    min_filter: FilterMode::Nearest,
-                    mipmap_filter: FilterMode::Nearest,
+                    mag_filter: filter_mode,
+                    min_filter: filter_mode,
+                    mipmap_filter: filter_mode,
                     ..Default::default()
                 });
                 let texture = texture_cache.get(
@@ -393,21 +393,27 @@ fn prepare_light_pass_targets(
                 }
             };
 
-            let albedo_texture = create_texture(size, ALBEDO_TEXTURE_FORMAT);
-            let direct_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
-            let indirect_render_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+            let mut create_texture =
+                |texture_format| create_texture_sampler(texture_format, FilterMode::Nearest);
+
+            let albedo_texture = create_texture(ALBEDO_TEXTURE_FORMAT);
+            let direct_render_texture = create_texture(RENDER_TEXTURE_FORMAT);
+            let indirect_render_texture = create_texture(RENDER_TEXTURE_FORMAT);
 
             let common_denoised_textures = [
-                create_texture(size, RENDER_TEXTURE_FORMAT),
-                create_texture(size, RENDER_TEXTURE_FORMAT),
-                create_texture(size, RENDER_TEXTURE_FORMAT),
+                create_texture(RENDER_TEXTURE_FORMAT),
+                create_texture(RENDER_TEXTURE_FORMAT),
+                create_texture(RENDER_TEXTURE_FORMAT),
             ];
-            let direct_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
-            let indirect_denoised_texture = create_texture(size, RENDER_TEXTURE_FORMAT);
+            let direct_denoised_texture = create_texture(RENDER_TEXTURE_FORMAT);
+            let indirect_denoised_texture = create_texture(RENDER_TEXTURE_FORMAT);
+
+            let mut create_texture =
+                |texture_format| create_texture_sampler(texture_format, FilterMode::Linear);
 
             let overlay_render_textures = [
-                create_texture(size, OVERLAY_RENDER_TEXTURE_FORMAT),
-                create_texture(size, OVERLAY_RENDER_TEXTURE_FORMAT),
+                create_texture(OVERLAY_RENDER_TEXTURE_FORMAT),
+                create_texture(OVERLAY_RENDER_TEXTURE_FORMAT),
             ];
 
             if match reservoir_cache.get(&entity) {
