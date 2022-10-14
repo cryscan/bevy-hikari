@@ -21,13 +21,18 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] Next event estimation
 - [x] ReSTIR: Temporal sample reuse
 - [ ] ReSTIR: Spatial sample reuse
-- [ ] Spatiotemporal filtering
+- [x] Spatial filtering
+- [x] Temporal anti-aliasing
 - [ ] Hardware ray tracing (upstream related)
 
 ## Basic Usage
 1. Add `HikariPlugin` to your `App` after `PbrPlugin`
 2. Setup the scene with a directional light
 3. Set your camera's `camera_render_graph` to `CameraRenderGraph::new(bevy_hikari::graph::NAME)`
+
+Notes:
+- Please run with `--release` flag to avoid the texture non-uniform indexing error
+- Supported meshes must have these 3 vertex attributes: position, normal and uv 
 
 ```rust
 use bevy::{pbr::PbrPlugin, prelude::*, render::camera::CameraRenderGraph};
@@ -89,7 +94,7 @@ fn setup(
 ```
 
 ## Effects
-You can check the video [here](https://youtu.be/TabdNrI0OuM).
+You can check the video [here](https://youtu.be/p5g4twfe9yY).
 
 ### Screenshots
 <img src="assets/screenshots/rt-gi.png" />
