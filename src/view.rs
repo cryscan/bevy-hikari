@@ -76,7 +76,6 @@ pub struct FrameUniform {
     pub clear_color: Vec4,
     pub number: u32,
     pub validation_interval: u32,
-    pub second_bounce_chance: f32,
     pub solar_angle: f32,
 }
 
@@ -112,7 +111,6 @@ fn prepare_frame_uniform(
     // }
 
     let validation_interval = config.validation_interval as u32;
-    let second_bounce_chance = config.second_bounce_chance;
     let solar_angle = config.solar_angle;
 
     uniform.buffer.set(FrameUniform {
@@ -124,7 +122,6 @@ fn prepare_frame_uniform(
         clear_color: clear_color.0.into(),
         number: counter.0 as u32,
         validation_interval,
-        second_bounce_chance,
         solar_angle,
     });
     uniform.buffer.write_buffer(&render_device, &render_queue);

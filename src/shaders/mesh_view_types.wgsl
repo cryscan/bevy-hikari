@@ -5,7 +5,6 @@ struct Frame {
     clear_color: vec4<f32>,
     number: u32,
     validation_interval: u32,
-    second_bounce_chance: f32,
     solar_angle: f32,
 };
 

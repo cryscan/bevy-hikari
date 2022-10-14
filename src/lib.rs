@@ -268,8 +268,6 @@ impl Plugin for HikariPlugin {
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
     pub validation_interval: usize,
-    /// Chance for the indirect rays to bounce again after first hit.
-    pub second_bounce_chance: f32,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
 }
@@ -278,7 +276,6 @@ impl Default for HikariConfig {
     fn default() -> Self {
         Self {
             validation_interval: 4,
-            second_bounce_chance: 0.25,
             solar_angle: PI / 36.0,
         }
     }

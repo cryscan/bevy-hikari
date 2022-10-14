@@ -975,63 +975,52 @@ fn indirect_lit_ambient(
     s.visible_normal = normal;
     s.visible_instance = instance_material.x;
 
-    var second_bounce_chance = frame.second_bounce_chance;
-    if (r.count < OVERSAMPLE_THRESHOLD) {
-        second_bounce_chance = 1.0;
-    }
-    var pdf = 1.0 - second_bounce_chance;
+    var ray: Ray;
+    var hit: Hit;
+    var info: HitInfo;
+    var surface: Surface;
 
-    let workgroup_index = workgroup_id.x + num_workgroups.x * workgroup_id.y;
-    if (random_float(hash(workgroup_index) ^ hash(frame.number)) <= second_bounce_chance) {
-        var ray: Ray;
-        var hit: Hit;
-        var info: HitInfo;
-        var surface: Surface;
+    ray.origin = position.xyz + normal * RAY_BIAS;
+    ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
+    ray.inv_direction = 1.0 / ray.direction;
+    var p1 = dot(ray.direction, normal);
 
-        ray.origin = position.xyz + normal * RAY_BIAS;
-        ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
-        ray.inv_direction = 1.0 / ray.direction;
-        var p1 = dot(ray.direction, normal);
-
-        hit = traverse_top(ray, F32_MAX, 0.0);
-        info = hit_info(ray, hit);
-        s.sample_position = info.position;
-        s.sample_normal = info.normal;
+    hit = traverse_top(ray, F32_MAX, 0.0);
+    info = hit_info(ray, hit);
+    s.sample_position = info.position;
+    s.sample_normal = info.normal;
 
         // Only ambient radiance
-        s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
+    s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
 
         // Second bounce: from sample position
-        var p2 = 0.5;
-        var bounce_radiance = vec3<f32>(0.0);
-        if (hit.instance_index != U32_MAX) {
-            let bounce_candidate = select_light_candidate(
-                s.random,
-                info.position.xyz,
-                info.normal,
-                info.instance_index
-            );
+    var p2 = 0.5;
+    var bounce_radiance = vec3<f32>(0.0);
+    if (hit.instance_index != U32_MAX) {
+        let bounce_candidate = select_light_candidate(
+            s.random,
+            info.position.xyz,
+            info.normal,
+            info.instance_index
+        );
 
-            var bounce_ray: Ray;
-            var bounce_info: HitInfo;
+        var bounce_ray: Ray;
+        var bounce_info: HitInfo;
 
-            bounce_ray.origin = info.position.xyz + info.normal * RAY_BIAS;
-            bounce_ray.direction = bounce_candidate.direction;
-            bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-            p2 = bounce_candidate.p;
+        bounce_ray.origin = info.position.xyz + info.normal * RAY_BIAS;
+        bounce_ray.direction = bounce_candidate.direction;
+        bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
+        p2 = bounce_candidate.p;
 
-            if (dot(bounce_candidate.direction, info.normal) > 0.0) {
-                hit = traverse_top(bounce_ray, bounce_candidate.max_distance, bounce_candidate.min_distance);
-                bounce_info = hit_info(bounce_ray, hit);
+        if (dot(bounce_candidate.direction, info.normal) > 0.0) {
+            hit = traverse_top(bounce_ray, bounce_candidate.max_distance, bounce_candidate.min_distance);
+            bounce_info = hit_info(bounce_ray, hit);
 
-                surface = retreive_surface(info.material_index, info.uv);
-                surface.roughness = 1.0;
-                let radiance = input_radiance(bounce_ray, bounce_info, bounce_candidate.directional_index, bounce_candidate.emissive_index);
-                s.radiance += vec4<f32>(shading(-ray.direction, info.normal, bounce_ray.direction, surface, radiance), 0.0);
-            }
+            surface = retreive_surface(info.material_index, info.uv);
+            surface.roughness = 1.0;
+            let radiance = input_radiance(bounce_ray, bounce_info, bounce_candidate.directional_index, bounce_candidate.emissive_index);
+            s.radiance += vec4<f32>(shading(-ray.direction, info.normal, bounce_ray.direction, surface, radiance), 0.0);
         }
-
-        pdf = p1 * p2 * second_bounce_chance;
     }
 
     // Radiance clamping
@@ -1042,7 +1031,7 @@ fn indirect_lit_ambient(
     let previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
     var r = load_previous_reservoir(previous_uv, render_size, reservoir_size);
-    var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, pdf, MAX_TEMPORAL_REUSE_COUNT);
+    var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
     store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
     let output_color = restir.output;
