@@ -1,11 +1,11 @@
 use super::{
-    material::GpuStandardMaterials,
-    mesh::{GpuMeshes, MeshAssetState},
-    GpuLightSource, GpuLightSourceBuffer, MeshMaterialSystems,
+    material::GpuStandardMaterials, mesh::GpuMeshes, GpuLightSource, GpuLightSourceBuffer,
+    MeshMaterialSystems,
 };
 use crate::{
     mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
     transform::GlobalTransformQueue,
+    HikariConfig,
 };
 use bevy::{
     math::{Vec3A, Vec4Swizzles},
@@ -123,7 +123,7 @@ fn extract_mesh_transforms(
 }
 
 #[derive(Default, Deref, DerefMut)]
-pub struct GpuInstances(BTreeMap<Entity, GpuInstance>);
+pub struct GpuInstances(BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped)>);
 
 #[derive(Default, Deref, DerefMut)]
 pub struct GpuLightSources(BTreeMap<Entity, GpuLightSource>);
@@ -219,18 +219,9 @@ fn extract_instances<M: IntoStandardMaterial>(
 fn prepare_generic_instances<M: IntoStandardMaterial>(
     mut extracted_instances: ResMut<ExtractedInstances<M>>,
     mut instances: ResMut<GpuInstances>,
-    mut sources: ResMut<GpuLightSources>,
-    meshes: Res<GpuMeshes>,
-    materials: Res<GpuStandardMaterials>,
-    asset_state: Res<MeshAssetState>,
 ) {
-    if *asset_state == MeshAssetState::Dirty {
-        panic!("Mesh assets must be prepared before instances!");
-    }
-
     for removed in extracted_instances.removed.drain(..) {
         instances.remove(&removed);
-        sources.remove(&removed);
     }
 
     for (entity, aabb, transform, mesh, material) in extracted_instances.extracted.drain(..) {
@@ -256,37 +247,23 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
         min += center;
         max += center;
 
-        if let (Some(mesh), Some(material)) = (meshes.get(&mesh), materials.get(&material)) {
-            let min = Vec3::from(min);
-            let max = Vec3::from(max);
-            instances.insert(
-                entity,
+        // Note that here the `GpuInstance` is partially constructed
+        let min = Vec3::from(min);
+        let max = Vec3::from(max);
+        instances.insert(
+            entity,
+            (
                 GpuInstance {
                     min,
                     max,
                     transform,
                     inverse_transpose_model: transform.inverse().transpose(),
-                    slice: mesh.1,
-                    material: material.1,
-                    node_index: 0,
+                    ..Default::default()
                 },
-            );
-
-            // Add it to the light source list if it's emissive.
-            let emissive = material.0.emissive;
-            if emissive.w * emissive.xyz().length() > 0.0 {
-                let radius = aabb.half_extents.length();
-                sources.insert(
-                    entity,
-                    GpuLightSource {
-                        emissive,
-                        position: Vec3::from(center),
-                        radius,
-                        instance: 0,
-                    },
-                );
-            }
-        }
+                mesh,
+                material,
+            ),
+        );
     }
 }
 
@@ -299,19 +276,18 @@ pub struct InstanceIndex {
 #[derive(Component, Default, Clone, Copy)]
 pub struct DynamicInstanceIndex(pub u32);
 
+/// Note: this system must run AFTER [`prepare_mesh_assets`].
 fn prepare_instances(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    config: Res<HikariConfig>,
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut instances: ResMut<GpuInstances>,
     mut sources: ResMut<GpuLightSources>,
-    asset_state: Res<MeshAssetState>,
+    meshes: Res<GpuMeshes>,
+    materials: Res<GpuStandardMaterials>,
 ) {
-    if *asset_state == MeshAssetState::Dirty {
-        panic!("Mesh assets must be prepared before instances!");
-    }
-
     if instances.is_empty() {
         return;
     }
@@ -322,7 +298,7 @@ fn prepare_instances(
         let command_batch: Vec<_> = instances
             .iter()
             .enumerate()
-            .map(|(id, (entity, instance))| {
+            .map(|(id, (entity, (instance, _, _)))| {
                 let component = InstanceIndex {
                     instance: id as u32,
                     material: instance.material.value,
@@ -334,13 +310,47 @@ fn prepare_instances(
         commands.insert_or_spawn_batch(command_batch);
     };
 
-    if *asset_state != MeshAssetState::Clean || instances.is_changed() {
-        let mut values: Vec<_> = instances.values().cloned().collect();
+    if meshes.is_changed() || materials.is_changed() || instances.is_changed() {
+        // Important: update mesh and material info for every instance
+        sources.clear();
+
+        instances.retain(|entity, (instance, mesh, material)| {
+            if let (Some(mesh), Some(material)) = (meshes.get(mesh), materials.get(material)) {
+                instance.slice = mesh.1;
+                instance.material = material.1;
+
+                // Add it to the light source list if it's emissive.
+                let emissive = material.0.emissive;
+                if emissive.w * emissive.xyz().length() > config.emissive_threshold {
+                    let position = 0.5 * (instance.max + instance.min);
+                    let radius = 0.5 * (instance.max - instance.min).length();
+                    sources.insert(
+                        *entity,
+                        GpuLightSource {
+                            emissive,
+                            position,
+                            radius,
+                            instance: 0,
+                        },
+                    );
+                }
+
+                true
+            } else {
+                false
+            }
+        });
+
+        let mut values: Vec<_> = instances
+            .values()
+            .map(|(instance, _, _)| instance)
+            .cloned()
+            .collect();
         let bvh = BVH::build(&mut values);
         let nodes = bvh.flatten_custom(&GpuNode::pack);
 
         for (instance, value) in instances.values_mut().zip_eq(values.iter()) {
-            *instance = *value;
+            instance.0 = *value;
         }
 
         add_instance_indices(&instances);

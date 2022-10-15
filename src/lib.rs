@@ -222,6 +222,8 @@ pub struct HikariConfig {
     pub validation_interval: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
+    /// Threshold that emissive objects begin to lit others.
+    pub emissive_threshold: f32,
 }
 
 impl Default for HikariConfig {
@@ -229,6 +231,7 @@ impl Default for HikariConfig {
         Self {
             validation_interval: 4,
             solar_angle: PI / 36.0,
+            emissive_threshold: 0.1,
         }
     }
 }

@@ -20,7 +20,6 @@ impl Plugin for MeshPlugin {
             render_app
                 .init_resource::<GpuMeshes>()
                 .init_resource::<MeshRenderAssets>()
-                .init_resource::<MeshAssetState>()
                 .add_system_to_stage(RenderStage::Extract, extract_mesh_assets)
                 .add_system_to_stage(
                     RenderStage::Prepare,
@@ -61,17 +60,6 @@ impl MeshRenderAssets {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum MeshAssetState {
-    /// No updates for all mesh assets.
-    #[default]
-    Clean,
-    /// There are upcoming updates but mesh assets haven't been prepared.
-    Dirty,
-    /// There were asset updates and mesh assets have been prepared.
-    Updated,
-}
-
 /// Holds all GPU representatives of mesh assets.
 #[derive(Default, Deref, DerefMut)]
 pub struct GpuMeshes(HashMap<Handle<Mesh>, (GpuMesh, GpuMeshSlice)>);
@@ -85,7 +73,6 @@ pub struct ExtractedMeshes {
 fn extract_mesh_assets(
     mut commands: Commands,
     mut events: Extract<EventReader<AssetEvent<Mesh>>>,
-    mut state: ResMut<MeshAssetState>,
     assets: Extract<Res<Assets<Mesh>>>,
 ) {
     let mut changed_assets = HashSet::default();
@@ -109,28 +96,17 @@ fn extract_mesh_assets(
         }
     }
 
-    *state = if !extracted.is_empty() || !removed.is_empty() {
-        MeshAssetState::Dirty
-    } else {
-        MeshAssetState::Clean
-    };
-
     commands.insert_resource(ExtractedMeshes { extracted, removed });
 }
 
 fn prepare_mesh_assets(
     mut extracted_assets: ResMut<ExtractedMeshes>,
-    mut asset_state: ResMut<MeshAssetState>,
     mut assets: Local<BTreeMap<Handle<Mesh>, GpuMesh>>,
     mut meshes: ResMut<GpuMeshes>,
     mut render_assets: ResMut<MeshRenderAssets>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
-    if *asset_state == MeshAssetState::Clean {
-        return;
-    }
-
     for handle in extracted_assets.removed.drain(..) {
         assets.remove(&handle);
         meshes.remove(&handle);
@@ -178,6 +154,4 @@ fn prepare_mesh_assets(
     }
     render_assets.set(vertices, primitives, nodes);
     render_assets.write_buffer(&render_device, &render_queue);
-
-    *asset_state = MeshAssetState::Updated;
 }
