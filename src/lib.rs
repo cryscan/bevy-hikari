@@ -12,9 +12,10 @@ use bevy::{
     prelude::*,
     reflect::TypeUuid,
     render::{
+        extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_graph::{RenderGraph, SlotInfo, SlotType},
         texture::{CompressedImageFormats, ImageType},
-        Extract, RenderApp, RenderStage,
+        RenderApp,
     },
 };
 use std::f32::consts::PI;
@@ -40,7 +41,7 @@ pub mod graph {
 }
 
 pub const WORKGROUP_SIZE: u32 = 8;
-pub const NOISE_TEXTURE_COUNT: usize = 64;
+pub const NOISE_TEXTURE_COUNT: usize = 16;
 
 pub const UTILS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4462033275253590181);
@@ -139,54 +140,6 @@ impl Plugin for HikariPlugin {
                 include_bytes!("noise/LDR_RGBA_13.png"),
                 include_bytes!("noise/LDR_RGBA_14.png"),
                 include_bytes!("noise/LDR_RGBA_15.png"),
-                include_bytes!("noise/LDR_RGBA_16.png"),
-                include_bytes!("noise/LDR_RGBA_17.png"),
-                include_bytes!("noise/LDR_RGBA_18.png"),
-                include_bytes!("noise/LDR_RGBA_19.png"),
-                include_bytes!("noise/LDR_RGBA_20.png"),
-                include_bytes!("noise/LDR_RGBA_21.png"),
-                include_bytes!("noise/LDR_RGBA_22.png"),
-                include_bytes!("noise/LDR_RGBA_23.png"),
-                include_bytes!("noise/LDR_RGBA_24.png"),
-                include_bytes!("noise/LDR_RGBA_25.png"),
-                include_bytes!("noise/LDR_RGBA_26.png"),
-                include_bytes!("noise/LDR_RGBA_27.png"),
-                include_bytes!("noise/LDR_RGBA_28.png"),
-                include_bytes!("noise/LDR_RGBA_29.png"),
-                include_bytes!("noise/LDR_RGBA_30.png"),
-                include_bytes!("noise/LDR_RGBA_31.png"),
-                include_bytes!("noise/LDR_RGBA_32.png"),
-                include_bytes!("noise/LDR_RGBA_33.png"),
-                include_bytes!("noise/LDR_RGBA_34.png"),
-                include_bytes!("noise/LDR_RGBA_35.png"),
-                include_bytes!("noise/LDR_RGBA_36.png"),
-                include_bytes!("noise/LDR_RGBA_37.png"),
-                include_bytes!("noise/LDR_RGBA_38.png"),
-                include_bytes!("noise/LDR_RGBA_39.png"),
-                include_bytes!("noise/LDR_RGBA_40.png"),
-                include_bytes!("noise/LDR_RGBA_41.png"),
-                include_bytes!("noise/LDR_RGBA_42.png"),
-                include_bytes!("noise/LDR_RGBA_43.png"),
-                include_bytes!("noise/LDR_RGBA_44.png"),
-                include_bytes!("noise/LDR_RGBA_45.png"),
-                include_bytes!("noise/LDR_RGBA_46.png"),
-                include_bytes!("noise/LDR_RGBA_47.png"),
-                include_bytes!("noise/LDR_RGBA_48.png"),
-                include_bytes!("noise/LDR_RGBA_49.png"),
-                include_bytes!("noise/LDR_RGBA_50.png"),
-                include_bytes!("noise/LDR_RGBA_51.png"),
-                include_bytes!("noise/LDR_RGBA_52.png"),
-                include_bytes!("noise/LDR_RGBA_53.png"),
-                include_bytes!("noise/LDR_RGBA_54.png"),
-                include_bytes!("noise/LDR_RGBA_55.png"),
-                include_bytes!("noise/LDR_RGBA_56.png"),
-                include_bytes!("noise/LDR_RGBA_57.png"),
-                include_bytes!("noise/LDR_RGBA_58.png"),
-                include_bytes!("noise/LDR_RGBA_59.png"),
-                include_bytes!("noise/LDR_RGBA_60.png"),
-                include_bytes!("noise/LDR_RGBA_61.png"),
-                include_bytes!("noise/LDR_RGBA_62.png"),
-                include_bytes!("noise/LDR_RGBA_63.png"),
             ];
             let handles = Vec::from(bytes.map(|buffer| {
                 let image = Image::from_buffer(
@@ -198,11 +151,12 @@ impl Plugin for HikariPlugin {
                 .unwrap();
                 images.add(image)
             }));
-
-            commands.insert_resource(NoiseTexture(handles));
+            commands.insert_resource(NoiseTextures(handles));
         };
 
         app.init_resource::<HikariConfig>()
+            .add_plugin(ExtractResourcePlugin::<HikariConfig>::default())
+            .add_plugin(ExtractResourcePlugin::<NoiseTextures>::default())
             .add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshMaterialPlugin)
@@ -212,8 +166,6 @@ impl Plugin for HikariPlugin {
             .add_startup_system(noise_load_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_system_to_stage(RenderStage::Extract, extract_config);
-
             let prepass_node = PrepassNode::new(&mut render_app.world);
             let light_pass_node = LightPassNode::new(&mut render_app.world);
             let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
@@ -264,7 +216,7 @@ impl Plugin for HikariPlugin {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, ExtractResource)]
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
     pub validation_interval: usize,
@@ -281,9 +233,5 @@ impl Default for HikariConfig {
     }
 }
 
-fn extract_config(mut commands: Commands, config: Extract<Res<HikariConfig>>) {
-    commands.insert_resource(config.clone());
-}
-
-#[derive(Clone, Deref, DerefMut)]
-pub struct NoiseTexture(pub Vec<Handle<Image>>);
+#[derive(Clone, Deref, ExtractResource)]
+pub struct NoiseTextures(pub Vec<Handle<Image>>);

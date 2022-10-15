@@ -2,7 +2,7 @@ use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTarget},
     view::{FrameCounter, PreviousViewUniformOffset},
-    NoiseTexture, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
+    NoiseTextures, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
     ecs::system::{
@@ -20,7 +20,7 @@ use bevy::{
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{GpuImage, TextureCache},
         view::ViewUniformOffset,
-        Extract, RenderApp, RenderStage,
+        RenderApp, RenderStage,
     },
     utils::HashMap,
 };
@@ -38,16 +38,11 @@ impl Plugin for LightPlugin {
                 .init_resource::<ReservoirCache>()
                 .init_resource::<LightPipeline>()
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
-                .add_system_to_stage(RenderStage::Extract, extract_noise_texture)
                 .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
                 .add_system_to_stage(RenderStage::Queue, queue_light_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
         }
     }
-}
-
-fn extract_noise_texture(mut commands: Commands, noise_texture: Extract<Res<NoiseTexture>>) {
-    commands.insert_resource(noise_texture.clone());
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
@@ -528,7 +523,7 @@ fn queue_light_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
-    noise_texture: Res<NoiseTexture>,
+    noise_texture: Res<NoiseTextures>,
     images: Res<RenderAssets<Image>>,
     reservoir_cache: Res<ReservoirCache>,
     query: Query<(Entity, &PrepassTarget, &LightPassTarget), With<ExtractedCamera>>,
