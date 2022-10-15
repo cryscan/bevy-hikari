@@ -1,1 +1,1 @@
-pub use crate::HikariPlugin;
+pub use crate::{HikariConfig, HikariPlugin};
