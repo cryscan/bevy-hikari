@@ -515,7 +515,7 @@ fn queue_mesh_material_bind_group(
         instances.instance_buffer.binding(),
         instances.node_buffer.binding(),
         materials.buffer.binding(),
-        instances.light_source_buffer.binding(),
+        instances.source_buffer.binding(),
     ) {
         let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,

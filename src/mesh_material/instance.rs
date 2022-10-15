@@ -73,26 +73,30 @@ impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
 pub struct InstanceRenderAssets {
     pub instance_buffer: StorageBuffer<GpuInstanceBuffer>,
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
-    pub light_source_buffer: StorageBuffer<GpuLightSourceBuffer>,
+    pub source_buffer: StorageBuffer<GpuLightSourceBuffer>,
     pub instance_indices: DynamicUniformBuffer<InstanceIndex>,
 }
 
 impl InstanceRenderAssets {
-    pub fn set_nodes(&mut self, instances: Vec<GpuInstance>, nodes: Vec<GpuNode>) {
+    pub fn set(
+        &mut self,
+        instances: Vec<GpuInstance>,
+        nodes: Vec<GpuNode>,
+        sources: Vec<GpuLightSource>,
+    ) {
         self.instance_buffer.get_mut().data = instances;
+
         self.node_buffer.get_mut().count = nodes.len() as u32;
         self.node_buffer.get_mut().data = nodes;
-    }
 
-    pub fn set_light_sources(&mut self, light_sources: Vec<GpuLightSource>) {
-        self.light_source_buffer.get_mut().count = light_sources.len() as u32;
-        self.light_source_buffer.get_mut().data = light_sources;
+        self.source_buffer.get_mut().count = sources.len() as u32;
+        self.source_buffer.get_mut().data = sources;
     }
 
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
         self.instance_buffer.write_buffer(device, queue);
         self.node_buffer.write_buffer(device, queue);
-        self.light_source_buffer.write_buffer(device, queue);
+        self.source_buffer.write_buffer(device, queue);
         self.instance_indices.write_buffer(device, queue);
     }
 }
@@ -215,7 +219,7 @@ fn extract_instances<M: IntoStandardMaterial>(
 fn prepare_generic_instances<M: IntoStandardMaterial>(
     mut extracted_instances: ResMut<ExtractedInstances<M>>,
     mut instances: ResMut<GpuInstances>,
-    mut light_sources: ResMut<GpuLightSources>,
+    mut sources: ResMut<GpuLightSources>,
     meshes: Res<GpuMeshes>,
     materials: Res<GpuStandardMaterials>,
     asset_state: Res<MeshAssetState>,
@@ -226,7 +230,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
 
     for removed in extracted_instances.removed.drain(..) {
         instances.remove(&removed);
-        light_sources.remove(&removed);
+        sources.remove(&removed);
     }
 
     for (entity, aabb, transform, mesh, material) in extracted_instances.extracted.drain(..) {
@@ -272,7 +276,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
             let emissive = material.0.emissive;
             if emissive.w * emissive.xyz().length() > 0.0 {
                 let radius = aabb.half_extents.length();
-                light_sources.insert(
+                sources.insert(
                     entity,
                     GpuLightSource {
                         emissive,
@@ -301,7 +305,7 @@ fn prepare_instances(
     render_queue: Res<RenderQueue>,
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut instances: ResMut<GpuInstances>,
-    mut light_sources: ResMut<GpuLightSources>,
+    mut sources: ResMut<GpuLightSources>,
     asset_state: Res<MeshAssetState>,
 ) {
     if *asset_state == MeshAssetState::Dirty {
@@ -333,6 +337,7 @@ fn prepare_instances(
     if *asset_state != MeshAssetState::Clean || instances.is_changed() {
         let mut values: Vec<_> = instances.values().cloned().collect();
         let bvh = BVH::build(&mut values);
+        let nodes = bvh.flatten_custom(&GpuNode::pack);
 
         for (instance, value) in instances.values_mut().zip_eq(values.iter()) {
             *instance = *value;
@@ -340,17 +345,14 @@ fn prepare_instances(
 
         add_instance_indices(&instances);
 
-        let nodes = bvh.flatten_custom(&GpuNode::pack);
-        render_assets.set_nodes(values, nodes);
-
         for (id, (entity, _)) in instances.iter().enumerate() {
-            if let Some(light_source) = light_sources.get_mut(entity) {
-                light_source.instance = id as u32;
+            if let Some(source) = sources.get_mut(entity) {
+                source.instance = id as u32;
             }
         }
-        let light_sources = light_sources.values().cloned().collect();
-        render_assets.set_light_sources(light_sources);
+        let sources = sources.values().cloned().collect();
 
+        render_assets.set(values, nodes, sources);
         render_assets.write_buffer(&render_device, &render_queue);
     } else {
         add_instance_indices(&instances);

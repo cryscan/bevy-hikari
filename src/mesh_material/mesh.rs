@@ -1,5 +1,6 @@
 use super::{
-    GpuMesh, GpuMeshSlice, GpuNodeBuffer, GpuPrimitiveBuffer, GpuVertexBuffer, MeshMaterialSystems,
+    GpuMesh, GpuMeshSlice, GpuNode, GpuNodeBuffer, GpuPrimitive, GpuPrimitiveBuffer, GpuVertex,
+    GpuVertexBuffer, MeshMaterialSystems,
 };
 use bevy::{
     prelude::*,
@@ -40,11 +41,17 @@ pub struct MeshRenderAssets {
 }
 
 impl MeshRenderAssets {
-    pub fn clear(&mut self) {
-        self.vertex_buffer.get_mut().data.clear();
-        self.primitive_buffer.get_mut().data.clear();
-        self.node_buffer.get_mut().data.clear();
-        self.node_buffer.get_mut().count = 0;
+    pub fn set(
+        &mut self,
+        vertices: Vec<GpuVertex>,
+        primitives: Vec<GpuPrimitive>,
+        nodes: Vec<GpuNode>,
+    ) {
+        self.vertex_buffer.get_mut().data = vertices;
+        self.primitive_buffer.get_mut().data = primitives;
+
+        self.node_buffer.get_mut().count = nodes.len() as u32;
+        self.node_buffer.get_mut().data = nodes;
     }
 
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
@@ -140,28 +147,20 @@ fn prepare_mesh_assets(
         }
     }
 
-    render_assets.clear();
+    let mut vertices = vec![];
+    let mut primitives = vec![];
+    let mut nodes = vec![];
+
     for (handle, mesh) in assets.iter() {
-        let vertex = render_assets.vertex_buffer.get().data.len() as u32;
-        let primitive = render_assets.primitive_buffer.get().data.len() as u32;
-        let node_offset = render_assets.node_buffer.get().data.len() as u32;
+        let vertex = vertices.len() as u32;
+        let primitive = primitives.len() as u32;
+        let node_offset = nodes.len() as u32;
         let node_len = mesh.nodes.len() as u32;
 
-        render_assets
-            .vertex_buffer
-            .get_mut()
-            .data
-            .append(&mut mesh.vertices.clone());
-        render_assets
-            .primitive_buffer
-            .get_mut()
-            .data
-            .append(&mut mesh.primitives.clone());
-        render_assets
-            .node_buffer
-            .get_mut()
-            .data
-            .append(&mut mesh.nodes.clone());
+        let mut mesh = mesh.clone();
+        vertices.append(&mut mesh.vertices);
+        primitives.append(&mut mesh.primitives);
+        nodes.append(&mut mesh.nodes);
 
         meshes.insert(
             handle.clone_weak(),
@@ -176,6 +175,7 @@ fn prepare_mesh_assets(
             ),
         );
     }
+    render_assets.set(vertices, primitives, nodes);
     render_assets.write_buffer(&render_device, &render_queue);
 
     *asset_state = MeshAssetState::Updated;
