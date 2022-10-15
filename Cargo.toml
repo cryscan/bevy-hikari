@@ -11,6 +11,10 @@ keywords = ["gamedev", "graphics", "bevy", "3d"]
 categories = ["game-engines", "rendering"]
 exclude = ["assets"]
 
+[features]
+default = []
+warn_mesh_load = []
+
 [dependencies]
 bevy = { version = "0.8", default-features = false, features = [
     "bevy_asset",

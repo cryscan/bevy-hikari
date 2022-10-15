@@ -141,8 +141,9 @@ fn prepare_mesh_assets(
                 info!("Loaded mesh {}", assets.len());
                 assets.insert(handle, mesh);
             }
-            Err(err) => {
-                warn!("Encounter an error when loading mesh: {:#?}", err);
+            Err(_err) => {
+                #[cfg(feature = "warn_mesh_load")]
+                warn!("Encounter an error when loading mesh: {:#?}", _err);
             }
         }
     }
