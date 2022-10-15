@@ -123,7 +123,7 @@ fn extract_mesh_transforms(
 }
 
 #[derive(Default, Deref, DerefMut)]
-pub struct GpuInstances(BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped)>);
+pub struct GpuInstances(BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped, bool)>);
 
 #[derive(Default, Deref, DerefMut)]
 pub struct GpuLightSources(BTreeMap<Entity, GpuLightSource>);
@@ -177,7 +177,7 @@ fn instance_event_system<M: IntoStandardMaterial>(
 
 #[allow(clippy::type_complexity)]
 pub struct ExtractedInstances<M: IntoStandardMaterial> {
-    extracted: Vec<(Entity, Aabb, GlobalTransform, Handle<Mesh>, Handle<M>)>,
+    extracted: Vec<(Entity, Aabb, GlobalTransform, Handle<Mesh>, Handle<M>, bool)>,
     removed: Vec<Entity>,
 }
 
@@ -193,20 +193,16 @@ fn extract_instances<M: IntoStandardMaterial>(
         match event {
             InstanceEvent::Created(entity, mesh, material, visibility)
             | InstanceEvent::Modified(entity, mesh, material, visibility) => {
-                let is_visible = visibility.as_ref().map(|v| v.is_visible).unwrap_or(true);
-
+                let visible = visibility.as_ref().map(|v| v.is_visible).unwrap_or(true);
                 if let Ok((aabb, transform)) = query.get(*entity) {
-                    if is_visible {
-                        extracted.push((
-                            *entity,
-                            aabb.clone(),
-                            *transform,
-                            mesh.clone_weak(),
-                            material.clone_weak(),
-                        ));
-                    } else {
-                        removed.push(*entity);
-                    }
+                    extracted.push((
+                        *entity,
+                        aabb.clone(),
+                        *transform,
+                        mesh.clone_weak(),
+                        material.clone_weak(),
+                        visible,
+                    ));
                 }
             }
             InstanceEvent::Removed(entity) => removed.push(*entity),
@@ -224,7 +220,9 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
         instances.remove(&removed);
     }
 
-    for (entity, aabb, transform, mesh, material) in extracted_instances.extracted.drain(..) {
+    for (entity, aabb, transform, mesh, material, visible) in
+        extracted_instances.extracted.drain(..)
+    {
         let material = HandleUntyped::weak(material.id);
         let transform = transform.compute_matrix();
         let center = transform.transform_point3a(aabb.center);
@@ -262,6 +260,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
                 },
                 mesh,
                 material,
+                visible,
             ),
         );
     }
@@ -298,7 +297,7 @@ fn prepare_instances(
         let command_batch: Vec<_> = instances
             .iter()
             .enumerate()
-            .map(|(id, (entity, (instance, _, _)))| {
+            .map(|(id, (entity, (instance, _, _, _)))| {
                 let component = InstanceIndex {
                     instance: id as u32,
                     material: instance.material.value,
@@ -314,7 +313,11 @@ fn prepare_instances(
         // Important: update mesh and material info for every instance
         sources.clear();
 
-        instances.retain(|entity, (instance, mesh, material)| {
+        instances.retain(|entity, (instance, mesh, material, visible)| {
+            if !*visible {
+                return false;
+            }
+
             if let (Some(mesh), Some(material)) = (meshes.get(mesh), materials.get(material)) {
                 instance.slice = mesh.1;
                 instance.material = material.1;
@@ -343,7 +346,7 @@ fn prepare_instances(
 
         let mut values: Vec<_> = instances
             .values()
-            .map(|(instance, _, _)| instance)
+            .map(|(instance, _, _, _)| instance)
             .cloned()
             .collect();
         let bvh = BVH::build(&mut values);
