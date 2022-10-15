@@ -53,6 +53,7 @@ impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
             CoreStage::PostUpdate,
             instance_event_system::<M>
                 .after(TransformSystem::TransformPropagate)
+                .after(VisibilitySystems::VisibilityPropagate)
                 .after(VisibilitySystems::CalculateBounds),
         );
 
@@ -123,14 +124,16 @@ fn extract_mesh_transforms(
 }
 
 #[derive(Default, Deref, DerefMut)]
-pub struct GpuInstances(BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped, bool)>);
+pub struct GpuInstances(
+    BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped, ComputedVisibility)>,
+);
 
 #[derive(Default, Deref, DerefMut)]
 pub struct GpuLightSources(BTreeMap<Entity, GpuLightSource>);
 
 pub enum InstanceEvent<M: IntoStandardMaterial> {
-    Created(Entity, Handle<Mesh>, Handle<M>, Option<Visibility>),
-    Modified(Entity, Handle<Mesh>, Handle<M>, Option<Visibility>),
+    Created(Entity, Handle<Mesh>, Handle<M>, ComputedVisibility),
+    Modified(Entity, Handle<Mesh>, Handle<M>, ComputedVisibility),
     Removed(Entity),
 }
 
@@ -140,16 +143,16 @@ fn instance_event_system<M: IntoStandardMaterial>(
     removed: RemovedComponents<Handle<Mesh>>,
     mut set: ParamSet<(
         Query<
-            (Entity, &Handle<Mesh>, &Handle<M>, Option<&Visibility>),
+            (Entity, &Handle<Mesh>, &Handle<M>, &ComputedVisibility),
             Or<(Added<Handle<Mesh>>, Added<Handle<M>>)>,
         >,
         Query<
-            (Entity, &Handle<Mesh>, &Handle<M>, Option<&Visibility>),
+            (Entity, &Handle<Mesh>, &Handle<M>, &ComputedVisibility),
             Or<(
                 Changed<GlobalTransform>,
                 Changed<Handle<Mesh>>,
                 Changed<Handle<M>>,
-                Changed<Visibility>,
+                Changed<ComputedVisibility>,
             )>,
         >,
     )>,
@@ -162,7 +165,7 @@ fn instance_event_system<M: IntoStandardMaterial>(
             entity,
             mesh.clone_weak(),
             material.clone_weak(),
-            visibility.cloned(),
+            visibility.clone(),
         ));
     }
     for (entity, mesh, material, visibility) in &set.p1() {
@@ -170,14 +173,21 @@ fn instance_event_system<M: IntoStandardMaterial>(
             entity,
             mesh.clone_weak(),
             material.clone_weak(),
-            visibility.cloned(),
+            visibility.clone(),
         ));
     }
 }
 
 #[allow(clippy::type_complexity)]
 pub struct ExtractedInstances<M: IntoStandardMaterial> {
-    extracted: Vec<(Entity, Aabb, GlobalTransform, Handle<Mesh>, Handle<M>, bool)>,
+    extracted: Vec<(
+        Entity,
+        Aabb,
+        GlobalTransform,
+        Handle<Mesh>,
+        Handle<M>,
+        ComputedVisibility,
+    )>,
     removed: Vec<Entity>,
 }
 
@@ -193,7 +203,6 @@ fn extract_instances<M: IntoStandardMaterial>(
         match event {
             InstanceEvent::Created(entity, mesh, material, visibility)
             | InstanceEvent::Modified(entity, mesh, material, visibility) => {
-                let visible = visibility.as_ref().map(|v| v.is_visible).unwrap_or(true);
                 if let Ok((aabb, transform)) = query.get(*entity) {
                     extracted.push((
                         *entity,
@@ -201,7 +210,7 @@ fn extract_instances<M: IntoStandardMaterial>(
                         *transform,
                         mesh.clone_weak(),
                         material.clone_weak(),
-                        visible,
+                        visibility.clone(),
                     ));
                 }
             }
@@ -220,7 +229,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
         instances.remove(&removed);
     }
 
-    for (entity, aabb, transform, mesh, material, visible) in
+    for (entity, aabb, transform, mesh, material, visibility) in
         extracted_instances.extracted.drain(..)
     {
         let material = HandleUntyped::weak(material.id);
@@ -260,7 +269,7 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
                 },
                 mesh,
                 material,
-                visible,
+                visibility,
             ),
         );
     }
@@ -313,8 +322,8 @@ fn prepare_instances(
         // Important: update mesh and material info for every instance
         sources.clear();
 
-        instances.retain(|entity, (instance, mesh, material, visible)| {
-            if !*visible {
+        instances.retain(|entity, (instance, mesh, material, visibility)| {
+            if !visibility.is_visible_in_hierarchy() {
                 return false;
             }
 
