@@ -285,6 +285,7 @@ pub struct InstanceIndex {
 pub struct DynamicInstanceIndex(pub u32);
 
 /// Note: this system must run AFTER [`prepare_mesh_assets`].
+#[allow(clippy::too_many_arguments)]
 fn prepare_instances(
     mut commands: Commands,
     render_device: Res<RenderDevice>,

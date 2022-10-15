@@ -16,7 +16,7 @@ impl Plugin for TransformPlugin {
     }
 }
 
-#[derive(Component, Debug, PartialEq, Clone, Copy, Deref, DerefMut)]
+#[derive(Component, Debug, Clone, Deref, DerefMut)]
 pub struct GlobalTransformQueue(pub [Mat4; 2]);
 
 impl ExtractComponent for GlobalTransformQueue {
