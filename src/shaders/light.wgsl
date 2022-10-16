@@ -901,15 +901,21 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // Sample validation
     if (frame.number % frame.validation_interval == 0u) {
-        let sample_distance = distance(r.s.visible_position.xyz, r.s.sample_position.xyz);
         ray.origin = r.s.visible_position.xyz + r.s.visible_normal * RAY_BIAS;
         ray.direction = normalize(r.s.sample_position.xyz - ray.origin);
         ray.inv_direction = 1.0 / ray.direction;
 
-        hit = traverse_top(ray, F32_MAX, sample_distance - 0.1);
+        let candidate = select_light_candidate(
+            r.s.random,
+            r.s.visible_position.xyz,
+            r.s.visible_normal,
+            instance_material.x
+        );
+
+        hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
         info = hit_info(ray, hit);
 
-        let validation_radiance = input_radiance(ray, info, 0u, SAMPLE_ALL_EMISSIVE);
+        let validation_radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
         let luminance_ratio = luminance(validation_radiance.rgb) / luminance(r.s.radiance.rgb);
         if (luminance_ratio > 1.25 || luminance_ratio < 0.8) {
             set_reservoir(&r, s, restir.w_new);
@@ -1037,6 +1043,8 @@ fn indirect_lit_ambient(
     // According to the ReSTIR PT papar, the variance of ReSTIR estimation is proportional to the variance of average w
     // let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / max(1.0, r.count);
     // textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
+
+    storageBarrier();
 }
 
 // Normal-weighting function (4.4.1)
