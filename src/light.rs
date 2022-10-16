@@ -2,7 +2,7 @@ use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTarget},
     view::{FrameCounter, PreviousViewUniformOffset},
-    NoiseTextures, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
+    HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
 use bevy::{
     ecs::system::{
@@ -798,6 +798,7 @@ impl Node for LightPassNode {
         };
         let pipelines = world.resource::<CachedLightPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
+        let config = world.resource::<HikariConfig>();
 
         let mut pass = render_context
             .command_encoder
@@ -828,13 +829,15 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        for pipeline in pipelines.denoise {
-            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
-                pass.set_pipeline(pipeline);
+        if config.spatial_denoise {
+            for pipeline in pipelines.denoise {
+                if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
+                    pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                pass.dispatch_workgroups(count.x, count.y, 1);
+                    let size = camera.physical_target_size.unwrap();
+                    let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    pass.dispatch_workgroups(count.x, count.y, 1);
+                }
             }
         }
 
@@ -850,13 +853,15 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        for pipeline in pipelines.denoise {
-            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
-                pass.set_pipeline(pipeline);
+        if config.spatial_denoise {
+            for pipeline in pipelines.denoise {
+                if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
+                    pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                pass.dispatch_workgroups(count.x, count.y, 1);
+                    let size = camera.physical_target_size.unwrap();
+                    let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    pass.dispatch_workgroups(count.x, count.y, 1);
+                }
             }
         }
 

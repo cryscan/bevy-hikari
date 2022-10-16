@@ -1,7 +1,7 @@
 use crate::{
     light::{LightPassTarget, LightPipeline, SetDeferredBindGroup, OVERLAY_RENDER_TEXTURE_FORMAT},
     prepass::{PrepassPipeline, SetViewBindGroup},
-    OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
+    HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
 };
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
@@ -198,6 +198,7 @@ pub struct OverlayBindGroup(pub BindGroup);
 fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
+    config: Res<HikariConfig>,
     pipeline: Res<OverlayPipeline>,
     query: Query<(Entity, &LightPassTarget)>,
 ) {
@@ -205,21 +206,29 @@ fn queue_overlay_bind_groups(
         let current_id = target.current_id;
         let previous_id = 1 - current_id;
 
+        let (direct_view, indirect_view) = if config.spatial_denoise {
+            (
+                &target.direct_denoised_texture.texture_view,
+                &target.indirect_denoised_texture.texture_view,
+            )
+        } else {
+            (
+                &target.direct_render_texture.texture_view,
+                &target.indirect_render_texture.texture_view,
+            )
+        };
+
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.overlay_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(
-                        &target.direct_denoised_texture.texture_view,
-                    ),
+                    resource: BindingResource::TextureView(direct_view),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(
-                        &target.indirect_denoised_texture.texture_view,
-                    ),
+                    resource: BindingResource::TextureView(indirect_view),
                 },
                 BindGroupEntry {
                     binding: 2,

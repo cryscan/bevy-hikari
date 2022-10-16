@@ -76,7 +76,9 @@ pub struct FrameUniform {
     pub clear_color: Vec4,
     pub number: u32,
     pub validation_interval: u32,
+    pub max_temporal_reuse_count: u32,
     pub solar_angle: f32,
+    pub max_radiance: f32,
 }
 
 #[derive(Default)]
@@ -110,8 +112,13 @@ fn prepare_frame_uniform(
     //     }
     // }
 
-    let validation_interval = config.validation_interval as u32;
-    let solar_angle = config.solar_angle;
+    let HikariConfig {
+        validation_interval,
+        max_temporal_reuse_count,
+        solar_angle,
+        max_radiance,
+        ..
+    } = config.into_inner().clone();
 
     uniform.buffer.set(FrameUniform {
         kernel: Mat3 {
@@ -121,8 +128,10 @@ fn prepare_frame_uniform(
         },
         clear_color: clear_color.0.into(),
         number: counter.0 as u32,
-        validation_interval,
+        validation_interval: validation_interval as u32,
+        max_temporal_reuse_count: max_temporal_reuse_count as u32,
         solar_angle,
+        max_radiance,
     });
     uniform.buffer.write_buffer(&render_device, &render_queue);
     counter.0 += 1;

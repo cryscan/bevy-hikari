@@ -220,18 +220,27 @@ impl Plugin for HikariPlugin {
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
     pub validation_interval: usize,
+    /// Temporal reservoir sample count is capped by this value.
+    pub max_temporal_reuse_count: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
     pub emissive_threshold: f32,
+    /// Radiance clamping to reduce fireflies.
+    pub max_radiance: f32,
+    /// Whether to perform spatial denoise.
+    pub spatial_denoise: bool,
 }
 
 impl Default for HikariConfig {
     fn default() -> Self {
         Self {
             validation_interval: 4,
+            max_temporal_reuse_count: 50,
             solar_angle: PI / 36.0,
             emissive_threshold: 0.1,
+            max_radiance: 10.0,
+            spatial_denoise: true,
         }
     }
 }

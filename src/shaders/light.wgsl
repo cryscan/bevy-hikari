@@ -70,7 +70,6 @@ let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let OVERSAMPLE_THRESHOLD: f32 = 4.0;
-let MAX_TEMPORAL_REUSE_COUNT: f32 = 50.0;
 let SPATIAL_REUSE_COUNT: u32 = 1u;
 let SPATIAL_REUSE_RANGE: f32 = 30.0;
 
@@ -785,7 +784,7 @@ fn temporal_restir(
     surface: Surface,
     s: Sample,
     pdf: f32,
-    max_sample_count: f32
+    max_sample_count: u32
 ) -> RestirOutput {
     var out: RestirOutput;
     out.radiance = shading(
@@ -812,9 +811,10 @@ fn temporal_restir(
     }
 
     // Clamp...
-    (*r).w_sum *= max_sample_count / max((*r).count, max_sample_count);
-    (*r).w2_sum *= max_sample_count / max((*r).count, max_sample_count);
-    (*r).count = min((*r).count, max_sample_count);
+    let m = f32(max_sample_count);
+    (*r).w_sum *= m / max((*r).count, m);
+    (*r).w2_sum *= m / max((*r).count, m);
+    (*r).count = min((*r).count, m);
 
     out.radiance = shading(
         V,
@@ -900,7 +900,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
     var r = load_previous_reservoir(previous_uv, size, size);
-    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, MAX_TEMPORAL_REUSE_COUNT);
+    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
 
     // Sample validation
     if (frame.number % frame.validation_interval == 0u) {
@@ -990,10 +990,10 @@ fn indirect_lit_ambient(
     s.sample_position = info.position;
     s.sample_normal = info.normal;
 
-        // Only ambient radiance
+    // Only ambient radiance
     s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
 
-        // Second bounce: from sample position
+    // Second bounce: from sample position
     var p2 = 0.5;
     var bounce_radiance = vec3<f32>(0.0);
     if (hit.instance_index != U32_MAX) {
@@ -1031,7 +1031,7 @@ fn indirect_lit_ambient(
     let previous_uv = uv - velocity;
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
     var r = load_previous_reservoir(previous_uv, render_size, reservoir_size);
-    var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, MAX_TEMPORAL_REUSE_COUNT);
+    var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
     store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
     let output_color = restir.output;
@@ -1080,8 +1080,9 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let instance = textureLoad(instance_material_texture, output_coords, 0).x;
 
     let albedo = textureLoad(albedo_texture, output_coords);
+
     var irradiance = textureLoad(render_texture, render_coords).rgb / max(albedo.rgb, vec3<f32>(0.01));
-    irradiance *= max(sign(albedo.rgb - vec3<f32>(0.01)), vec3<f32>(0.0));
+    irradiance = min(irradiance, vec3<f32>(frame.max_radiance));
     let lum = luminance(irradiance);
 
     let r = load_reservoir(render_coords.x + output_size.x * render_coords.y);
@@ -1103,7 +1104,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
             let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
             irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
-            irradiance *= max(sign(sample_albedo - vec3<f32>(0.01)), vec3<f32>(0.0));
+            irradiance = min(irradiance, vec3<f32>(frame.max_radiance));
 
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
@@ -1219,7 +1220,9 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     w_sum = max(w_sum, 0.0001);
-    let color = vec4<f32>(albedo.rgb * irradiance_sum / w_sum, albedo.a);
+
+    irradiance = irradiance_sum / w_sum;
+    let color = vec4<f32>(albedo.rgb * irradiance, albedo.a);
     textureStore(denoised_texture_3, output_coords, color);
 #endif
 }
