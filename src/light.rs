@@ -63,10 +63,7 @@ pub struct GpuReservoirBuffer {
 }
 
 #[derive(Default, Deref, DerefMut)]
-pub struct ReservoirBuffer(Vec<StorageBuffer<GpuReservoirBuffer>>);
-
-#[derive(Default, Deref, DerefMut)]
-pub struct ReservoirCache(HashMap<Entity, ReservoirBuffer>);
+pub struct ReservoirCache(HashMap<Entity, Vec<StorageBuffer<GpuReservoirBuffer>>>);
 
 pub struct LightPipeline {
     pub view_layout: BindGroupLayout,
@@ -275,6 +272,28 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
+                // Previous Spatial Reservoir
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Current Spatial Reservoir
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -422,18 +441,15 @@ fn prepare_light_pass_targets(
             } {
                 // Reservoirs of this entity should be updated.
                 let len = (size.x * size.y) as usize;
-                let buffer = GpuReservoirBuffer {
-                    data: vec![GpuPackedReservoir::default(); len],
-                };
-                let mut reservoirs = ReservoirBuffer(vec![
-                    StorageBuffer::from(buffer.clone()),
-                    StorageBuffer::from(buffer.clone()),
-                    StorageBuffer::from(buffer.clone()),
-                    StorageBuffer::from(buffer),
-                ]);
-                for buffer in reservoirs.iter_mut() {
-                    buffer.write_buffer(&render_device, &render_queue);
-                }
+                let reservoirs = (0..8)
+                    .map(|_| {
+                        let mut buffer = StorageBuffer::from(GpuReservoirBuffer {
+                            data: vec![GpuPackedReservoir::default(); len],
+                        });
+                        buffer.write_buffer(&render_device, &render_queue);
+                        buffer
+                    })
+                    .collect();
                 reservoir_cache.insert(entity, reservoirs);
             }
 
@@ -701,6 +717,14 @@ fn queue_light_bind_groups(
                         binding: 1,
                         resource: reservoir_bindings[previous_id].clone(),
                     },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: reservoir_bindings[2 + current_id].clone(),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: reservoir_bindings[2 + previous_id].clone(),
+                    },
                 ],
             });
             let indirect_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
@@ -709,11 +733,19 @@ fn queue_light_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: reservoir_bindings[2 + current_id].clone(),
+                        resource: reservoir_bindings[4 + current_id].clone(),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: reservoir_bindings[2 + previous_id].clone(),
+                        resource: reservoir_bindings[4 + previous_id].clone(),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: reservoir_bindings[6 + current_id].clone(),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: reservoir_bindings[6 + previous_id].clone(),
                     },
                 ],
             });

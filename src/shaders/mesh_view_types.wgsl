@@ -6,8 +6,8 @@ struct Frame {
     number: u32,
     validation_interval: u32,
     max_temporal_reuse_count: u32,
+    max_spatial_reuse_count: u32,
     solar_angle: f32,
-    max_radiance: f32,
 };
 
 struct PreviousView {
