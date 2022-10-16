@@ -1222,7 +1222,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_luminance = luminance(irradiance);
 
 #ifdef RADIANCE_CLAMP
-            if (sample_luminance > 0.5) {
+            if (sample_luminance > frame.max_indirect_luminance) {
                 continue;
             }
 #endif

@@ -8,6 +8,7 @@ struct Frame {
     max_temporal_reuse_count: u32,
     max_spatial_reuse_count: u32,
     solar_angle: f32,
+    max_indirect_luminance: f32,
 };
 
 struct PreviousView {
