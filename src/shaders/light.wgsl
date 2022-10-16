@@ -74,8 +74,8 @@ let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let OVERSAMPLE_THRESHOLD: f32 = 4.0;
-let SPATIAL_REUSE_COUNT: u32 = 1u;
-let SPATIAL_REUSE_RANGE: f32 = 30.0;
+let SPATIAL_REUSE_COUNT: u32 = 7u;
+let SPATIAL_REUSE_RANGE: f32 = 5.0;
 
 struct Ray {
     origin: vec3<f32>,
@@ -825,6 +825,94 @@ fn temporal_restir(
     return out;
 }
 
+fn spatial_restir(
+    r: ptr<function, Reservoir>,
+    temporal_output: RestirOutput,
+    previous_uv: vec2<f32>,
+    coords: vec2<i32>,
+    reservoir_size: vec2<i32>,
+    V: vec3<f32>,
+    surface: Surface,
+    s: Sample,
+    max_sample_count: u32
+) -> RestirOutput {
+    var out: RestirOutput = temporal_output;
+
+    let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
+
+    let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
+    let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
+
+    let instance_miss = (*r).s.visible_instance != s.visible_instance;
+    let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
+
+    if (depth_miss || instance_miss || normal_miss) {
+        set_reservoir(r, s, out.w_new);
+    }
+
+    var rand = s.random;
+    for (var i = 0u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
+        var offset = vec2<i32>(0);
+        if (i > 0u) {
+            rand = fract(rand + f32(frame.number) * GOLDEN_RATIO);
+            offset = vec2<i32>(round(sample_cosine_hemisphere(rand.zw).xy * SPATIAL_REUSE_RANGE));
+        }
+
+        let sample_coords = coords + offset;
+        if (any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size)) {
+            continue;
+        }
+
+        let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
+        if (distance((*r).s.visible_position.w, q.s.visible_position.w) > 0.05 || dot((*r).s.visible_normal, q.s.visible_normal) < 0.866) {
+            continue;
+        }
+
+        var inv_jac = 1.0;
+        // if (q.s.sample_position.w > 0.5) {
+        //     let dqq = q.s.visible_position.xyz - q.s.sample_position.xyz;
+        //     let drq = (*r).s.visible_position.xyz - q.s.sample_position.xyz;
+        //     let cos_r = abs(dot(normalize(drq), q.s.sample_normal));
+        //     let cos_q = abs(dot(normalize(dqq), q.s.sample_normal));
+        //     inv_jac = (cos_q * dot(drq, drq)) / max(cos_r * dot(dqq, dqq), 0.0001);
+        // }
+
+        let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
+        if (dot(sample_direction, (*r).s.visible_normal) < 0.0) {
+            continue;
+        }
+
+        let radiance = shading(
+            V,
+            q.s.visible_normal,
+            normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
+            surface,
+            q.s.radiance
+        );
+        let pdf = luminance(radiance) * inv_jac;
+
+        merge_reservoir(r, q, pdf);
+    }
+
+    // Clamp...
+    let m = f32(max_sample_count);
+    (*r).w_sum *= m / max((*r).count, m);
+    (*r).w2_sum *= m / max((*r).count, m);
+    (*r).count = min((*r).count, m);
+
+    out.radiance = shading(
+        V,
+        (*r).s.visible_normal,
+        normalize((*r).s.sample_position.xyz - (*r).s.visible_position.xyz),
+        surface,
+        (*r).s.radiance
+    );
+    (*r).w = (*r).w_sum / max((*r).count * luminance(out.radiance), 0.0001);
+    out.output = (*r).w * out.radiance;
+
+    return out;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
@@ -1037,14 +1125,31 @@ fn indirect_lit_ambient(
     var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
     store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
-    let output_color = restir.output;
-    textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
+    // let output_color = restir.output;
+    // textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
 
     // According to the ReSTIR PT papar, the variance of ReSTIR estimation is proportional to the variance of average w
     // let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / max(1.0, r.count);
     // textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
 
     storageBarrier();
+
+    r = load_previous_spatial_reservoir(previous_uv, render_size, reservoir_size);
+    restir = spatial_restir(
+        &r,
+        restir,
+        previous_uv,
+        coords,
+        reservoir_size,
+        view_direction,
+        surface,
+        s,
+        frame.max_spatial_reuse_count
+    );
+    store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
+
+    let output_color = restir.output;
+    textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
 }
 
 // Normal-weighting function (4.4.1)
@@ -1115,6 +1220,12 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
             let sample_luminance = luminance(irradiance);
+
+#ifdef RADIANCE_CLAMP
+            if (sample_luminance > 0.5) {
+                continue;
+            }
+#endif
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);

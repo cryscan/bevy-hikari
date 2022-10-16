@@ -310,11 +310,12 @@ impl FromWorld for LightPipeline {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Hash, PartialEq, Eq)]
 pub struct LightPipelineKey {
     pub entry_point: String,
-    pub texture_count: usize,
-    pub filter_level: usize,
+    pub texture_count: u8,
+    pub denoiser_level: u8,
+    pub radiance_clamp: bool,
 }
 
 impl SpecializedComputePipeline for LightPipeline {
@@ -322,10 +323,16 @@ impl SpecializedComputePipeline for LightPipeline {
 
     fn specialize(&self, key: Self::Key) -> ComputePipelineDescriptor {
         let mut shader_defs = vec![];
+
         if key.texture_count < 1 {
             shader_defs.push("NO_TEXTURE".into());
         }
-        shader_defs.push(format!("DENOISER_LEVEL_{}", key.filter_level));
+
+        shader_defs.push(format!("DENOISER_LEVEL_{}", key.denoiser_level));
+
+        if key.radiance_clamp {
+            shader_defs.push("RADIANCE_CLAMP".into());
+        }
 
         ComputePipelineDescriptor {
             label: None,
@@ -471,7 +478,8 @@ fn prepare_light_pass_targets(
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     indirect_lit_ambient: CachedComputePipelineId,
-    denoise: [CachedComputePipelineId; 4],
+    direct_denoise: [CachedComputePipelineId; 4],
+    indirect_denoise: [CachedComputePipelineId; 4],
 }
 
 fn queue_light_pipelines(
@@ -482,43 +490,46 @@ fn queue_light_pipelines(
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
     pipeline.texture_layout = Some(layout.layout.clone());
+    let texture_count = layout.texture_count as u8;
 
-    let direct_lit = pipelines.specialize(
-        &mut pipeline_cache,
-        &pipeline,
-        LightPipelineKey {
-            entry_point: "direct_lit".into(),
-            texture_count: layout.texture_count,
-            filter_level: 0,
-        },
-    );
+    let key = LightPipelineKey {
+        entry_point: "direct_lit".into(),
+        texture_count,
+        ..Default::default()
+    };
+    let direct_lit = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    let indirect_lit_ambient = pipelines.specialize(
-        &mut pipeline_cache,
-        &pipeline,
-        LightPipelineKey {
-            entry_point: "indirect_lit_ambient".into(),
-            texture_count: layout.texture_count,
-            filter_level: 0,
-        },
-    );
+    let key = LightPipelineKey {
+        entry_point: "indirect_lit_ambient".into(),
+        texture_count,
+        ..Default::default()
+    };
+    let indirect_lit_ambient = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    let denoise = [0, 1, 2, 3].map(|level| {
-        pipelines.specialize(
-            &mut pipeline_cache,
-            &pipeline,
-            LightPipelineKey {
-                entry_point: "denoise_atrous".into(),
-                texture_count: layout.texture_count,
-                filter_level: level,
-            },
-        )
+    let direct_denoise = [0, 1, 2, 3].map(|level| {
+        let key = LightPipelineKey {
+            entry_point: "denoise_atrous".into(),
+            texture_count: texture_count,
+            denoiser_level: level,
+            radiance_clamp: false,
+        };
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    });
+    let indirect_denoise = [0, 1, 2, 3].map(|level| {
+        let key = LightPipelineKey {
+            entry_point: "denoise_atrous".into(),
+            texture_count: texture_count,
+            denoiser_level: level,
+            radiance_clamp: true,
+        };
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
 
     commands.insert_resource(CachedLightPipelines {
         direct_lit,
         indirect_lit_ambient,
-        denoise,
+        direct_denoise,
+        indirect_denoise,
     })
 }
 
@@ -862,7 +873,7 @@ impl Node for LightPassNode {
         }
 
         if config.spatial_denoise {
-            for pipeline in pipelines.denoise {
+            for pipeline in pipelines.direct_denoise {
                 if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
                     pass.set_pipeline(pipeline);
 
@@ -886,7 +897,7 @@ impl Node for LightPassNode {
         }
 
         if config.spatial_denoise {
-            for pipeline in pipelines.denoise {
+            for pipeline in pipelines.indirect_denoise {
                 if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
                     pass.set_pipeline(pipeline);
 
