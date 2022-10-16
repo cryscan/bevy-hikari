@@ -909,7 +909,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         ray.direction = normalize(r.s.sample_position.xyz - ray.origin);
         ray.inv_direction = 1.0 / ray.direction;
 
-        hit = traverse_top(ray, sample_distance + 0.1, sample_distance - 0.1);
+        hit = traverse_top(ray, F32_MAX, sample_distance - 0.1);
         info = hit_info(ray, hit);
 
         let validation_radiance = input_radiance(ray, info, 0u, SAMPLE_ALL_EMISSIVE);
