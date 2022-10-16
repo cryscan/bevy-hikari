@@ -35,6 +35,7 @@ impl ExtractComponent for GlobalTransformQueue {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn previous_transform_system(
     mut commands: Commands,
     mut queries: ParamSet<(
@@ -58,6 +59,7 @@ fn previous_transform_system(
 #[derive(Component, Debug, Clone, Copy, Deref, DerefMut)]
 pub struct HierarchyVisibility(pub bool);
 
+#[allow(clippy::type_complexity)]
 fn hierarchy_visibility_system(
     mut commands: Commands,
     mut queries: ParamSet<(
