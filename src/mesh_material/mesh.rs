@@ -107,6 +107,10 @@ fn prepare_mesh_assets(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
+    if extracted_assets.removed.is_empty() && extracted_assets.extracted.is_empty() {
+        return;
+    }
+
     for handle in extracted_assets.removed.drain(..) {
         assets.remove(&handle);
         meshes.remove(&handle);
