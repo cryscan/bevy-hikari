@@ -224,6 +224,8 @@ pub struct HikariConfig {
     pub max_temporal_reuse_count: usize,
     /// Spatial reservoir sample count is capped by this value.
     pub max_spatial_reuse_count: usize,
+    /// Threshold for oversampling the direct illumination if the sample count is low.
+    pub direct_oversample_threshold: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
@@ -244,6 +246,7 @@ impl Default for HikariConfig {
             validation_interval: 4,
             max_temporal_reuse_count: 50,
             max_spatial_reuse_count: 500,
+            direct_oversample_threshold: 1,
             solar_angle: PI / 36.0,
             emissive_threshold: 0.00390625,
             max_indirect_luminance: 1.0,

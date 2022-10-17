@@ -1038,7 +1038,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // ReSTIR: Temporal
     var previous_uv = uv - velocity;
     var r = load_previous_reservoir(previous_uv, size);
-    let restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
+    var restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
 
     // Sample validation
     if (frame.number % frame.validation_interval == 0u) {
@@ -1061,6 +1061,32 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         if (luminance_ratio > 1.25 || luminance_ratio < 0.8) {
             set_reservoir(&r, s, restir.w_new);
         }
+    }
+
+    // Perform oversampling until the sample count reaches the threshold.
+    for (var i = u32(r.count); i <= frame.direct_oversample_threshold; i += 1u) {
+        s.random = fract(s.random + GOLDEN_RATIO);
+
+        let candidate = select_light_candidate(s.random, position.xyz, normal, instance_material.x);
+
+        ray.origin = position.xyz + normal * RAY_BIAS;
+        ray.direction = candidate.direction;
+        ray.inv_direction = 1.0 / ray.direction;
+
+        if (dot(candidate.direction, normal) > 0.0) {
+            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
+            info = hit_info(ray, hit);
+
+            s.sample_position = info.position;
+            s.sample_normal = info.normal;
+
+            s.radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
+        } else {
+            s.sample_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
+            s.sample_normal = -ray.direction;
+        }
+
+        restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
     }
 
     store_reservoir(coords.x + size.x * coords.y, r);

@@ -78,6 +78,7 @@ pub struct FrameUniform {
     pub validation_interval: u32,
     pub max_temporal_reuse_count: u32,
     pub max_spatial_reuse_count: u32,
+    pub direct_oversample_threshold: u32,
     pub solar_angle: f32,
     pub max_indirect_luminance: f32,
 }
@@ -117,6 +118,7 @@ fn prepare_frame_uniform(
         validation_interval,
         max_temporal_reuse_count,
         max_spatial_reuse_count,
+        direct_oversample_threshold,
         solar_angle,
         max_indirect_luminance,
         ..
@@ -125,6 +127,7 @@ fn prepare_frame_uniform(
     let validation_interval = validation_interval as u32;
     let max_temporal_reuse_count = max_temporal_reuse_count as u32;
     let max_spatial_reuse_count = max_spatial_reuse_count as u32;
+    let direct_oversample_threshold = direct_oversample_threshold as u32;
 
     uniform.buffer.set(FrameUniform {
         kernel: Mat3 {
@@ -137,6 +140,7 @@ fn prepare_frame_uniform(
         validation_interval,
         max_temporal_reuse_count,
         max_spatial_reuse_count,
+        direct_oversample_threshold,
         solar_angle,
         max_indirect_luminance,
     });
