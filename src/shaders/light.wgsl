@@ -806,7 +806,7 @@ fn temporal_restir(
         update_reservoir(r, s, out.w_new);
     }
 
-    // Clamp...    
+    // Clamp...
     let m = f32(max_sample_count);
     if ((*r).count > m) {
         (*r).w_sum *= m / (*r).count;

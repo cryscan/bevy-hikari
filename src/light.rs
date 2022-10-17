@@ -509,7 +509,7 @@ fn queue_light_pipelines(
     let direct_denoise = [0, 1, 2, 3].map(|level| {
         let key = LightPipelineKey {
             entry_point: "denoise_atrous".into(),
-            texture_count: texture_count,
+            texture_count,
             denoiser_level: level,
             radiance_clamp: false,
         };
@@ -518,7 +518,7 @@ fn queue_light_pipelines(
     let indirect_denoise = [0, 1, 2, 3].map(|level| {
         let key = LightPipelineKey {
             entry_point: "denoise_atrous".into(),
-            texture_count: texture_count,
+            texture_count,
             denoiser_level: level,
             radiance_clamp: true,
         };
