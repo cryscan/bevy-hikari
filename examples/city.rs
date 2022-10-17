@@ -4,6 +4,7 @@ use bevy::{
     prelude::*,
     render::camera::CameraRenderGraph,
 };
+use bevy_editor_pls::prelude::*;
 use bevy_hikari::prelude::*;
 use bevy_mod_raycast::{
     DefaultRaycastingPlugin, Intersection, RayCastMesh, RayCastMethod, RayCastSource, RaycastSystem,
@@ -19,13 +20,9 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
-        // .insert_resource(ClearColor(Color::rgb_u8(0, 171, 240)))
-        // .insert_resource(AmbientLight {
-        //     color: Color::rgb_u8(135, 206, 235),
-        //     ..Default::default()
-        // })
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
+        .add_plugin(EditorPlugin)
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())

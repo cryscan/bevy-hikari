@@ -154,7 +154,8 @@ impl Plugin for HikariPlugin {
             commands.insert_resource(NoiseTextures(handles));
         };
 
-        app.init_resource::<HikariConfig>()
+        app.register_type::<HikariConfig>()
+            .init_resource::<HikariConfig>()
             .add_plugin(ExtractResourcePlugin::<HikariConfig>::default())
             .add_plugin(ExtractResourcePlugin::<NoiseTextures>::default())
             .add_plugin(TransformPlugin)
@@ -216,7 +217,8 @@ impl Plugin for HikariPlugin {
     }
 }
 
-#[derive(Debug, Clone, ExtractResource)]
+#[derive(Debug, Clone, ExtractResource, Reflect)]
+#[reflect(Resource)]
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
     pub validation_interval: usize,
