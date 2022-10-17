@@ -806,11 +806,13 @@ fn temporal_restir(
         update_reservoir(r, s, out.w_new);
     }
 
-    // Clamp...
+    // Clamp...    
     let m = f32(max_sample_count);
-    (*r).w_sum *= m / max((*r).count, m);
-    (*r).w2_sum *= m / max((*r).count, m);
-    (*r).count = min((*r).count, m);
+    if ((*r).count > m) {
+        (*r).w_sum *= m / (*r).count;
+        (*r).w2_sum *= m / (*r).count;
+        (*r).count = m;
+    }
 
     out.radiance = shading(
         V,
@@ -896,9 +898,11 @@ fn spatial_restir(
 
     // Clamp...
     let m = f32(max_sample_count);
-    (*r).w_sum *= m / max((*r).count, m);
-    (*r).w2_sum *= m / max((*r).count, m);
-    (*r).count = min((*r).count, m);
+    if ((*r).count > m) {
+        (*r).w_sum *= m / (*r).count;
+        (*r).w2_sum *= m / (*r).count;
+        (*r).count = m;
+    }
 
     out.radiance = shading(
         V,
