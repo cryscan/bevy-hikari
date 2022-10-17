@@ -478,6 +478,7 @@ fn prepare_light_pass_targets(
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     indirect_lit_ambient: CachedComputePipelineId,
+    indirect_spatial_reuse: CachedComputePipelineId,
     direct_denoise: [CachedComputePipelineId; 4],
     indirect_denoise: [CachedComputePipelineId; 4],
 }
@@ -508,6 +509,14 @@ fn queue_light_pipelines(
     };
     let indirect_lit_ambient = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
+    let key = LightPipelineKey {
+        entry_point: "indirect_spatial_reuse".into(),
+        texture_count,
+        denoiser_level: 0,
+        radiance_clamp: false,
+    };
+    let indirect_spatial_reuse = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+
     let direct_denoise = [0, 1, 2, 3].map(|level| {
         let key = LightPipelineKey {
             entry_point: "denoise_atrous".into(),
@@ -530,6 +539,7 @@ fn queue_light_pipelines(
     commands.insert_resource(CachedLightPipelines {
         direct_lit,
         indirect_lit_ambient,
+        indirect_spatial_reuse,
         direct_denoise,
         indirect_denoise,
     })
@@ -890,6 +900,15 @@ impl Node for LightPassNode {
         pass.set_bind_group(6, &light_bind_group.indirect_reservoir, &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.indirect_lit_ambient)
+        {
+            pass.set_pipeline(pipeline);
+
+            let size = camera.physical_target_size.unwrap();
+            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            pass.dispatch_workgroups(count.x, count.y, 1);
+        }
+        if let Some(pipeline) =
+            pipeline_cache.get_compute_pipeline(pipelines.indirect_spatial_reuse)
         {
             pass.set_pipeline(pipeline);
 

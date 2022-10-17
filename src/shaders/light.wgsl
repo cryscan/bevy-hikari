@@ -313,6 +313,12 @@ fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
     return hit;
 }
 
+fn sample_uniform_disk(rand: vec2<f32>) -> vec2<f32> {
+    let r = sqrt(rand.x);
+    let theta = 2.0 * PI * rand.y;
+    return vec2<f32>(r * cos(theta), r * sin(theta));
+}
+
 fn sample_cosine_hemisphere(rand: vec2<f32>) -> vec3<f32> {
     let r = sqrt(rand.x);
     let theta = 2.0 * PI * rand.y;
@@ -526,6 +532,16 @@ fn empty_sample() -> Sample {
     return s;
 }
 
+fn empty_reservoir() -> Reservoir {
+    var r: Reservoir;
+    r.s = empty_sample();
+    r.count = 0.0;
+    r.w = 0.0;
+    r.w_sum = 0.0;
+    r.w2_sum = 0.0;
+    return r;
+}
+
 fn unpack_reservoir(packed: PackedReservoir) -> Reservoir {
     var r: Reservoir;
 
@@ -589,10 +605,10 @@ fn pack_reservoir(r: Reservoir) -> PackedReservoir {
     return packed;
 }
 
-fn load_previous_reservoir(uv: vec2<f32>, render_size: vec2<i32>, reservoir_size: vec2<i32>) -> Reservoir {
-    var r: Reservoir;
+fn load_previous_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> Reservoir {
+    var r = empty_reservoir();
     if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
-        let coords = vec2<i32>(uv * vec2<f32>(render_size));
+        let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
         let index = coords.x + reservoir_size.x * coords.y;
         let packed = previous_reservoir_buffer.data[index];
         r = unpack_reservoir(packed);
@@ -601,7 +617,6 @@ fn load_previous_reservoir(uv: vec2<f32>, render_size: vec2<i32>, reservoir_size
 }
 
 fn load_reservoir(index: i32) -> Reservoir {
-    var r: Reservoir;
     let packed = reservoir_buffer.data[index];
     return unpack_reservoir(packed);
 }
@@ -610,10 +625,10 @@ fn store_reservoir(index: i32, r: Reservoir) {
     reservoir_buffer.data[index] = pack_reservoir(r);
 }
 
-fn load_previous_spatial_reservoir(uv: vec2<f32>, render_size: vec2<i32>, reservoir_size: vec2<i32>) -> Reservoir {
-    var r: Reservoir;
+fn load_previous_spatial_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> Reservoir {
+    var r = empty_reservoir();
     if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
-        let coords = vec2<i32>(uv * vec2<f32>(render_size));
+        let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
         let index = coords.x + reservoir_size.x * coords.y;
         let packed = previous_spatial_reservoir_buffer.data[index];
         r = unpack_reservoir(packed);
@@ -622,7 +637,6 @@ fn load_previous_spatial_reservoir(uv: vec2<f32>, render_size: vec2<i32>, reserv
 }
 
 fn load_spatial_reservoir(index: i32) -> Reservoir {
-    var r: Reservoir;
     let packed = spatial_reservoir_buffer.data[index];
     return unpack_reservoir(packed);
 }
@@ -775,7 +789,6 @@ fn env_brdf(
 
 fn temporal_restir(
     r: ptr<function, Reservoir>,
-    previous_uv: vec2<f32>,
     V: vec3<f32>,
     surface: Surface,
     s: Sample,
@@ -791,8 +804,6 @@ fn temporal_restir(
         s.radiance
     );
     out.w_new = luminance(out.radiance) / pdf;
-
-    let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
 
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
     let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
@@ -860,8 +871,6 @@ fn compute_inv_jacobian(current_sample: Sample, neighbor_sample: Sample) -> f32 
 
 fn spatial_restir(
     r: ptr<function, Reservoir>,
-    temporal_output: RestirOutput,
-    previous_uv: vec2<f32>,
     coords: vec2<i32>,
     reservoir_size: vec2<i32>,
     V: vec3<f32>,
@@ -869,9 +878,7 @@ fn spatial_restir(
     s: Sample,
     max_sample_count: u32
 ) -> RestirOutput {
-    var out: RestirOutput = temporal_output;
-
-    let uv_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
+    var rand = s.random;
 
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
     let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
@@ -880,16 +887,24 @@ fn spatial_restir(
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
     if (depth_miss || instance_miss || normal_miss) {
-        set_reservoir(r, s, out.w_new);
+        set_reservoir(r, s, 0.0);
     }
 
-    var rand = s.random;
-    for (var i = 0u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
-        var offset = vec2<i32>(0);
-        if (i > 0u) {
-            rand = fract(rand + f32(frame.number) * GOLDEN_RATIO);
-            offset = vec2<i32>(round(sample_cosine_hemisphere(rand.zw).xy * SPATIAL_REUSE_RANGE));
-        }
+    // Always merge the reservoir on its own location at first.
+    let q = load_reservoir(coords.x + reservoir_size.x * coords.y);
+    let radiance = shading(
+        V,
+        q.s.visible_normal,
+        normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
+        surface,
+        q.s.radiance
+    );
+    let pdf = luminance(radiance);
+    merge_reservoir(r, q, pdf);
+
+    for (var i = 0u; i < SPATIAL_REUSE_COUNT; i += 1u) {
+        rand = fract(rand + f32(frame.number) * GOLDEN_RATIO);
+        let offset = vec2<i32>(round(sample_uniform_disk(rand.zw) * SPATIAL_REUSE_RANGE));
 
         let sample_coords = coords + offset;
         if (any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size)) {
@@ -897,13 +912,9 @@ fn spatial_restir(
         }
 
         let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
-
-        // Discard black samples.
-        if (q.count <= 0.0) {
-            continue;
-        }
-
-        if (distance((*r).s.visible_position.w, q.s.visible_position.w) > 0.05 || dot((*r).s.visible_normal, q.s.visible_normal) < 0.866) {
+        let depth_miss = distance((*r).s.visible_position.w, q.s.visible_position.w) > 0.05;
+        let normal_miss = dot((*r).s.visible_normal, q.s.visible_normal) < 0.866;
+        if (q.count < F32_EPSILON || depth_miss || normal_miss) {
             continue;
         }
 
@@ -942,6 +953,7 @@ fn spatial_restir(
         (*r).count = m;
     }
 
+    var out: RestirOutput;
     out.radiance = shading(
         V,
         (*r).s.visible_normal,
@@ -1025,9 +1037,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // ReSTIR: Temporal
     var previous_uv = uv - velocity;
-    let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
-    var r = load_previous_reservoir(previous_uv, size, size);
-    let restir = temporal_restir(&r, previous_uv, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
+    var r = load_previous_reservoir(previous_uv, size);
+    let restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
 
     // Sample validation
     if (frame.number % frame.validation_interval == 0u) {
@@ -1064,27 +1075,23 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn indirect_lit_ambient(
-    @builtin(global_invocation_id) invocation_id: vec3<u32>,
-    @builtin(workgroup_id) workgroup_id: vec3<u32>,
-    @builtin(num_workgroups) num_workgroups: vec3<u32>,
-) {
+fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let deferred_size = textureDimensions(position_texture);
     let render_size = textureDimensions(render_texture);
     let reservoir_size = render_size;
 
     let uv = (vec2<f32>(invocation_id.xy) + frame_jitter(frame.number)) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
+    let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
 
-    var s = empty_sample();
-
-    let deferred_coords = vec2<i32>(uv * vec2<f32>(textureDimensions(position_texture)));
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
 
+    var s = empty_sample();
+    var r = empty_reservoir();
+
     if (depth < F32_EPSILON) {
-        var r: Reservoir;
-        set_reservoir(&r, s, 0.0);
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
         store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
@@ -1156,31 +1163,71 @@ fn indirect_lit_ambient(
         }
     }
 
-    // Radiance clamping
-    // s.radiance = s.radiance / max(luminance(s.radiance.xyz), MAX_LUMINANCE) * MAX_LUMINANCE;
     surface = retreive_surface(instance_material.y, object_uv);
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity;
-    let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
-    var r = load_previous_reservoir(previous_uv, render_size, reservoir_size);
-    var restir = temporal_restir(&r, previous_uv, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
+    r = load_previous_reservoir(previous_uv, reservoir_size);
+    let restir = temporal_restir(&r, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
     store_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
-    // let output_color = restir.output;
-    // textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
+    // To display temporal output for debugging
+    let output_color = restir.output;
+    textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
 
     // According to the ReSTIR PT papar, the variance of ReSTIR estimation is proportional to the variance of average w
     // let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / max(1.0, r.count);
     // textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
+}
 
-    storageBarrier();
+@compute @workgroup_size(8, 8, 1)
+fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let deferred_size = textureDimensions(position_texture);
+    let render_size = textureDimensions(render_texture);
+    let reservoir_size = render_size;
 
-    r = load_previous_spatial_reservoir(previous_uv, render_size, reservoir_size);
-    restir = spatial_restir(
+    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter(frame.number)) / vec2<f32>(render_size);
+    let coords = vec2<i32>(invocation_id.xy);
+    let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
+
+    let position_depth = textureLoad(position_texture, deferred_coords, 0);
+    let position = vec4<f32>(position_depth.xyz, 1.0);
+    let depth = position_depth.w;
+
+    var s = empty_sample();
+    var r = empty_reservoir();
+
+    if (depth < F32_EPSILON) {
+        store_reservoir(coords.x + reservoir_size.x * coords.y, r);
+        store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
+
+        textureStore(render_texture, coords, vec4<f32>(0.0));
+        return;
+    }
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+
+    let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
+    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
+    let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
+    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy;
+
+    let noise_id = frame.number % NOISE_TEXTURE_COUNT;
+    let noise_size = textureDimensions(noise_texture[noise_id]);
+    let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
+    s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
+    s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
+
+    s.visible_position = vec4<f32>(position.xyz, depth);
+    s.visible_normal = normal;
+    s.visible_instance = instance_material.x;
+
+    let surface = retreive_surface(instance_material.y, object_uv);
+
+    // ReSTIR: Spatial
+    let previous_uv = uv - velocity;
+    r = load_previous_spatial_reservoir(previous_uv, reservoir_size);
+    let restir = spatial_restir(
         &r,
-        restir,
-        previous_uv,
         coords,
         reservoir_size,
         view_direction,
