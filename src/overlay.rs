@@ -217,16 +217,14 @@ fn queue_overlay_bind_groups(
         let current_id = target.current_id;
         let previous_id = 1 - current_id;
 
-        let (direct_view, indirect_view) = if config.spatial_denoise {
-            (
-                &target.direct_denoised_texture.texture_view,
-                &target.indirect_denoised_texture.texture_view,
-            )
-        } else {
-            (
-                &target.direct_render_texture.texture_view,
-                &target.indirect_render_texture.texture_view,
-            )
+        let direct_view = match config.direct_spatial_denoise {
+            true => &target.direct_denoised_texture.texture_view,
+            false => &target.direct_render_texture.texture_view,
+        };
+
+        let indirect_view = match config.indirect_spatial_denoise {
+            true => &target.indirect_denoised_texture.texture_view,
+            false => &target.indirect_render_texture.texture_view,
         };
 
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {

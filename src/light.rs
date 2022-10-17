@@ -884,7 +884,7 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if config.spatial_denoise {
+        if config.direct_spatial_denoise {
             for pipeline in pipelines.direct_denoise {
                 if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
                     pass.set_pipeline(pipeline);
@@ -917,7 +917,7 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if config.spatial_denoise {
+        if config.indirect_spatial_denoise {
             for pipeline in pipelines.indirect_denoise {
                 if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
                     pass.set_pipeline(pipeline);
