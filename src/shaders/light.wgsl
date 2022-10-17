@@ -827,6 +827,38 @@ fn temporal_restir(
     return out;
 }
 
+fn get_jacobian(current_sample: Sample, neighbor_sample: Sample) -> f32 
+{
+    var offset_b: vec3<f32> = neighbor_sample.sample_position.xyz - neighbor_sample.visible_position.xyz;
+    var offset_a: vec3<f32> = neighbor_sample.sample_position.xyz - current_sample.visible_position.xyz;
+
+    if (dot(current_sample.visible_normal, offset_a) <= 0.0)
+    {
+        return 0.0;
+    }
+
+    let rb2: f32 = dot(offset_b, offset_b);
+    let ra2: f32 = dot(offset_a, offset_a);
+    offset_b = normalize(offset_b);
+    offset_a = normalize(offset_a);
+    let cos_a: f32 = dot(current_sample.visible_normal, offset_a);
+    let cos_b: f32 = dot(neighbor_sample.visible_normal, offset_b);
+    let cos_phi_a: f32 = -dot(offset_a, neighbor_sample.sample_normal);
+    let cos_phi_b: f32 = -dot(offset_b, neighbor_sample.sample_normal);
+
+    if (cos_b <= 0.0 || cos_phi_b <= 0.0)
+    {
+        return 0.0;
+    }
+
+    if (cos_a <= 0.0 || cos_phi_a <= 0.0 || ra2 <= 0.0 || rb2 <= 0.0)
+    {
+        return 0.0;
+    }
+
+    return select(clamp(rb2 * cos_phi_a / (ra2 * cos_phi_b), 0.0, 1e20f), 0.0, ((ra2 * cos_phi_b) <= 0.0));
+}
+
 fn spatial_restir(
     r: ptr<function, Reservoir>,
     temporal_output: RestirOutput,
@@ -866,18 +898,27 @@ fn spatial_restir(
         }
 
         let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
+
+        // Discard black samples.
+        if (q.count <= 0.0)
+        {
+            continue;
+        } 
+
         if (distance((*r).s.visible_position.w, q.s.visible_position.w) > 0.05 || dot((*r).s.visible_normal, q.s.visible_normal) < 0.866) {
             continue;
         }
 
         var inv_jac = 1.0;
-        // if (q.s.sample_position.w > 0.5) {
-        //     let dqq = q.s.visible_position.xyz - q.s.sample_position.xyz;
-        //     let drq = (*r).s.visible_position.xyz - q.s.sample_position.xyz;
-        //     let cos_r = abs(dot(normalize(drq), q.s.sample_normal));
-        //     let cos_q = abs(dot(normalize(dqq), q.s.sample_normal));
-        //     inv_jac = (cos_q * dot(drq, drq)) / max(cos_r * dot(dqq, dqq), 0.0001);
-        // }
+        
+        if (q.s.sample_position.w > 0.1) {
+            //let dqq = q.s.visible_position.xyz - q.s.sample_position.xyz;
+            //let drq = (*r).s.visible_position.xyz - q.s.sample_position.xyz;
+            //let cos_r = abs(dot(normalize(drq), q.s.sample_normal));
+            //let cos_q = abs(dot(normalize(dqq), q.s.sample_normal));
+            //inv_jac = clamp((cos_q * dot(drq, drq)) / max(cos_r * dot(dqq, dqq), 0.0001), 0.0, 1e20f);
+            inv_jac = get_jacobian(s, q.s);
+        }
 
         let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
         if (dot(sample_direction, (*r).s.visible_normal) < 0.0) {
