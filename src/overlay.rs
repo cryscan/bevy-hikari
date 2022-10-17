@@ -125,8 +125,14 @@ impl FromWorld for OverlayPipeline {
     }
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct OverlayPipelineKey {
+    pub mesh_pipeline_key: MeshPipelineKey,
+    pub temporal_anti_aliasing: bool,
+}
+
 impl SpecializedMeshPipeline for OverlayPipeline {
-    type Key = MeshPipelineKey;
+    type Key = OverlayPipelineKey;
 
     fn specialize(
         &self,
@@ -141,18 +147,23 @@ impl SpecializedMeshPipeline for OverlayPipeline {
             self.overlay_layout.clone(),
         ];
 
+        let mut shader_defs = vec![];
+        if key.temporal_anti_aliasing {
+            shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
+        }
+
         Ok(RenderPipelineDescriptor {
             label: None,
             layout: Some(bind_group_layout),
             vertex: VertexState {
                 shader: OVERLAY_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs: vec![],
+                shader_defs: shader_defs.clone(),
                 entry_point: "vertex".into(),
                 buffers: vec![vertex_buffer_layout],
             },
             fragment: Some(FragmentState {
                 shader: OVERLAY_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs: vec![],
+                shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
                     format: TextureFormat::bevy_default(),
@@ -161,7 +172,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
                 })],
             }),
             primitive: PrimitiveState {
-                topology: key.primitive_topology(),
+                topology: key.mesh_pipeline_key.primitive_topology(),
                 strip_index_format: None,
                 front_face: FrontFace::Ccw,
                 cull_mode: None,
@@ -171,7 +182,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
             },
             depth_stencil: None,
             multisample: MultisampleState {
-                count: key.msaa_samples(),
+                count: key.mesh_pipeline_key.msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -258,6 +269,7 @@ fn queue_overlay_bind_groups(
 fn queue_overlay_mesh(
     mut commands: Commands,
     msaa: Res<Msaa>,
+    config: Res<HikariConfig>,
     draw_functions: Res<DrawFunctions<Overlay>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     overlay_pipeline: Res<OverlayPipeline>,
@@ -271,6 +283,10 @@ fn queue_overlay_mesh(
         if let Some(mesh) = render_meshes.get(&mesh_handle) {
             let key = MeshPipelineKey::from_msaa_samples(msaa.samples)
                 | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+            let key = OverlayPipelineKey {
+                mesh_pipeline_key: key,
+                temporal_anti_aliasing: config.temporal_anti_aliasing,
+            };
             let pipeline_id =
                 pipelines.specialize(&mut pipeline_cache, &overlay_pipeline, key, &mesh.layout);
             let pipeline_id = match pipeline_id {

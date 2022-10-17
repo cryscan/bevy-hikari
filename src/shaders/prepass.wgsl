@@ -30,10 +30,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var model = mesh.model;
     let vertex_position = vec4<f32>(vertex.position, 1.0);
 
-    let jitter = 2.0 * (frame_jitter(frame.number) - 0.5) / vec2<f32>(view.width, view.height);
     var projection = view.projection;
+    
+#ifdef TEMPORL_ANTI_ALIASING
+    let jitter = 2.0 * (frame_jitter(frame.number) - 0.5) / vec2<f32>(view.width, view.height);
     projection[2][0] += jitter.x;
     projection[2][1] -= jitter.y;
+#endif
 
     var out: VertexOutput;
     out.world_position = mesh_position_local_to_world(model, vertex_position);

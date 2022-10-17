@@ -228,10 +228,12 @@ pub struct HikariConfig {
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
     pub emissive_threshold: f32,
-    /// Whether to perform spatial denoise.
-    pub spatial_denoise: bool,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
+    /// Whether to perform spatial denoise.
+    pub spatial_denoise: bool,
+    /// Whether to perform TAA.
+    pub temporal_anti_aliasing: bool,
 }
 
 impl Default for HikariConfig {
@@ -242,8 +244,9 @@ impl Default for HikariConfig {
             max_spatial_reuse_count: 500,
             solar_angle: PI / 36.0,
             emissive_threshold: 0.00390625,
-            spatial_denoise: true,
             max_indirect_luminance: 1.0,
+            spatial_denoise: true,
+            temporal_anti_aliasing: true,
         }
     }
 }

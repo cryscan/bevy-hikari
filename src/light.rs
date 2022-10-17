@@ -310,7 +310,7 @@ impl FromWorld for LightPipeline {
     }
 }
 
-#[derive(Default, Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct LightPipelineKey {
     pub entry_point: String,
     pub texture_count: u8,
@@ -495,14 +495,16 @@ fn queue_light_pipelines(
     let key = LightPipelineKey {
         entry_point: "direct_lit".into(),
         texture_count,
-        ..Default::default()
+        denoiser_level: 0,
+        radiance_clamp: false,
     };
     let direct_lit = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     let key = LightPipelineKey {
         entry_point: "indirect_lit_ambient".into(),
         texture_count,
-        ..Default::default()
+        denoiser_level: 0,
+        radiance_clamp: false,
     };
     let indirect_lit_ambient = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 

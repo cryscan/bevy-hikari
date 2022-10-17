@@ -6,7 +6,7 @@ use crate::{
         FrameUniform, FrameUniformBuffer, PreviousViewUniform, PreviousViewUniformOffset,
         PreviousViewUniforms,
     },
-    PREPASS_SHADER_HANDLE,
+    HikariConfig, PREPASS_SHADER_HANDLE,
 };
 use bevy::{
     ecs::system::{
@@ -161,8 +161,14 @@ impl FromWorld for PrepassPipeline {
     }
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct PrepassPipelineKey {
+    pub mesh_pipeline_key: MeshPipelineKey,
+    pub temporal_anti_aliasing: bool,
+}
+
 impl SpecializedMeshPipeline for PrepassPipeline {
-    type Key = MeshPipelineKey;
+    type Key = PrepassPipelineKey;
 
     fn specialize(
         &self,
@@ -177,18 +183,23 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
         let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
 
+        let mut shader_defs = vec![];
+        if key.temporal_anti_aliasing {
+            shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
+        }
+
         Ok(RenderPipelineDescriptor {
             label: None,
             layout: Some(bind_group_layout),
             vertex: VertexState {
                 shader: PREPASS_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs: vec![],
+                shader_defs: shader_defs.clone(),
                 entry_point: "vertex".into(),
                 buffers: vec![vertex_buffer_layout],
             },
             fragment: Some(FragmentState {
                 shader: PREPASS_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs: vec![],
+                shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![
                     Some(ColorTargetState {
@@ -224,7 +235,7 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                 ],
             }),
             primitive: PrimitiveState {
-                topology: key.primitive_topology(),
+                topology: key.mesh_pipeline_key.primitive_topology(),
                 strip_index_format: None,
                 front_face: FrontFace::Ccw,
                 cull_mode: None,
@@ -346,7 +357,9 @@ fn prepare_prepass_targets(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn queue_prepass_meshes(
+    config: Res<HikariConfig>,
     draw_functions: Res<DrawFunctions<Prepass>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     prepass_pipeline: Res<PrepassPipeline>,
@@ -367,6 +380,10 @@ fn queue_prepass_meshes(
         )| {
             if let Some(mesh) = render_meshes.get(mesh_handle) {
                 let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                let key = PrepassPipelineKey {
+                    mesh_pipeline_key: key,
+                    temporal_anti_aliasing: config.temporal_anti_aliasing,
+                };
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);
                 let pipeline_id = match pipeline_id {

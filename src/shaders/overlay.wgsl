@@ -40,7 +40,7 @@ fn fetch_color(coords: vec2<i32>) -> vec3<f32> {
     let direct = textureLoad(direct_texture, coords, 0);
     let indirect = textureLoad(indirect_texture, coords, 0);
     var color = tone_mapping(direct + indirect);
-    var color = clamp(color, vec4<f32>(0.0), vec4<f32>(1.0));
+    color = clamp(color, vec4<f32>(0.0), vec4<f32>(1.0));
     // return mix(frame.clear_color.rgb, color.rgb, alpha);
     return frame.clear_color.rgb * (1.0 - alpha) + color.rgb * alpha;
 }
@@ -71,6 +71,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let coords = vec2<i32>(in.clip_position.xy);
     let size = textureDimensions(position_texture);
 
+#ifdef TEMPORAL_ANTI_ALIASING
     let velocity = textureLoad(velocity_texture, coords, 0).xy;
     let previous_uv = uv - velocity;
     let previous_color = textureSample(previous_render_texture, previous_render_sampler, previous_uv);
@@ -122,6 +123,11 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     out.color = vec4<f32>(antialiased, 1.0);
 
     textureStore(temporal_texture, coords, vec4<f32>(antialiased, mix_rate));
+#else
+    let direct = textureLoad(direct_texture, coords, 0);
+    let indirect = textureLoad(indirect_texture, coords, 0);
+    out.color = clamp(tone_mapping(direct + indirect), vec4<f32>(0.0), vec4<f32>(1.0));
+#endif
 
     return out;
 }
