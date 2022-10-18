@@ -1,6 +1,5 @@
 use super::{
-    GpuStandardMaterial, GpuStandardMaterialBuffer, GpuStandardMaterialOffset,
-    IntoStandardMaterial, MeshMaterialSystems,
+    GpuStandardMaterial, GpuStandardMaterialBuffer, IntoStandardMaterial, MeshMaterialSystems,
 };
 use bevy::{
     asset::HandleId,
@@ -61,9 +60,7 @@ pub struct MaterialRenderAssets {
 pub struct StandardMaterials(BTreeMap<HandleId, StandardMaterial>);
 
 #[derive(Default, Deref, DerefMut)]
-pub struct GpuStandardMaterials(
-    HashMap<HandleUntyped, (GpuStandardMaterial, GpuStandardMaterialOffset)>,
-);
+pub struct GpuStandardMaterials(HashMap<HandleUntyped, (GpuStandardMaterial, u32)>);
 
 #[derive(Default)]
 pub struct ExtractedMaterials<M: IntoStandardMaterial> {
@@ -167,12 +164,9 @@ fn prepare_material_assets(
                 normal_map_texture,
                 occlusion_texture,
             };
-            let offset = GpuStandardMaterialOffset {
-                value: offset as u32,
-            };
 
             let handle = HandleUntyped::weak(*handle);
-            assets.insert(handle, (material, offset));
+            assets.insert(handle, (material, offset as u32));
             material
         })
         .collect();

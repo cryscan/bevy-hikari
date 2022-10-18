@@ -94,12 +94,12 @@ impl BHShape for GpuPrimitive {
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuInstance {
     pub min: Vec3,
-    pub material: GpuStandardMaterialOffset,
+    pub material: u32,
     pub max: Vec3,
     node_index: u32,
     pub transform: Mat4,
     pub inverse_transpose_model: Mat4,
-    pub slice: GpuMeshSlice,
+    pub mesh: GpuMeshIndex,
 }
 
 impl Bounded for GpuInstance {
@@ -170,11 +170,6 @@ pub struct GpuLightSource {
     pub position: Vec3,
     pub radius: f32,
     pub instance: u32,
-}
-
-#[derive(Debug, Default, Clone, Copy, ShaderType)]
-pub struct GpuStandardMaterialOffset {
-    pub value: u32,
 }
 
 #[derive(Default, ShaderType)]
@@ -322,7 +317,7 @@ impl GpuMesh {
 /// Offsets (and length for nodes) of the mesh in the universal buffer.
 /// This is known only when [`MeshAssetState`] isn't [`Dirty`](MeshAssetState::Dirty).
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
-pub struct GpuMeshSlice {
+pub struct GpuMeshIndex {
     pub vertex: u32,
     pub primitive: u32,
     pub node_offset: u32,

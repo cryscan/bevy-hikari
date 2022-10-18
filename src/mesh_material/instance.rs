@@ -310,7 +310,7 @@ fn prepare_instances(
             .map(|(id, (entity, (instance, _, _, _)))| {
                 let component = InstanceIndex {
                     instance: id as u32,
-                    material: instance.material.value,
+                    material: instance.material,
                 };
                 let index = render_assets.instance_indices.push(component);
                 (*entity, (DynamicInstanceIndex(index),))
@@ -329,7 +329,7 @@ fn prepare_instances(
             }
 
             if let (Some(mesh), Some(material)) = (meshes.get(mesh), materials.get(material)) {
-                instance.slice = mesh.1;
+                instance.mesh = mesh.1;
                 instance.material = material.1;
 
                 // Add it to the light source list if it's emissive.

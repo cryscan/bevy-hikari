@@ -12,7 +12,7 @@ struct Primitive {
     node_index: u32,
 };
 
-struct Slice {
+struct MeshIndex {
     vertex: u32,
     primitive: u32,
     node_offset: u32,
@@ -26,7 +26,7 @@ struct Instance {
     node_index: u32,
     model: mat4x4<f32>,
     inverse_transpose_model: mat4x4<f32>,
-    slice: Slice,
+    mesh: MeshIndex,
 };
 
 struct Node {

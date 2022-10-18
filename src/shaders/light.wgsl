@@ -223,15 +223,15 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     return result;
 }
 
-fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, slice: Slice, early_distance: f32) -> bool {
+fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, mesh: MeshIndex, early_distance: f32) -> bool {
     var intersected = false;
     var index = 0u;
-    for (; index < slice.node_len;) {
-        let node_index = slice.node_offset + index;
+    for (; index < mesh.node_len;) {
+        let node_index = mesh.node_offset + index;
         let node = asset_node_buffer.data[node_index];
         var aabb: Aabb;
         if (node.entry_index >= BVH_LEAF_FLAG) {
-            let primitive_index = slice.primitive + node.entry_index - BVH_LEAF_FLAG;
+            let primitive_index = mesh.primitive + node.entry_index - BVH_LEAF_FLAG;
             let vertices = primitive_buffer.data[primitive_index].vertices;
 
             aabb.min = min(vertices[0], min(vertices[1], vertices[2]));
@@ -289,7 +289,7 @@ fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
                 r.direction = instance_direction_world_to_local(instance, ray.direction);
                 r.inv_direction = 1.0 / r.direction;
 
-                if (traverse_bottom(&hit, r, instance.slice, early_distance)) {
+                if (traverse_bottom(&hit, r, instance.mesh, early_distance)) {
                     hit.instance_index = instance_index;
                     if (hit.intersection.distance < early_distance) {
                         return hit;
@@ -504,9 +504,9 @@ fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
         let instance = instance_buffer.data[hit.instance_index];
         let indices = primitive_buffer.data[hit.primitive_index].indices;
 
-        let v0 = vertex_buffer.data[(instance.slice.vertex + indices[0])];
-        let v1 = vertex_buffer.data[(instance.slice.vertex + indices[1])];
-        let v2 = vertex_buffer.data[(instance.slice.vertex + indices[2])];
+        let v0 = vertex_buffer.data[(instance.mesh.vertex + indices[0])];
+        let v1 = vertex_buffer.data[(instance.mesh.vertex + indices[1])];
+        let v2 = vertex_buffer.data[(instance.mesh.vertex + indices[2])];
         let uv = hit.intersection.uv;
         info.uv = v0.uv + uv.x * (v1.uv - v0.uv) + uv.y * (v2.uv - v0.uv);
         info.normal = v0.normal + uv.x * (v1.normal - v0.normal) + uv.y * (v2.normal - v0.normal);

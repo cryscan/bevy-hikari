@@ -4,8 +4,8 @@ use bevy::{
     prelude::*,
     render::camera::CameraRenderGraph,
 };
-use bevy_editor_pls::prelude::*;
 use bevy_hikari::prelude::*;
+use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_mod_raycast::{
     DefaultRaycastingPlugin, Intersection, RayCastMesh, RayCastMethod, RayCastSource, RaycastSystem,
 };
@@ -22,7 +22,7 @@ fn main() {
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
-        .add_plugin(EditorPlugin)
+        .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())

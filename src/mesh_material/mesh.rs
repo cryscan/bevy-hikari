@@ -1,5 +1,5 @@
 use super::{
-    GpuMesh, GpuMeshSlice, GpuNode, GpuNodeBuffer, GpuPrimitive, GpuPrimitiveBuffer, GpuVertex,
+    GpuMesh, GpuMeshIndex, GpuNode, GpuNodeBuffer, GpuPrimitive, GpuPrimitiveBuffer, GpuVertex,
     GpuVertexBuffer, MeshMaterialSystems,
 };
 use bevy::{
@@ -62,7 +62,7 @@ impl MeshRenderAssets {
 
 /// Holds all GPU representatives of mesh assets.
 #[derive(Default, Deref, DerefMut)]
-pub struct GpuMeshes(HashMap<Handle<Mesh>, (GpuMesh, GpuMeshSlice)>);
+pub struct GpuMeshes(HashMap<Handle<Mesh>, (GpuMesh, GpuMeshIndex)>);
 
 #[derive(Default)]
 pub struct ExtractedMeshes {
@@ -147,7 +147,7 @@ fn prepare_mesh_assets(
             handle.clone_weak(),
             (
                 mesh.clone(),
-                GpuMeshSlice {
+                GpuMeshIndex {
                     vertex,
                     primitive,
                     node_offset,
