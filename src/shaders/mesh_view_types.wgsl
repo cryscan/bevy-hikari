@@ -5,6 +5,7 @@ struct Frame {
     clear_color: vec4<f32>,
     number: u32,
     validation_interval: u32,
+    suppress_temporal_reuse: u32,
     max_temporal_reuse_count: u32,
     max_spatial_reuse_count: u32,
     direct_oversample_threshold: u32,

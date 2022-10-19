@@ -803,6 +803,7 @@ fn temporal_restir(
         surface,
         s.radiance
     );
+
     out.w_new = luminance(out.radiance) / pdf;
 
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
@@ -1089,7 +1090,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
     }
 
-    store_reservoir(coords.x + size.x * coords.y, r);
+    if (frame.suppress_temporal_reuse == 0u) {
+        store_reservoir(coords.x + size.x * coords.y, r);
+    }
 
     var output_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
     output_color += restir.output;
@@ -1195,7 +1198,10 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let previous_uv = uv - velocity;
     r = load_previous_reservoir(previous_uv, reservoir_size);
     let restir = temporal_restir(&r, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
-    store_reservoir(coords.x + reservoir_size.x * coords.y, r);
+
+    if (frame.suppress_temporal_reuse == 0u) {
+        store_reservoir(coords.x + reservoir_size.x * coords.y, r);
+    }
 
     // To display temporal output for debugging
     let output_color = restir.output;
