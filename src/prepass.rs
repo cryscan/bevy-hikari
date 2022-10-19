@@ -641,6 +641,10 @@ impl Node for PrepassNode {
             Err(_) => return Ok(()),
         };
 
+        if !world.contains_resource::<PrepassBindGroup>() {
+            return Ok(());
+        }
+
         {
             #[cfg(feature = "trace")]
             let _main_prepass_span = info_span!("main_prepass").entered();

@@ -297,10 +297,6 @@ fn prepare_instances(
     meshes: Res<GpuMeshes>,
     materials: Res<GpuStandardMaterials>,
 ) {
-    if instances.is_empty() {
-        return;
-    }
-
     // Since entities are cleared every frame, this should always be called.
     let mut add_instance_indices = |instances: &GpuInstances| {
         render_assets.instance_indices.clear();
@@ -322,32 +318,13 @@ fn prepare_instances(
     if meshes.is_changed() || materials.is_changed() || instances.is_changed() {
         // Important: update mesh and material info for every instance
         sources.clear();
-
-        instances.retain(|entity, (instance, mesh, material, visibility)| {
+        instances.retain(|_, (instance, mesh, material, visibility)| {
             if !visibility.is_visible_in_hierarchy() {
                 return false;
             }
-
             if let (Some(mesh), Some(material)) = (meshes.get(mesh), materials.get(material)) {
                 instance.mesh = mesh.1;
                 instance.material = material.1;
-
-                // Add it to the light source list if it's emissive.
-                let emissive = material.0.emissive;
-                if emissive.w * emissive.xyz().length() > config.emissive_threshold {
-                    let position = 0.5 * (instance.max + instance.min);
-                    let radius = 0.5 * (instance.max - instance.min).length();
-                    sources.insert(
-                        *entity,
-                        GpuLightSource {
-                            emissive,
-                            position,
-                            radius,
-                            instance: 0,
-                        },
-                    );
-                }
-
                 true
             } else {
                 false
@@ -359,8 +336,13 @@ fn prepare_instances(
             .map(|(instance, _, _, _)| instance)
             .cloned()
             .collect();
-        let bvh = BVH::build(&mut values);
-        let nodes = bvh.flatten_custom(&GpuNode::pack);
+
+        let nodes = if !instances.is_empty() {
+            let bvh = BVH::build(&mut values);
+            bvh.flatten_custom(&GpuNode::pack)
+        } else {
+            Vec::new()
+        };
 
         for (instance, value) in instances.values_mut().zip_eq(values.iter()) {
             instance.0 = *value;
@@ -368,9 +350,23 @@ fn prepare_instances(
 
         add_instance_indices(&instances);
 
-        for (id, (entity, _)) in instances.iter().enumerate() {
-            if let Some(source) = sources.get_mut(entity) {
-                source.instance = id as u32;
+        for (id, (entity, (instance, _, material, _))) in instances.iter().enumerate() {
+            if let Some(material) = materials.get(material) {
+                // Add it to the light source list if it's emissive.
+                let emissive = material.0.emissive;
+                if emissive.w * emissive.xyz().length() > config.emissive_threshold {
+                    let position = 0.5 * (instance.max + instance.min);
+                    let radius = 0.5 * (instance.max - instance.min).length();
+                    sources.insert(
+                        *entity,
+                        GpuLightSource {
+                            emissive,
+                            position,
+                            radius,
+                            instance: id as u32,
+                        },
+                    );
+                }
             }
         }
         let sources = sources.values().cloned().collect();

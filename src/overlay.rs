@@ -1,6 +1,6 @@
 use crate::{
     light::{LightPassTarget, LightPipeline, SetDeferredBindGroup, OVERLAY_RENDER_TEXTURE_FORMAT},
-    prepass::{PrepassPipeline, SetViewBindGroup},
+    prepass::{PrepassBindGroup, PrepassPipeline, SetViewBindGroup},
     HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
 };
 use bevy::{
@@ -408,6 +408,10 @@ impl Node for OverlayPassNode {
             Ok(query) => query,
             Err(_) => return Ok(()),
         };
+
+        if !world.contains_resource::<PrepassBindGroup>() {
+            return Ok(());
+        }
 
         {
             #[cfg(feature = "trace")]
