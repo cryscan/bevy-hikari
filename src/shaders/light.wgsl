@@ -1090,7 +1090,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
     }
 
-    if (frame.suppress_temporal_accum == 0u) {
+    if (frame.suppress_temporal_reuse == 0u) {
         store_reservoir(coords.x + size.x * coords.y, r);
     }
 
@@ -1199,7 +1199,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     r = load_previous_reservoir(previous_uv, reservoir_size);
     let restir = temporal_restir(&r, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
 
-    if (frame.suppress_temporal_accum == 0u) {
+    if (frame.suppress_temporal_reuse == 0u) {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
     }
 

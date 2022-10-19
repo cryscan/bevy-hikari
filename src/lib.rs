@@ -235,7 +235,7 @@ pub struct HikariConfig {
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
     /// Whether to do temporal sample reuse in ReSTIR.
-    pub suppress_temporal_accum: bool,
+    pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
     pub spatial_reuse: bool,
     /// Whether to perform spatial denoise for direct illumination.
@@ -256,7 +256,7 @@ impl Default for HikariConfig {
             solar_angle: PI / 36.0,
             emissive_threshold: 0.00390625,
             max_indirect_luminance: 1.0,
-            suppress_temporal_accum: false,
+            temporal_reuse: true,
             spatial_reuse: false,
             direct_spatial_denoise: true,
             indirect_spatial_denoise: true,
