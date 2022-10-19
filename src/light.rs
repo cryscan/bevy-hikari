@@ -907,14 +907,17 @@ impl Node for LightPassNode {
             let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
-        if let Some(pipeline) =
-            pipeline_cache.get_compute_pipeline(pipelines.indirect_spatial_reuse)
-        {
-            pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
+        if config.spatial_reuse {
+            if let Some(pipeline) =
+                pipeline_cache.get_compute_pipeline(pipelines.indirect_spatial_reuse)
+            {
+                pass.set_pipeline(pipeline);
+
+                let size = camera.physical_target_size.unwrap();
+                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
+            }
         }
 
         if config.indirect_spatial_denoise {

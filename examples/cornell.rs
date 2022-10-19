@@ -7,7 +7,7 @@ use bevy::{
 use bevy_hikari::prelude::*;
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_mod_raycast::{
-    DefaultRaycastingPlugin, Intersection, RayCastMesh, RayCastMethod, RayCastSource, RaycastSystem,
+    DefaultRaycastingPlugin, Intersection, RayCastMethod, RayCastSource, RaycastSystem,
 };
 use smooth_bevy_cameras::{
     controllers::orbit::{
@@ -20,6 +20,7 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
+        .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins)
         .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
@@ -38,31 +39,7 @@ fn main() {
 
 pub struct RaycastSet;
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-) {
-    // Box
-    let cube = meshes.add(Mesh::from(shape::Cube::default()));
-    commands
-        .spawn_bundle(PbrBundle {
-            mesh: cube.clone(),
-            material: materials.add(StandardMaterial {
-                base_color: Color::BLACK,
-                perceptual_roughness: 0.9,
-                ..Default::default()
-            }),
-            transform: Transform {
-                translation: Vec3::new(0.0, 0.0, 0.0),
-                scale: Vec3::new(1.0, 1.0, 1.0),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .insert(RayCastMesh::<RaycastSet>::default());
-
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Model
     commands.spawn_bundle(SceneBundle {
         scene: asset_server.load("models/cornell.glb#Scene0"),
@@ -87,12 +64,12 @@ fn setup(
     commands
         .spawn_bundle(Camera3dBundle {
             camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
-            transform: Transform::from_xyz(-10.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(0.0, 1.0, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         })
         .insert_bundle(OrbitCameraBundle::new(
             OrbitCameraController::default(),
-            Vec3::new(-10.0, 5.0, 20.0),
+            Vec3::new(0.0, 1.0, 2.0),
             Vec3::new(0., 0., 0.),
         ))
         .insert(RayCastSource::<RaycastSet>::default());
