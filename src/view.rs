@@ -81,6 +81,7 @@ pub struct FrameUniform {
     pub direct_oversample_threshold: u32,
     pub solar_angle: f32,
     pub max_indirect_luminance: f32,
+    pub suppress_temporal_accum: u32,
 }
 
 #[derive(Default)]
@@ -121,6 +122,7 @@ fn prepare_frame_uniform(
         direct_oversample_threshold,
         solar_angle,
         max_indirect_luminance,
+        suppress_temporal_accum,
         ..
     } = config.into_inner().clone();
 
@@ -128,6 +130,7 @@ fn prepare_frame_uniform(
     let max_temporal_reuse_count = max_temporal_reuse_count as u32;
     let max_spatial_reuse_count = max_spatial_reuse_count as u32;
     let direct_oversample_threshold = direct_oversample_threshold as u32;
+    let suppress_temporal_accum = if suppress_temporal_accum { 1u32 } else { 0u32 };
 
     uniform.buffer.set(FrameUniform {
         kernel: Mat3 {
@@ -143,6 +146,7 @@ fn prepare_frame_uniform(
         direct_oversample_threshold,
         solar_angle,
         max_indirect_luminance,
+        suppress_temporal_accum,
     });
     uniform.buffer.write_buffer(&render_device, &render_queue);
     counter.0 += 1;

@@ -10,6 +10,7 @@ struct Frame {
     direct_oversample_threshold: u32,
     solar_angle: f32,
     max_indirect_luminance: f32,
+    suppress_temporal_accum: u32,
 };
 
 struct PreviousView {
