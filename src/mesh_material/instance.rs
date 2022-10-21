@@ -8,10 +8,11 @@ use crate::{
     HikariConfig,
 };
 use bevy::{
+    ecs::query::QueryItem,
     math::{Vec3A, Vec4Swizzles},
     prelude::*,
     render::{
-        extract_component::UniformComponentPlugin,
+        extract_component::{ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin},
         primitives::Aabb,
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
@@ -27,14 +28,14 @@ use std::{collections::BTreeMap, marker::PhantomData};
 pub struct InstancePlugin;
 impl Plugin for InstancePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(UniformComponentPlugin::<PreviousMeshUniform>::default());
+        app.add_plugin(ExtractComponentPlugin::<PreviousMeshUniform>::default())
+            .add_plugin(UniformComponentPlugin::<PreviousMeshUniform>::default());
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<GpuInstances>()
                 .init_resource::<GpuLightSources>()
                 .init_resource::<InstanceRenderAssets>()
-                .add_system_to_stage(RenderStage::Extract, extract_mesh_transforms)
                 .add_system_to_stage(
                     RenderStage::Prepare,
                     prepare_instances
@@ -108,18 +109,16 @@ pub struct PreviousMeshUniform {
     pub inverse_transpose_model: Mat4,
 }
 
-#[allow(clippy::type_complexity)]
-fn extract_mesh_transforms(
-    mut commands: Commands,
-    query: Extract<Query<(Entity, &GlobalTransformQueue), With<Handle<Mesh>>>>,
-) {
-    for (entity, queue) in query.iter() {
+impl ExtractComponent for PreviousMeshUniform {
+    type Query = &'static GlobalTransformQueue;
+    type Filter = With<Handle<Mesh>>;
+
+    fn extract_component(queue: QueryItem<Self::Query>) -> Self {
         let transform = queue[1];
-        let uniform = PreviousMeshUniform {
+        PreviousMeshUniform {
             transform,
             inverse_transpose_model: transform.inverse().transpose(),
-        };
-        commands.get_or_spawn(entity).insert(uniform);
+        }
     }
 }
 

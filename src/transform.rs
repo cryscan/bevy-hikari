@@ -18,6 +18,7 @@ impl Plugin for TransformPlugin {
 
 #[derive(Component, Debug, Clone, Deref, DerefMut)]
 pub struct GlobalTransformQueue(pub [Mat4; 2]);
+
 impl ExtractComponent for GlobalTransformQueue {
     type Query = &'static Self;
     type Filter = ();
