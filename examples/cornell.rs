@@ -19,6 +19,11 @@ use std::f32::consts::PI;
 
 fn main() {
     App::new()
+        // .insert_resource(WindowDescriptor {
+        //     width: 400.,
+        //     height: 300.,
+        //     ..Default::default()
+        // })
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins)

@@ -19,6 +19,11 @@ use std::f32::consts::PI;
 
 fn main() {
     App::new()
+        // .insert_resource(WindowDescriptor {
+        //     width: 400.,
+        //     height: 300.,
+        //     ..Default::default()
+        // })
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
@@ -64,20 +69,22 @@ fn setup(
         .insert(RayCastMesh::<RaycastSet>::default());
 
     // Sphere
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::UVSphere {
-            radius: 0.5,
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::UVSphere {
+                radius: 0.5,
+                ..Default::default()
+            })),
+            material: materials.add(StandardMaterial {
+                base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+                emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
+                emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+                ..Default::default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.5, 0.0),
             ..Default::default()
-        })),
-        material: materials.add(StandardMaterial {
-            base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-            emissive: Color::rgba(1.0, 1.0, 1.0, 0.5),
-            emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
-            ..Default::default()
-        }),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
-        ..Default::default()
-    });
+        })
+        .insert(Name::new("Emissive Sphere"));
 
     // Only directional light is supported
     commands.spawn_bundle(DirectionalLightBundle {

@@ -410,7 +410,7 @@ fn select_light_candidate(
         if (d2 > r2) {
             cone = vec4<f32>(normalize(delta), sqrt((d2 - r2) / d2));
         } else {
-            cone = vec4<f32>(0.0, 0.0, 1.0, 0.0);
+            cone = vec4<f32>(normal, 0.0);
         }
         // let cone = vec4<f32>(normalize(delta), sqrt(max(d2 - r2, 0.0) / max(d2, 0.0001)));
         // let sin = sqrt(1.0 - cone.w * cone.w);
