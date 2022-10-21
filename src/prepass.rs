@@ -667,6 +667,7 @@ impl<const I: usize> EntityRenderCommand for SetMeshBindGroup<I> {
 }
 
 pub struct PrepassNode {
+    #[allow(clippy::type_complexity)]
     query: QueryState<
         (
             &'static ExtractedCamera,
@@ -754,7 +755,7 @@ impl Node for PrepassNode {
                     }),
                 ],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &depth,
+                    view: depth,
                     depth_ops: Some(Operations {
                         load: camera_3d.depth_load_op.clone().into(),
                         store: true,
