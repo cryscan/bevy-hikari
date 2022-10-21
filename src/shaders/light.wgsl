@@ -61,6 +61,8 @@ var<storage, read> previous_spatial_reservoir_buffer: Reservoirs;
 var<storage, read_write> spatial_reservoir_buffer: Reservoirs;
 
 let TAU: f32 = 6.283185307;
+let INV_TAU: f32 = 0.159154943;
+
 let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 0xFFFFFFFFu;
@@ -319,21 +321,40 @@ fn sample_uniform_disk(rand: vec2<f32>) -> vec2<f32> {
     let r = sqrt(rand.x);
     let theta = 2.0 * PI * rand.y;
     return vec2<f32>(r * cos(theta), r * sin(theta));
+
+    // let t = 2.0 * rand - 1.0;
+    // if (all(abs(t) < vec2<f32>(F32_EPSILON))) {
+    //     return vec2<f32>(0.0);
+    // }
+
+    // var theta: f32;
+    // var r: f32;
+    // if (abs(t.x) > abs(t.y)) {
+    //     r = t.x;
+    //     theta = 0.25 * PI * (t.y / t.x);
+    // } else {
+    //     r = t.y;
+    //     theta = 0.25 * PI * (2.0 - t.x / t.y);
+    // }
+    // return r * vec2<f32>(cos(theta), sin(theta));
 }
 
-fn sample_cosine_hemisphere(rand: vec2<f32>) -> vec3<f32> {
-    let r = sqrt(rand.x);
-    let theta = 2.0 * PI * rand.y;
-    var direction = vec3<f32>(r * cos(theta), r * sin(theta), 0.0);
-    direction.z = sqrt(1.0 - dot(direction.xy, direction.xy));
-    return direction;
+// Cosine weight sampling, with pdf
+fn sample_cosine_hemisphere(rand: vec2<f32>) -> vec4<f32> {
+    let t = sample_uniform_disk(rand);
+    let direction = vec3<f32>(t.x, t.y, sqrt(1.0 - dot(t, t)));
+    let pdf = 2.0 * INV_TAU * direction.z;
+    return vec4<f32>(direction, pdf);
 }
 
-fn sample_uniform_cone(rand: vec2<f32>, cos_angle: f32) -> vec3<f32> {
+// Samples a random direction in a cone with given half apex, also returns pdf
+fn sample_uniform_cone(rand: vec2<f32>, cos_angle: f32) -> vec4<f32> {
     let z = 1.0 - (1.0 - cos_angle) * rand.x;  // [cos(angle), 1.0]
-    let theta = 2.0 * PI * rand.y;
+    let theta = TAU * rand.y;
     let r = sqrt(1.0 - z * z);
-    return vec3<f32>(r * cos(theta), r * sin(theta), z);
+    let direction = vec3<f32>(r * cos(theta), r * sin(theta), z);
+    let pdf = INV_TAU / (1.0 - cos_angle);
+    return vec4<f32>(direction, pdf);
 }
 
 // Choose a light source based on luminance
@@ -351,13 +372,15 @@ fn select_light_candidate(
 
     var directional = lights.directional_lights[0];
     let cone = vec4<f32>(directional.direction_to_light, cos(frame.solar_angle));
-    let direction = normal_basis(cone.xyz) * sample_uniform_cone(rand.zw, cone.w);
+    let rand_sample = sample_uniform_cone(rand.zw, cone.w);
+    let direction = normal_basis(cone.xyz) * rand_sample.xyz;
 
     candidate.cone = cone;
     candidate.direction = direction;
 
-    var sum_flux = luminance(directional.color.rgb) / TAU;
+    var sum_flux = luminance(directional.color.rgb) * INV_TAU;
     var selected_flux = sum_flux;
+    var selected_pdf = rand_sample.w;
 
     var rand_1d = fract(rand.x + rand.y);
 
@@ -383,12 +406,20 @@ fn select_light_candidate(
         let r2 = source.radius * source.radius;
         let d = sqrt(d2);
 
-        let cone = vec4<f32>(normalize(delta), sqrt(max(d2 - r2, 0.0) / max(d2, 0.0001)));
-        let sin = sqrt(1.0 - cone.w * cone.w);
-        if (instance == source.instance || dot(cone.xyz, normal) < -sin) {
+        var cone: vec4<f32>;
+        if (d2 > r2) {
+            cone = vec4<f32>(normalize(delta), sqrt((d2 - r2) / d2));
+        } else {
+            cone = vec4<f32>(0.0, 0.0, 1.0, 0.0);
+        }
+        // let cone = vec4<f32>(normalize(delta), sqrt(max(d2 - r2, 0.0) / max(d2, 0.0001)));
+        // let sin = sqrt(1.0 - cone.w * cone.w);
+        // if (instance == source.instance || dot(cone.xyz, normal) < -sin) {
+        if (instance == source.instance) {
             continue;
         }
-        let direction = normal_basis(cone.xyz) * sample_uniform_cone(rand.zw, cone.w);
+        let rand_sample = sample_uniform_cone(rand.zw, cone.w);
+        let direction = normal_basis(cone.xyz) * rand_sample.xyz;
 
         let flux = 255.0 * source.emissive.a * luminance(source.emissive.rgb) * (1.0 - cone.w);
         sum_flux += flux;
@@ -401,11 +432,12 @@ fn select_light_candidate(
             candidate.max_distance = d + source.radius;
             candidate.min_distance = d - source.radius;
             selected_flux = flux;
+            selected_pdf = rand_sample.w;
         }
     }
 
     candidate.p = selected_flux / sum_flux;
-    candidate.p *= 0.5 / (1.0 - candidate.cone.w);
+    candidate.p *= selected_pdf;
     return candidate;
 }
 
@@ -791,33 +823,22 @@ fn env_brdf(
 
 fn temporal_restir(
     r: ptr<function, Reservoir>,
-    V: vec3<f32>,
-    surface: Surface,
     s: Sample,
+    out_luminance: f32,
     pdf: f32,
     max_sample_count: u32
-) -> RestirOutput {
-    var out: RestirOutput;
-    out.radiance = shading(
-        V,
-        s.visible_normal,
-        normalize(s.sample_position.xyz - s.visible_position.xyz),
-        surface,
-        s.radiance
-    );
-
-    out.w_new = luminance(out.radiance) / pdf;
-
+) {
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
     let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
 
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
+    let w_new = out_luminance / pdf;
     if (depth_miss || instance_miss || normal_miss) {
-        set_reservoir(r, s, out.w_new);
+        set_reservoir(r, s, w_new);
     } else {
-        update_reservoir(r, s, out.w_new);
+        update_reservoir(r, s, w_new);
     }
 
     // Clamp...
@@ -827,18 +848,6 @@ fn temporal_restir(
         (*r).w2_sum *= m / (*r).count;
         (*r).count = m;
     }
-
-    out.radiance = shading(
-        V,
-        (*r).s.visible_normal,
-        normalize((*r).s.sample_position.xyz - (*r).s.visible_position.xyz),
-        surface,
-        (*r).s.radiance
-    );
-    (*r).w = (*r).w_sum / max((*r).count * luminance(out.radiance), 0.0001);
-    out.output = (*r).w * out.radiance;
-
-    return out;
 }
 
 fn compute_inv_jacobian(current_sample: Sample, neighbor_sample: Sample) -> f32 {
@@ -994,7 +1003,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         return;
     }
-    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
     let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
@@ -1011,6 +1019,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     s.visible_instance = instance_material.x;
 
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
     textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
 
     var ray: Ray;
@@ -1018,6 +1027,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var info: HitInfo;
 
     let candidate = select_light_candidate(s.random, position.xyz, normal, instance_material.x);
+    let pdf = candidate.p;
 
     // Direct light sampling
     ray.origin = position.xyz + normal * RAY_BIAS;
@@ -1037,10 +1047,28 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         s.sample_normal = -ray.direction;
     }
 
+    let sample_radiance = shading(
+        view_direction,
+        s.visible_normal,
+        normalize(s.sample_position.xyz - s.visible_position.xyz),
+        surface,
+        s.radiance
+    );
+
     // ReSTIR: Temporal
-    var previous_uv = uv - velocity_uv.xy;
+    let previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
-    var restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
+    temporal_restir(&r, s, luminance(sample_radiance), pdf, frame.max_temporal_reuse_count);
+
+    var out_radiance = shading(
+        view_direction,
+        r.s.visible_normal,
+        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+        surface,
+        r.s.radiance
+    );
+    r.w = r.w_sum / max(r.count * luminance(out_radiance), 0.0001);
+    out_radiance *= r.w;
 
     // Sample validation
     if (frame.number % frame.validation_interval == 0u) {
@@ -1061,47 +1089,18 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let validation_radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
         let luminance_ratio = luminance(validation_radiance.rgb) / luminance(r.s.radiance.rgb);
         if (luminance_ratio > 1.25 || luminance_ratio < 0.8) {
-            set_reservoir(&r, s, restir.w_new);
+            set_reservoir(&r, s, luminance(sample_radiance) / pdf);
         }
-    }
-
-    // Perform oversampling until the sample count reaches the threshold.
-    for (var i = u32(r.count); i <= frame.direct_oversample_threshold; i += 1u) {
-        s.random = fract(s.random + GOLDEN_RATIO);
-
-        let candidate = select_light_candidate(s.random, position.xyz, normal, instance_material.x);
-
-        ray.origin = position.xyz + normal * RAY_BIAS;
-        ray.direction = candidate.direction;
-        ray.inv_direction = 1.0 / ray.direction;
-
-        if (dot(candidate.direction, normal) > 0.0) {
-            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-            info = hit_info(ray, hit);
-
-            s.sample_position = info.position;
-            s.sample_normal = info.normal;
-
-            s.radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
-        } else {
-            s.sample_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
-            s.sample_normal = -ray.direction;
-        }
-
-        restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
     }
 
     if (frame.suppress_temporal_reuse == 0u) {
         store_reservoir(coords.x + size.x * coords.y, r);
     }
 
-    var output_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
-    output_color += restir.output;
+    var out_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
+    out_color += out_radiance;
 
-    textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
-
-    // let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / r.count;
-    // textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
+    textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -1128,7 +1127,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
-    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
     let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
@@ -1149,67 +1147,81 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var info: HitInfo;
     var surface: Surface;
 
+    var rand_sample = sample_cosine_hemisphere(s.random.xy);
     ray.origin = position.xyz + normal * RAY_BIAS;
-    ray.direction = normal_basis(normal) * sample_cosine_hemisphere(s.random.xy);
+    ray.direction = normal_basis(normal) * rand_sample.xyz;
     ray.inv_direction = 1.0 / ray.direction;
-    var p1 = dot(ray.direction, normal);
+    var pdf = rand_sample.w;
 
     hit = traverse_top(ray, F32_MAX, 0.0);
     info = hit_info(ray, hit);
     s.sample_position = info.position;
     s.sample_normal = info.normal;
 
-    // Only ambient radiance
-    s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
-
     // Second bounce: from sample position
-    var p2 = 0.5;
-    var bounce_radiance = vec3<f32>(0.0);
     if (hit.instance_index != U32_MAX) {
-        let bounce_candidate = select_light_candidate(
+        let candidate = select_light_candidate(
             s.random,
-            info.position.xyz,
-            info.normal,
+            s.sample_position.xyz,
+            s.sample_normal,
             info.instance_index
         );
+        pdf *= candidate.p;
 
-        var bounce_ray: Ray;
-        var bounce_info: HitInfo;
-
-        bounce_ray.origin = info.position.xyz + info.normal * RAY_BIAS;
-        bounce_ray.direction = bounce_candidate.direction;
-        bounce_ray.inv_direction = 1.0 / bounce_ray.direction;
-        p2 = bounce_candidate.p;
-
-        if (dot(bounce_candidate.direction, info.normal) > 0.0) {
-            hit = traverse_top(bounce_ray, bounce_candidate.max_distance, bounce_candidate.min_distance);
-            bounce_info = hit_info(bounce_ray, hit);
-
+        if (dot(candidate.direction, s.sample_normal) > 0.0) {
             surface = retreive_surface(info.material_index, info.uv);
             surface.roughness = 1.0;
-            let radiance = input_radiance(bounce_ray, bounce_info, bounce_candidate.directional_index, bounce_candidate.emissive_index);
-            s.radiance += vec4<f32>(shading(-ray.direction, info.normal, bounce_ray.direction, surface, radiance), 0.0);
+
+            ray.origin = s.sample_position.xyz + s.sample_normal * RAY_BIAS;
+            ray.direction = candidate.direction;
+            ray.inv_direction = 1.0 / ray.direction;
+
+            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
+            info = hit_info(ray, hit);
+            var radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
+            s.radiance = vec4<f32>(shading(
+                normalize(s.sample_position.xyz - s.visible_position.xyz),
+                s.sample_normal,
+                ray.direction,
+                surface,
+                radiance
+            ), radiance.a);
         }
+    } else {
+        // Only ambient radiance
+        s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, DONT_SAMPLE_EMISSIVE);
     }
 
     surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+    let sample_radiance = shading(
+        view_direction,
+        s.visible_normal,
+        normalize(s.sample_position.xyz - s.visible_position.xyz),
+        surface,
+        s.radiance
+    );
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
-    let restir = temporal_restir(&r, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
+    temporal_restir(&r, s, luminance(sample_radiance), pdf, frame.max_temporal_reuse_count);
+
+    var out_radiance = shading(
+        view_direction,
+        r.s.visible_normal,
+        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+        surface,
+        r.s.radiance
+    );
+    r.w = r.w_sum / max(r.count * luminance(out_radiance), 0.0001);
+    out_radiance *= r.w;
 
     if (frame.suppress_temporal_reuse == 0u) {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
     }
 
-    // To display temporal output for debugging
-    let output_color = restir.output;
-    textureStore(render_texture, coords, vec4<f32>(output_color, 1.0));
-
-    // According to the ReSTIR PT papar, the variance of ReSTIR estimation is proportional to the variance of average w
-    // let variance = (r.w2_sum - r.w_sum * r.w_sum / r.count) / max(1.0, r.count);
-    // textureStore(variance_texture, coords, vec4<f32>(variance, variance / r.count, 0.0, 0.0));
+    textureStore(render_texture, coords, vec4<f32>(out_radiance, 1.0));
 }
 
 @compute @workgroup_size(8, 8, 1)
