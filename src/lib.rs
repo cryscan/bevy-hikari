@@ -263,7 +263,7 @@ impl Default for HikariConfig {
             spatial_reuse: false,
             direct_spatial_denoise: false,
             indirect_spatial_denoise: false,
-            temporal_anti_aliasing: true,
+            temporal_anti_aliasing: false,
         }
     }
 }
