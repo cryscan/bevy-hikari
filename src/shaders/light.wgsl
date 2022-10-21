@@ -32,6 +32,8 @@ var denoised_texture_2: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(3)
 var denoised_texture_3: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(4)
+var albedo_texture: texture_storage_2d<rgba16float, read_write>;
+@group(5) @binding(5)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
 
 // 64 Bytes
@@ -996,8 +998,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
-    let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
-    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy;
+    let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]);
@@ -1009,7 +1010,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     s.visible_normal = normal;
     s.visible_instance = instance_material.x;
 
-    let surface = retreive_surface(instance_material.y, object_uv);
+    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
     textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
 
     var ray: Ray;
@@ -1037,7 +1038,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     // ReSTIR: Temporal
-    var previous_uv = uv - velocity;
+    var previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
     var restir = temporal_restir(&r, view_direction, surface, s, candidate.p, frame.max_temporal_reuse_count);
 
@@ -1131,8 +1132,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
-    let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
-    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy;
+    let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]);
@@ -1192,10 +1192,10 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         }
     }
 
-    surface = retreive_surface(instance_material.y, object_uv);
+    surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
     // ReSTIR: Temporal
-    let previous_uv = uv - velocity;
+    let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
     let restir = temporal_restir(&r, view_direction, surface, s, p1 * p2, frame.max_temporal_reuse_count);
 
@@ -1240,8 +1240,7 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
 
     let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
     let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
-    let object_uv = textureLoad(uv_texture, deferred_coords, 0).xy;
-    let velocity = textureLoad(velocity_texture, deferred_coords, 0).xy;
+    let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]);
@@ -1253,10 +1252,10 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
     s.visible_normal = normal;
     s.visible_instance = instance_material.x;
 
-    let surface = retreive_surface(instance_material.y, object_uv);
+    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
     // ReSTIR: Spatial
-    let previous_uv = uv - velocity;
+    let previous_uv = uv - velocity_uv.xy;
     r = load_previous_spatial_reservoir(previous_uv, reservoir_size);
     let restir = spatial_restir(
         &r,

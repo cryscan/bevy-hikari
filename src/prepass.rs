@@ -9,9 +9,12 @@ use crate::{
     HikariConfig, PREPASS_SHADER_HANDLE,
 };
 use bevy::{
-    ecs::system::{
-        lifetimeless::{Read, SQuery, SRes},
-        SystemParamItem,
+    ecs::{
+        query::QueryItem,
+        system::{
+            lifetimeless::{Read, SQuery, SRes},
+            SystemParamItem,
+        },
     },
     pbr::{
         DrawMesh, GpuLights, LightMeta, MeshPipelineKey, MeshUniform, ViewLightsUniformOffset,
@@ -20,7 +23,9 @@ use bevy::{
     prelude::*,
     render::{
         camera::ExtractedCamera,
-        extract_component::{ComponentUniforms, DynamicUniformIndex},
+        extract_component::{
+            ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
+        },
         mesh::MeshVertexBufferLayout,
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
@@ -31,7 +36,7 @@ use bevy::{
         },
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
-        texture::{GpuImage, TextureCache},
+        texture::{GpuImage, ImageSampler, TextureCache},
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms, VisibleEntities},
         Extract, RenderApp, RenderStage,
     },
@@ -42,12 +47,14 @@ pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const DEPTH_GRADIENT_FORMAT: TextureFormat = TextureFormat::Rg32Float;
 pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
-pub const UV_FORMAT: TextureFormat = TextureFormat::Rg16Unorm;
-pub const VELOCITY_FORMAT: TextureFormat = TextureFormat::Rg32Float;
+pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 
 pub struct PrepassPlugin;
 impl Plugin for PrepassPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugin(ExtractComponentPlugin::<PrepassTextures>::default())
+            .add_system(prepass_textures_system);
+
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<DrawFunctions<Prepass>>()
@@ -55,7 +62,7 @@ impl Plugin for PrepassPlugin {
                 .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
                 .add_render_command::<Prepass, DrawPrepass>()
                 .add_system_to_stage(RenderStage::Extract, extract_prepass_camera_phases)
-                .add_system_to_stage(RenderStage::Prepare, prepare_prepass_targets)
+                .add_system_to_stage(RenderStage::Queue, queue_prepass_depth_texture)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_meshes)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_bind_group)
                 .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Prepass>);
@@ -223,12 +230,7 @@ impl SpecializedMeshPipeline for PrepassPipeline {
                         write_mask: ColorWrites::ALL,
                     }),
                     Some(ColorTargetState {
-                        format: UV_FORMAT,
-                        blend: None,
-                        write_mask: ColorWrites::ALL,
-                    }),
-                    Some(ColorTargetState {
-                        format: VELOCITY_FORMAT,
+                        format: VELOCITY_UV_FORMAT,
                         blend: None,
                         write_mask: ColorWrites::ALL,
                     }),
@@ -277,82 +279,145 @@ fn extract_prepass_camera_phases(
     }
 }
 
-#[derive(Component)]
-pub struct PrepassTarget {
-    pub position: GpuImage,
-    pub normal: GpuImage,
-    pub depth_gradient: GpuImage,
-    pub instance_material: GpuImage,
-    pub uv: GpuImage,
-    pub velocity: GpuImage,
-    pub depth: GpuImage,
+#[derive(Clone, Component, AsBindGroup)]
+pub struct PrepassTextures {
+    #[texture(0, visibility(all))]
+    pub position: Handle<Image>,
+    #[texture(1, visibility(all))]
+    pub normal: Handle<Image>,
+    #[texture(2, visibility(all))]
+    pub depth_gradient: Handle<Image>,
+    #[texture(3, visibility(all), sample_type = "u_int")]
+    pub instance_material: Handle<Image>,
+    #[texture(4, visibility(all))]
+    pub velocity_uv: Handle<Image>,
 }
 
-fn prepare_prepass_targets(
+impl ExtractComponent for PrepassTextures {
+    type Query = &'static Self;
+    type Filter = ();
+
+    fn extract_component(item: QueryItem<Self::Query>) -> Self {
+        item.clone()
+    }
+}
+
+pub struct PreparedPrepassTextures<'a> {
+    pub position: &'a GpuImage,
+    pub normal: &'a GpuImage,
+    pub depth_gradient: &'a GpuImage,
+    pub instance_material: &'a GpuImage,
+    pub velocity_uv: &'a GpuImage,
+}
+
+impl PrepassTextures {
+    pub fn prepared<'a>(
+        &self,
+        assets: &'a RenderAssets<Image>,
+    ) -> Option<PreparedPrepassTextures<'a>> {
+        let prepared = PreparedPrepassTextures {
+            position: assets.get(&self.position)?,
+            normal: assets.get(&self.normal)?,
+            depth_gradient: assets.get(&self.depth_gradient)?,
+            instance_material: assets.get(&self.instance_material)?,
+            velocity_uv: assets.get(&self.velocity_uv)?,
+        };
+        Some(prepared)
+    }
+}
+
+fn prepass_textures_system(
     mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    mut texture_cache: ResMut<TextureCache>,
-    cameras: Query<(Entity, &ExtractedCamera), With<RenderPhase<Prepass>>>,
+    mut images: ResMut<Assets<Image>>,
+    query: Query<(Entity, &Camera), Changed<Camera>>,
 ) {
-    for (entity, camera) in &cameras {
-        if let Some(size) = camera.physical_target_size {
-            let extent = Extent3d {
+    for (entity, camera) in &query {
+        if let Some(size) = camera.physical_target_size() {
+            let size = Extent3d {
                 width: size.x,
                 height: size.y,
                 depth_or_array_layers: 1,
             };
-            let size = size.as_vec2();
-            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
+            let texture_usage = TextureUsages::COPY_DST
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::RENDER_ATTACHMENT;
 
-            let mut create_texture = |texture_format| -> GpuImage {
-                let sampler = render_device.create_sampler(&SamplerDescriptor {
+            let create_texture = |texture_format| -> Image {
+                let texture_descriptor = TextureDescriptor {
                     label: None,
-                    address_mode_u: AddressMode::ClampToEdge,
-                    address_mode_v: AddressMode::ClampToEdge,
-                    address_mode_w: AddressMode::ClampToEdge,
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: texture_format,
+                    usage: texture_usage,
+                };
+                let sampler_descriptor = ImageSampler::Descriptor(SamplerDescriptor {
                     mag_filter: FilterMode::Nearest,
                     min_filter: FilterMode::Nearest,
                     mipmap_filter: FilterMode::Nearest,
                     ..Default::default()
                 });
-                let texture = texture_cache.get(
-                    &render_device,
-                    TextureDescriptor {
-                        label: None,
-                        size: extent,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: texture_format,
-                        usage: texture_usage,
-                    },
-                );
-                GpuImage {
-                    texture: texture.texture,
-                    texture_view: texture.default_view,
-                    texture_format,
-                    sampler,
-                    size,
-                }
+
+                let mut image = Image {
+                    texture_descriptor,
+                    sampler_descriptor,
+                    ..Default::default()
+                };
+                image.resize(size);
+                image
             };
 
-            let position = create_texture(POSITION_FORMAT);
-            let normal = create_texture(NORMAL_FORMAT);
-            let depth_gradient = create_texture(DEPTH_GRADIENT_FORMAT);
-            let instance_material = create_texture(INSTANCE_MATERIAL_FORMAT);
-            let uv = create_texture(UV_FORMAT);
-            let velocity = create_texture(VELOCITY_FORMAT);
-            let depth = create_texture(SHADOW_FORMAT);
+            let position = images.add(create_texture(POSITION_FORMAT));
+            let normal = images.add(create_texture(NORMAL_FORMAT));
+            let depth_gradient = images.add(create_texture(DEPTH_GRADIENT_FORMAT));
+            let instance_material = images.add(create_texture(INSTANCE_MATERIAL_FORMAT));
+            let velocity_uv = images.add(create_texture(VELOCITY_UV_FORMAT));
 
-            commands.entity(entity).insert(PrepassTarget {
+            commands.entity(entity).insert(PrepassTextures {
                 position,
                 normal,
                 depth_gradient,
                 instance_material,
-                uv,
-                velocity,
-                depth,
+                velocity_uv,
             });
+        }
+    }
+}
+
+#[derive(Component, Deref, DerefMut)]
+pub struct PrepassDepthTexture(pub TextureView);
+
+fn queue_prepass_depth_texture(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    assets: Res<RenderAssets<Image>>,
+    mut texture_cache: ResMut<TextureCache>,
+    query: Query<(Entity, &PrepassTextures)>,
+) {
+    for (entity, textures) in &query {
+        if let Some(image) = assets.get(&textures.position) {
+            let size = Extent3d {
+                width: image.size.x as u32,
+                height: image.size.y as u32,
+                depth_or_array_layers: 1,
+            };
+            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
+            let texture = texture_cache.get(
+                &render_device,
+                TextureDescriptor {
+                    label: None,
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Depth32Float,
+                    usage: texture_usage,
+                },
+            );
+            commands
+                .entity(entity)
+                .insert(PrepassDepthTexture(texture.default_view));
         }
     }
 }
@@ -548,26 +613,27 @@ impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
         (bind_group, view_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (view_uniform, previous_view_uniform, view_lights) =
-            view_query.get_inner(view).unwrap();
-        pass.set_bind_group(
-            I,
-            &bind_group.into_inner().view,
-            &[
-                view_uniform.offset,
-                previous_view_uniform.offset,
-                view_lights.offset,
-            ],
-        );
-
-        RenderCommandResult::Success
+        if let Ok((view_uniform, previous_view_uniform, view_lights)) = view_query.get_inner(view) {
+            pass.set_bind_group(
+                I,
+                &bind_group.into_inner().view,
+                &[
+                    view_uniform.offset,
+                    previous_view_uniform.offset,
+                    view_lights.offset,
+                ],
+            );
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 
 pub struct SetMeshBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetMeshBindGroup<I> {
     type Param = (
-        SRes<PrepassBindGroup>,
+        Option<SRes<PrepassBindGroup>>,
         SQuery<(
             Read<DynamicUniformIndex<MeshUniform>>,
             Read<DynamicUniformIndex<PreviousMeshUniform>>,
@@ -581,19 +647,22 @@ impl<const I: usize> EntityRenderCommand for SetMeshBindGroup<I> {
         (bind_group, mesh_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let (mesh_uniform, previous_mesh_uniform, instance_index) =
-            mesh_query.get_inner(item).unwrap();
-        pass.set_bind_group(
-            I,
-            &bind_group.into_inner().mesh,
-            &[
-                mesh_uniform.index(),
-                previous_mesh_uniform.index(),
-                instance_index.0,
-            ],
-        );
-
-        RenderCommandResult::Success
+        if let (Some(bind_group), Ok((mesh_uniform, previous_mesh_uniform, instance_index))) =
+            (bind_group, mesh_query.get_inner(item))
+        {
+            pass.set_bind_group(
+                I,
+                &bind_group.into_inner().mesh,
+                &[
+                    mesh_uniform.index(),
+                    previous_mesh_uniform.index(),
+                    instance_index.0,
+                ],
+            );
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 
@@ -603,7 +672,8 @@ pub struct PrepassNode {
             &'static ExtractedCamera,
             &'static RenderPhase<Prepass>,
             &'static Camera3d,
-            &'static PrepassTarget,
+            &'static PrepassDepthTexture,
+            &'static PrepassTextures,
         ),
         With<ExtractedView>,
     >,
@@ -635,15 +705,17 @@ impl Node for PrepassNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (camera, prepass_phase, camera_3d, target) = match self.query.get_manual(world, entity)
-        {
-            Ok(query) => query,
-            Err(_) => return Ok(()),
-        };
+        let (camera, prepass_phase, camera_3d, depth, textures) =
+            match self.query.get_manual(world, entity) {
+                Ok(query) => query,
+                Err(_) => return Ok(()),
+            };
 
-        if !world.contains_resource::<PrepassBindGroup>() {
-            return Ok(());
-        }
+        let images = world.resource::<RenderAssets<Image>>();
+        let textures = match textures.prepared(images) {
+            Some(textures) => textures,
+            None => return Ok(()),
+        };
 
         {
             #[cfg(feature = "trace")]
@@ -656,38 +728,33 @@ impl Node for PrepassNode {
                 label: Some("main_prepass"),
                 color_attachments: &[
                     Some(RenderPassColorAttachment {
-                        view: &target.position.texture_view,
+                        view: &textures.position.texture_view,
                         resolve_target: None,
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.normal.texture_view,
+                        view: &textures.normal.texture_view,
                         resolve_target: None,
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.depth_gradient.texture_view,
+                        view: &textures.depth_gradient.texture_view,
                         resolve_target: None,
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.instance_material.texture_view,
+                        view: &textures.instance_material.texture_view,
                         resolve_target: None,
                         ops,
                     }),
                     Some(RenderPassColorAttachment {
-                        view: &target.uv.texture_view,
-                        resolve_target: None,
-                        ops,
-                    }),
-                    Some(RenderPassColorAttachment {
-                        view: &target.velocity.texture_view,
+                        view: &textures.velocity_uv.texture_view,
                         resolve_target: None,
                         ops,
                     }),
                 ],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &target.depth.texture_view,
+                    view: &depth,
                     depth_ops: Some(Operations {
                         load: camera_3d.depth_load_op.clone().into(),
                         store: true,

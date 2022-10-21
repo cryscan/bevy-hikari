@@ -72,7 +72,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let size = textureDimensions(position_texture);
 
 #ifdef TEMPORAL_ANTI_ALIASING
-    let velocity = textureLoad(velocity_texture, coords, 0).xy;
+    let velocity = textureLoad(velocity_uv_texture, coords, 0).xy;
     let previous_uv = uv - velocity;
     let previous_color = textureSample(previous_render_texture, previous_render_sampler, previous_uv);
 

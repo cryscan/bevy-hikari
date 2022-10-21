@@ -1,6 +1,6 @@
 use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
-    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTarget},
+    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, PreviousViewUniformOffset},
     HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
 };
@@ -9,7 +9,7 @@ use bevy::{
         lifetimeless::{Read, SQuery},
         SystemParamItem,
     },
-    pbr::{MeshPipeline, ViewLightsUniformOffset},
+    pbr::ViewLightsUniformOffset,
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -18,7 +18,7 @@ use bevy::{
         render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::{GpuImage, TextureCache},
+        texture::{FallbackImage, GpuImage, TextureCache},
         view::ViewUniformOffset,
         RenderApp, RenderStage,
     },
@@ -73,98 +73,14 @@ pub struct LightPipeline {
     pub noise_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
     pub reservoir_layout: BindGroupLayout,
-    pub dummy_white_gpu_image: GpuImage,
 }
 
 impl FromWorld for LightPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
-        let mesh_pipeline = world.resource::<MeshPipeline>();
         let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
         let view_layout = world.resource::<PrepassPipeline>().view_layout.clone();
-
-        let deferred_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Position Buffer
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Normal Buffer
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Depth Gradient Buffer
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // UV Buffer
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Velocity Buffer
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Instance-material Buffer
-                BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Uint,
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Albedo Texture
-                BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: ALBEDO_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let deferred_layout = PrepassTextures::bind_group_layout(render_device);
 
         let noise_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -233,9 +149,20 @@ impl FromWorld for LightPipeline {
                     },
                     count: None,
                 },
-                // Render Texture
+                // Albedo Texture
                 BindGroupLayoutEntry {
                     binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::ReadWrite,
+                        format: ALBEDO_TEXTURE_FORMAT,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Render Texture
+                BindGroupLayoutEntry {
+                    binding: 5,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::ReadWrite,
@@ -305,7 +232,6 @@ impl FromWorld for LightPipeline {
             noise_layout,
             render_layout,
             reservoir_layout,
-            dummy_white_gpu_image: mesh_pipeline.dummy_white_gpu_image.clone(),
         }
     }
 }
@@ -564,8 +490,9 @@ fn queue_light_bind_groups(
     pipeline: Res<LightPipeline>,
     noise_texture: Res<NoiseTextures>,
     images: Res<RenderAssets<Image>>,
+    fallback: Res<FallbackImage>,
     reservoir_cache: Res<ReservoirCache>,
-    query: Query<(Entity, &PrepassTarget, &LightPassTarget), With<ExtractedCamera>>,
+    query: Query<(Entity, &PrepassTextures, &LightPassTarget), With<ExtractedCamera>>,
 ) {
     let mut noise_texture_views = vec![];
     for handle in noise_texture.iter() {
@@ -599,46 +526,16 @@ fn queue_light_bind_groups(
             let current_id = light_pass.current_id;
             let previous_id = 1 - current_id;
 
-            let deferred = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.deferred_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&prepass.position.texture_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(&prepass.normal.texture_view),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(
-                            &prepass.depth_gradient.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: BindingResource::TextureView(&prepass.uv.texture_view),
-                    },
-                    BindGroupEntry {
-                        binding: 4,
-                        resource: BindingResource::TextureView(&prepass.velocity.texture_view),
-                    },
-                    BindGroupEntry {
-                        binding: 5,
-                        resource: BindingResource::TextureView(
-                            &prepass.instance_material.texture_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 6,
-                        resource: BindingResource::TextureView(
-                            &light_pass.albedo_texture.texture_view,
-                        ),
-                    },
-                ],
-            });
+            let deferred = match prepass.as_bind_group(
+                &pipeline.deferred_layout,
+                &render_device,
+                &images,
+                &fallback,
+            ) {
+                Ok(deferred) => deferred,
+                Err(_) => continue,
+            }
+            .bind_group;
 
             let noise = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
@@ -686,6 +583,12 @@ fn queue_light_bind_groups(
                     BindGroupEntry {
                         binding: 4,
                         resource: BindingResource::TextureView(
+                            &light_pass.albedo_texture.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 5,
+                        resource: BindingResource::TextureView(
                             &light_pass.direct_render_texture.texture_view,
                         ),
                     },
@@ -721,6 +624,12 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 4,
+                        resource: BindingResource::TextureView(
+                            &light_pass.albedo_texture.texture_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 5,
                         resource: BindingResource::TextureView(
                             &light_pass.indirect_render_texture.texture_view,
                         ),
@@ -795,10 +704,12 @@ impl<const I: usize> EntityRenderCommand for SetDeferredBindGroup<I> {
         query: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let bind_group = query.get_inner(view).unwrap();
-        pass.set_bind_group(I, &bind_group.deferred, &[]);
-
-        RenderCommandResult::Success
+        if let Ok(bind_group) = query.get_inner(view) {
+            pass.set_bind_group(I, &bind_group.deferred, &[]);
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 

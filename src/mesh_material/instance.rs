@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
-    transform::{GlobalTransformQueue, HierarchyVisibility},
+    transform::GlobalTransformQueue,
     HikariConfig,
 };
 use bevy::{
@@ -152,7 +152,7 @@ fn instance_event_system<M: IntoStandardMaterial>(
                 Changed<GlobalTransform>,
                 Changed<Handle<Mesh>>,
                 Changed<Handle<M>>,
-                Changed<HierarchyVisibility>,
+                Changed<ComputedVisibility>,
             )>,
         >,
     )>,

@@ -7,10 +7,6 @@ var normal_texture: texture_2d<f32>;
 @group(1) @binding(2)
 var depth_gradient_texture: texture_2d<f32>;
 @group(1) @binding(3)
-var uv_texture: texture_2d<f32>;
-@group(1) @binding(4)
-var velocity_texture: texture_2d<f32>;
-@group(1) @binding(5)
 var instance_material_texture: texture_2d<u32>;
-@group(1) @binding(6)
-var albedo_texture: texture_storage_2d<rgba16float, read_write>;
+@group(1) @binding(4)
+var velocity_uv_texture: texture_2d<f32>;
