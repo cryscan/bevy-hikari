@@ -261,8 +261,8 @@ impl Default for HikariConfig {
             max_indirect_luminance: 1.0,
             temporal_reuse: true,
             spatial_reuse: false,
-            direct_spatial_denoise: true,
-            indirect_spatial_denoise: true,
+            direct_spatial_denoise: false,
+            indirect_spatial_denoise: false,
             temporal_anti_aliasing: true,
         }
     }
