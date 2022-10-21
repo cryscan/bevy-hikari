@@ -2,7 +2,7 @@ use crate::{
     mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, PreviousViewUniformOffset},
-    HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, NOISE_TEXTURE_COUNT, WORKGROUP_SIZE,
+    HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
     ecs::system::{
@@ -24,7 +24,6 @@ use bevy::{
     },
     utils::HashMap,
 };
-use std::num::NonZeroU32;
 
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
@@ -80,30 +79,9 @@ impl FromWorld for LightPipeline {
         let render_device = world.resource::<RenderDevice>();
         let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
         let view_layout = world.resource::<PrepassPipeline>().view_layout.clone();
-        let deferred_layout = PrepassTextures::bind_group_layout(render_device);
 
-        let noise_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Blue Noise Texture
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: NonZeroU32::new(NOISE_TEXTURE_COUNT as u32),
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
-        });
+        let deferred_layout = PrepassTextures::bind_group_layout(render_device);
+        let noise_layout = NoiseTextures::bind_group_layout(render_device);
 
         let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -488,34 +466,12 @@ fn queue_light_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
-    noise_texture: Res<NoiseTextures>,
+    noise: Res<NoiseTextures>,
     images: Res<RenderAssets<Image>>,
     fallback: Res<FallbackImage>,
     reservoir_cache: Res<ReservoirCache>,
     query: Query<(Entity, &PrepassTextures, &LightPassTarget), With<ExtractedCamera>>,
 ) {
-    let mut noise_texture_views = vec![];
-    for handle in noise_texture.iter() {
-        let image = match images.get(handle) {
-            Some(image) => image,
-            None => {
-                return;
-            }
-        };
-        noise_texture_views.push(&*image.texture_view);
-    }
-
-    let noise_sampler = render_device.create_sampler(&SamplerDescriptor {
-        label: None,
-        address_mode_u: AddressMode::Repeat,
-        address_mode_v: AddressMode::Repeat,
-        address_mode_w: AddressMode::Repeat,
-        mag_filter: FilterMode::Nearest,
-        min_filter: FilterMode::Nearest,
-        mipmap_filter: FilterMode::Nearest,
-        ..Default::default()
-    });
-
     for (entity, prepass, light_pass) in &query {
         let reservoirs = reservoir_cache.get(&entity).unwrap();
         if let Some(reservoir_bindings) = reservoirs
@@ -537,20 +493,16 @@ fn queue_light_bind_groups(
             }
             .bind_group;
 
-            let noise = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.noise_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureViewArray(&noise_texture_views),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Sampler(&noise_sampler),
-                    },
-                ],
-            });
+            let noise = match noise.as_bind_group(
+                &pipeline.noise_layout,
+                &render_device,
+                &images,
+                &fallback,
+            ) {
+                Ok(noise) => noise,
+                Err(_) => continue,
+            }
+            .bind_group;
 
             let direct_render = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,

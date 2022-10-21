@@ -281,6 +281,7 @@ fn extract_prepass_camera_phases(
 
 #[derive(Clone, Component, AsBindGroup)]
 pub struct PrepassTextures {
+    pub size: Extent3d,
     #[texture(0, visibility(all))]
     pub position: Handle<Image>,
     #[texture(1, visibility(all))]
@@ -375,6 +376,7 @@ fn prepass_textures_system(
             let velocity_uv = images.add(create_texture(VELOCITY_UV_FORMAT));
 
             commands.entity(entity).insert(PrepassTextures {
+                size,
                 position,
                 normal,
                 depth_gradient,
@@ -391,34 +393,27 @@ pub struct PrepassDepthTexture(pub TextureView);
 fn queue_prepass_depth_texture(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    assets: Res<RenderAssets<Image>>,
     mut texture_cache: ResMut<TextureCache>,
     query: Query<(Entity, &PrepassTextures)>,
 ) {
     for (entity, textures) in &query {
-        if let Some(image) = assets.get(&textures.position) {
-            let size = Extent3d {
-                width: image.size.x as u32,
-                height: image.size.y as u32,
-                depth_or_array_layers: 1,
-            };
-            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
-            let texture = texture_cache.get(
-                &render_device,
-                TextureDescriptor {
-                    label: None,
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format: TextureFormat::Depth32Float,
-                    usage: texture_usage,
-                },
-            );
-            commands
-                .entity(entity)
-                .insert(PrepassDepthTexture(texture.default_view));
-        }
+        let size = textures.size;
+        let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
+        let texture = texture_cache.get(
+            &render_device,
+            TextureDescriptor {
+                label: None,
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: texture_usage,
+            },
+        );
+        commands
+            .entity(entity)
+            .insert(PrepassDepthTexture(texture.default_view));
     }
 }
 

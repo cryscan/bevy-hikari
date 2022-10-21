@@ -13,12 +13,15 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         extract_resource::{ExtractResource, ExtractResourcePlugin},
+        render_asset::RenderAssets,
         render_graph::{RenderGraph, SlotInfo, SlotType},
-        texture::{CompressedImageFormats, ImageType},
+        render_resource::*,
+        renderer::RenderDevice,
+        texture::{CompressedImageFormats, FallbackImage, ImageType},
         RenderApp,
     },
 };
-use std::f32::consts::PI;
+use std::{f32::consts::PI, num::NonZeroU32};
 
 pub mod light;
 pub mod mesh_material;
@@ -267,3 +270,85 @@ impl Default for HikariConfig {
 
 #[derive(Clone, Deref, ExtractResource)]
 pub struct NoiseTextures(pub Vec<Handle<Image>>);
+
+impl AsBindGroup for NoiseTextures {
+    type Data = ();
+
+    fn as_bind_group(
+        &self,
+        layout: &BindGroupLayout,
+        render_device: &RenderDevice,
+        images: &RenderAssets<Image>,
+        fallback_image: &FallbackImage,
+    ) -> Result<PreparedBindGroup<Self>, AsBindGroupError> {
+        let images: Vec<_> = self
+            .iter()
+            .map(|handle| match images.get(handle) {
+                Some(image) => image,
+                None => fallback_image,
+            })
+            .collect();
+        let texture_views: Vec<_> = images.iter().map(|image| &*image.texture_view).collect();
+        let bindings = images
+            .iter()
+            .map(|image| OwnedBindingResource::TextureView(image.texture_view.clone()))
+            .collect();
+
+        let sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: None,
+            address_mode_u: AddressMode::Repeat,
+            address_mode_v: AddressMode::Repeat,
+            address_mode_w: AddressMode::Repeat,
+            mag_filter: FilterMode::Nearest,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureViewArray(&texture_views),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        Ok(PreparedBindGroup {
+            bindings,
+            bind_group,
+            data: (),
+        })
+    }
+
+    fn bind_group_layout(render_device: &RenderDevice) -> BindGroupLayout {
+        render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                // Blue Noise Texture
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: NonZeroU32::new(NOISE_TEXTURE_COUNT as u32),
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        })
+    }
+}
