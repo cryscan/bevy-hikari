@@ -1168,14 +1168,22 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
             info = hit_info(ray, hit);
             let in_radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
-            let out_radiance = shading(
+            var out_radiance = shading(
                 normalize(s.sample_position.xyz - s.visible_position.xyz),
                 s.sample_normal,
                 ray.direction,
                 surface,
                 in_radiance
             );
-            s.radiance = vec4<f32>(out_radiance / candidate.p, in_radiance.a);
+            out_radiance = out_radiance / candidate.p;
+
+            // Do radiance clamping
+            let out_luminance = luminance(out_radiance);
+            if (out_luminance > frame.max_indirect_luminance) {
+                out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
+            }
+
+            s.radiance = vec4<f32>(out_radiance, in_radiance.a);
         }
     } else {
         // Only ambient radiance
@@ -1314,7 +1322,6 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let albedo = textureLoad(albedo_texture, output_coords);
 
     var irradiance = textureLoad(render_texture, render_coords).rgb / max(albedo.rgb, vec3<f32>(0.01));
-    // irradiance = min(irradiance, vec3<f32>(frame.max_radiance));
     let lum = luminance(irradiance);
 
     let r = load_reservoir(render_coords.x + output_size.x * render_coords.y);
@@ -1322,6 +1329,43 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var irradiance_sum = vec3<f32>(0.0);
     var w_sum = 0.0;
+
+    var w_ff = 1.0;
+
+#ifdef FIREFLY_FILTER
+    // 5x5 Firefly Filter
+    var lum_sum = 0.0;
+    var lum2_sum = 0.0;
+    var ff_count = 0.01;
+    for (var y = -2; y <= 2; y += 1) {
+        for (var x = -2; x <= 2; x += 1) {
+            if (x == 0 && y == 0) {
+                continue;
+            }
+
+            let offset = vec2<i32>(x, y);
+            let sample_coords = output_coords + offset;
+            let render_sample_coords = render_coords + offset;
+            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
+                continue;
+            }
+
+            let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
+            irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
+            let sample_luminance = luminance(irradiance);
+            
+            lum_sum += sample_luminance;
+            lum2_sum += sample_luminance * sample_luminance;
+            ff_count += 1.0;
+        }
+    }
+
+    let lum_mean = lum_sum / ff_count;
+    let lum_var = lum2_sum / ff_count - lum_mean * lum_mean;
+    if (lum > lum_mean + 3.0 * sqrt(lum_var)) {
+        w_ff = 0.0;
+    }
+#endif
 
 #ifdef DENOISER_LEVEL_0
     // Pass 0, stride 8
@@ -1336,18 +1380,11 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
             let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
             irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
-            // irradiance = min(irradiance, vec3<f32>(frame.max_radiance));
 
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
             let sample_luminance = luminance(irradiance);
-
-#ifdef RADIANCE_CLAMP
-            if (sample_luminance > frame.max_indirect_luminance) {
-                continue;
-            }
-#endif
 
             let w_normal = normal_weight(normal, sample_normal);
             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
@@ -1356,7 +1393,7 @@ fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
-            irradiance_sum += irradiance * w;
+            irradiance_sum += irradiance * w * select(1.0, w_ff, (x == 0 && y == 0));
             w_sum += w;
         }
     }

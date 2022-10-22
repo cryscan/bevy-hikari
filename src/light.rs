@@ -219,7 +219,7 @@ pub struct LightPipelineKey {
     pub entry_point: String,
     pub texture_count: u8,
     pub denoiser_level: u8,
-    pub radiance_clamp: bool,
+    pub firefly_filter: bool,
 }
 
 impl SpecializedComputePipeline for LightPipeline {
@@ -234,8 +234,8 @@ impl SpecializedComputePipeline for LightPipeline {
 
         shader_defs.push(format!("DENOISER_LEVEL_{}", key.denoiser_level));
 
-        if key.radiance_clamp {
-            shader_defs.push("RADIANCE_CLAMP".into());
+        if key.firefly_filter {
+            shader_defs.push("FIREFLY_FILTER".into());
         }
 
         ComputePipelineDescriptor {
@@ -401,7 +401,7 @@ fn queue_light_pipelines(
         entry_point: "direct_lit".into(),
         texture_count,
         denoiser_level: 0,
-        radiance_clamp: false,
+        firefly_filter: false,
     };
     let direct_lit = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
@@ -409,7 +409,7 @@ fn queue_light_pipelines(
         entry_point: "indirect_lit_ambient".into(),
         texture_count,
         denoiser_level: 0,
-        radiance_clamp: false,
+        firefly_filter: false,
     };
     let indirect_lit_ambient = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
@@ -417,7 +417,7 @@ fn queue_light_pipelines(
         entry_point: "indirect_spatial_reuse".into(),
         texture_count,
         denoiser_level: 0,
-        radiance_clamp: false,
+        firefly_filter: false,
     };
     let indirect_spatial_reuse = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
@@ -426,7 +426,7 @@ fn queue_light_pipelines(
             entry_point: "denoise_atrous".into(),
             texture_count,
             denoiser_level: level,
-            radiance_clamp: false,
+            firefly_filter: true,
         };
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
@@ -435,7 +435,7 @@ fn queue_light_pipelines(
             entry_point: "denoise_atrous".into(),
             texture_count,
             denoiser_level: level,
-            radiance_clamp: true,
+            firefly_filter: true,
         };
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
