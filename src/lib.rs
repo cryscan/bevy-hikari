@@ -258,7 +258,7 @@ impl Default for HikariConfig {
             direct_oversample_threshold: 1,
             solar_angle: PI / 36.0,
             emissive_threshold: 0.00390625,
-            max_indirect_luminance: 1.0,
+            max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: false,
             direct_spatial_denoise: false,

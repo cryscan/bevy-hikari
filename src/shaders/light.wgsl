@@ -890,8 +890,6 @@ fn spatial_restir(
     s: Sample,
     max_sample_count: u32
 ) -> RestirOutput {
-    var rand = s.random;
-
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
     let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
 
@@ -903,58 +901,50 @@ fn spatial_restir(
     }
 
     // Always merge the reservoir on its own location at first.
-    let q = load_reservoir(coords.x + reservoir_size.x * coords.y);
-    let radiance = shading(
-        V,
-        q.s.visible_normal,
-        normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
-        surface,
-        q.s.radiance
-    );
-    let pdf = luminance(radiance);
-    merge_reservoir(r, q, pdf);
+    // let q = load_reservoir(coords.x + reservoir_size.x * coords.y);
+    // let radiance = shading(
+    //     V,
+    //     q.s.visible_normal,
+    //     normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
+    //     surface,
+    //     q.s.radiance
+    // );
+    // merge_reservoir(r, q, luminance(radiance));
 
-    for (var i = 0u; i < SPATIAL_REUSE_COUNT; i += 1u) {
-        rand = fract(rand + f32(frame.number) * GOLDEN_RATIO);
-        let offset = vec2<i32>(round(sample_uniform_disk(rand.zw) * SPATIAL_REUSE_RANGE));
+    for (var y = -2; y <= 2; y += 1) {
+        for (var x = -2; x <= 2; x += 1) {
+            let offset = vec2<i32>(x, y);
+            let sample_coords = coords + offset * 2;
+            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size)) {
+                continue;
+            }
 
-        let sample_coords = coords + offset;
-        if (any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size)) {
-            continue;
+            let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
+            let depth_miss = distance((*r).s.visible_position.w, q.s.visible_position.w) > 0.05;
+            let normal_miss = dot((*r).s.visible_normal, q.s.visible_normal) < 0.866;
+            if (q.count < F32_EPSILON || depth_miss || normal_miss) {
+                continue;
+            }
+
+            var inv_jac = 1.0;
+            if (q.s.sample_position.w > 0.1) {
+                inv_jac = compute_inv_jacobian(s, q.s);
+            }
+
+            let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
+            if (dot(sample_direction, (*r).s.visible_normal) < 0.0) {
+                continue;
+            }
+
+            let radiance = shading(
+                V,
+                q.s.visible_normal,
+                normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
+                surface,
+                q.s.radiance
+            );
+            merge_reservoir(r, q, luminance(radiance) * inv_jac);
         }
-
-        let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
-        let depth_miss = distance((*r).s.visible_position.w, q.s.visible_position.w) > 0.05;
-        let normal_miss = dot((*r).s.visible_normal, q.s.visible_normal) < 0.866;
-        if (q.count < F32_EPSILON || depth_miss || normal_miss) {
-            continue;
-        }
-
-        var inv_jac = 1.0;
-        if (q.s.sample_position.w > 0.1) {
-            //let dqq = q.s.visible_position.xyz - q.s.sample_position.xyz;
-            //let drq = (*r).s.visible_position.xyz - q.s.sample_position.xyz;
-            //let cos_r = abs(dot(normalize(drq), q.s.sample_normal));
-            //let cos_q = abs(dot(normalize(dqq), q.s.sample_normal));
-            //inv_jac = clamp((cos_q * dot(drq, drq)) / max(cos_r * dot(dqq, dqq), 0.0001), 0.0, 1e20f);
-            inv_jac = compute_inv_jacobian(s, q.s);
-        }
-
-        let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
-        if (dot(sample_direction, (*r).s.visible_normal) < 0.0) {
-            continue;
-        }
-
-        let radiance = shading(
-            V,
-            q.s.visible_normal,
-            normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
-            surface,
-            q.s.radiance
-        );
-        let pdf = luminance(radiance) * inv_jac;
-
-        merge_reservoir(r, q, pdf);
     }
 
     // Clamp...
@@ -1166,9 +1156,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             s.sample_normal,
             info.instance_index
         );
-        pdf *= candidate.p;
 
-        if (dot(candidate.direction, s.sample_normal) > 0.0) {
+        if (dot(candidate.direction, s.sample_normal) > 0.0 && candidate.p > 0.0) {
             surface = retreive_surface(info.material_index, info.uv);
             surface.roughness = 1.0;
 
@@ -1178,14 +1167,15 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
             info = hit_info(ray, hit);
-            var radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
-            s.radiance = vec4<f32>(shading(
+            let in_radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
+            let out_radiance = shading(
                 normalize(s.sample_position.xyz - s.visible_position.xyz),
                 s.sample_normal,
                 ray.direction,
                 surface,
-                radiance
-            ), radiance.a);
+                in_radiance
+            );
+            s.radiance = vec4<f32>(out_radiance / candidate.p, in_radiance.a);
         }
     } else {
         // Only ambient radiance
