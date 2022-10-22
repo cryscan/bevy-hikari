@@ -335,6 +335,18 @@ impl IntoStandardMaterial for StandardMaterial {
         if let Some(texture) = &self.base_color_texture {
             render_assets.textures.insert(texture.clone_weak());
         }
+        if let Some(texture) = &self.emissive_texture {
+            render_assets.textures.insert(texture.clone_weak());
+        }
+        if let Some(texture) = &self.metallic_roughness_texture {
+            render_assets.textures.insert(texture.clone_weak());
+        }
+        if let Some(texture) = &self.normal_map_texture {
+            render_assets.textures.insert(texture.clone_weak());
+        }
+        if let Some(texture) = &self.occlusion_texture {
+            render_assets.textures.insert(texture.clone_weak());
+        }
         self
     }
 }
