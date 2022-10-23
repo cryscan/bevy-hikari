@@ -919,7 +919,7 @@ fn spatial_restir(
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
     if (depth_miss || instance_miss || normal_miss || (*r).count <= 0.0) {
-        *r = empty_reservoir();
+        *r = load_reservoir(coords.x + coords.x * coords.y);
     }
 
     let neighbor_count: i32 = 9;
@@ -966,7 +966,7 @@ fn spatial_restir(
             q.s.radiance
         );
         
-        let lum = min(frame.max_indirect_luminance, luminance(radiance) * inv_jac);
+        let lum = luminance(radiance) * inv_jac;
         merge_reservoir(r, q, lum);        
     }
 
