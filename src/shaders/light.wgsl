@@ -938,12 +938,12 @@ fn spatial_restir(
             continue;
         }
 
-        //let pos_diff = q.s.visible_position.xyz - s.visible_position.xyz;
-        //let pos_miss = dot(pos_diff, pos_diff) > 0.01;
-        let depth_miss = distance(s.visible_position.w, q.s.visible_position.w) > 0.05;
-        let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.866;                        
+        let pos_diff = q.s.visible_position.xyz - s.visible_position.xyz;
+        let pos_miss = dot(pos_diff, pos_diff) > 0.01;
+        //let depth_miss = distance(s.visible_position.w, q.s.visible_position.w) > 0.01;
+        let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.906;                        
 
-        if (q.count <= 0.0 || depth_miss || normal_miss) { // || pos_miss
+        if (q.count <= 0.0 || normal_miss || pos_miss) { // depth_miss
             continue;
         }
 
