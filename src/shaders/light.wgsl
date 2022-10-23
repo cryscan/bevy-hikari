@@ -81,6 +81,7 @@ let OVERSAMPLE_THRESHOLD: f32 = 4.0;
 let SPATIAL_REUSE_COUNT: u32 = 16u;
 let SPATIAL_REUSE_RANGE_MIN: f32 = 15.0;
 let SPATIAL_REUSE_RANGE_MAX: f32 = 30.0;
+let SPATIAL_REUSE_TAPS: u32 = 4u;
 
 struct Ray {
     origin: vec3<f32>,
@@ -1311,11 +1312,37 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
             continue;
         }
 
-        q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
-        let depth_ratio = s.visible_position.w / q.s.visible_position.w;
+        let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+        let depth_ratio = depth / sample_depth;
         let depth_miss = depth_ratio < 0.9 || depth_ratio > 1.1;
+        if (depth_miss) {
+            continue;
+        }
+
+        // Perform screen-space ray-marching the depth to reject samples
+        let tap_interval = max(1.0, offset_dist / f32(SPATIAL_REUSE_TAPS + 1u));
+        let tap_count = u32(offset_dist / tap_interval);
+        var occluded = false;
+        for (var j = 1u; j <= tap_count; j += 1u) {
+            let tap_dist = f32(j) * tap_interval;
+            let tap_offset = tap_dist * normalize(offset);
+
+            let tap_coords = coords + vec2<i32>(tap_offset);
+            let tap_depth = textureLoad(position_texture, tap_coords, 0).w;
+
+            let ref_depth = mix(depth, sample_depth, f32(j) / f32(tap_count + 1u));
+            if (tap_depth > ref_depth + 0.0001) {
+                occluded = true;
+                break;
+            }
+        }
+        if (occluded) {
+            continue;
+        }
+
+        q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
         let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.866;
-        if (q.count < F32_EPSILON || depth_miss || normal_miss) {
+        if (q.count < F32_EPSILON || normal_miss) {
             continue;
         }
 
