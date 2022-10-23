@@ -878,7 +878,7 @@ fn compute_inv_jacobian(current_sample: Sample, neighbor_sample: Sample) -> f32 
     let numerator = rb2 * cos_phi_a;
     let denominator = ra2 * cos_phi_b;
 
-    return select(clamp(numerator / denominator, 0.0, 1.0E20), 0.0, (denominator <= 0.0));
+    return select(clamp(numerator / denominator, 0.06, 1.0), 0.0, (denominator <= 0.0));
 }
 
 fn spatial_restir(
@@ -896,55 +896,55 @@ fn spatial_restir(
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
-    if (depth_miss || instance_miss || normal_miss) {
-        set_reservoir(r, s, 0.0);
+    if (depth_miss || instance_miss || normal_miss || (*r).count <= 0.0) {
+        *r = empty_reservoir();
     }
 
-    // Always merge the reservoir on its own location at first.
-    // let q = load_reservoir(coords.x + reservoir_size.x * coords.y);
-    // let radiance = shading(
-    //     V,
-    //     q.s.visible_normal,
-    //     normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
-    //     surface,
-    //     q.s.radiance
-    // );
-    // merge_reservoir(r, q, luminance(radiance));
+    let neighbor_count: i32 = 9;
 
-    for (var y = -2; y <= 2; y += 1) {
-        for (var x = -2; x <= 2; x += 1) {
-            let offset = vec2<i32>(x, y);
-            let sample_coords = coords + offset * 2;
-            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size)) {
-                continue;
-            }
+    for (var i: i32 = 0; i < neighbor_count; i++) {
+        let dist_fact: f32 = f32(i) / f32(neighbor_count - 1);
+        let angle_fact: f32 = 6.2831 * (dist_fact * 13.0 + s.random.x);
 
-            let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
-            let depth_miss = distance((*r).s.visible_position.w, q.s.visible_position.w) > 0.05;
-            let normal_miss = dot((*r).s.visible_normal, q.s.visible_normal) < 0.866;
-            if (q.count < F32_EPSILON || depth_miss || normal_miss) {
-                continue;
-            }
+        let offset: vec2<i32> = vec2<i32>(30.0 * dist_fact * vec2<f32>(cos(angle_fact), sin(angle_fact)));
+        let sample_coords: vec2<i32> = clamp(coords + offset, vec2<i32>(0), reservoir_size - 1);    
 
-            var inv_jac = 1.0;
-            if (q.s.sample_position.w > 0.1) {
-                inv_jac = compute_inv_jacobian(s, q.s);
-            }
+        let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
 
-            let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
-            if (dot(sample_direction, (*r).s.visible_normal) < 0.0) {
-                continue;
-            }
-
-            let radiance = shading(
-                V,
-                q.s.visible_normal,
-                normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
-                surface,
-                q.s.radiance
-            );
-            merge_reservoir(r, q, luminance(radiance) * inv_jac);
+        // Discard miss samples
+        if (length(q.s.sample_normal) <= 0.0) {
+            continue;
         }
+
+        //let pos_diff = q.s.visible_position.xyz - s.visible_position.xyz;
+        //let pos_miss = dot(pos_diff, pos_diff) > 0.01;
+        let depth_miss = distance(s.visible_position.w, q.s.visible_position.w) > 0.05;
+        let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.866;                        
+
+        if (q.count <= 0.0 || depth_miss || normal_miss) { // || pos_miss
+            continue;
+        }
+
+        var inv_jac = 1.0;
+        if (q.s.sample_position.w > 0.5) {
+            inv_jac = compute_inv_jacobian(s, q.s);
+        }
+
+        //let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
+        //if (dot(sample_direction, (*r).s.visible_normal) < 0.0) {
+            //continue;
+        //}
+
+        let radiance = shading(
+            V,
+            q.s.visible_normal,
+            normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
+            surface,
+            q.s.radiance
+        );
+        
+        let lum = min(frame.max_indirect_luminance, luminance(radiance) * inv_jac);
+        merge_reservoir(r, q, lum);        
     }
 
     // Clamp...
@@ -963,7 +963,9 @@ fn spatial_restir(
         surface,
         (*r).s.radiance
     );
-    (*r).w = (*r).w_sum / max((*r).count * luminance(out.radiance), 0.0001);
+
+    let lum_sum = (*r).count * luminance(out.radiance);
+    (*r).w = select((*r).w_sum / lum_sum, 0.0, lum_sum <= 0.0)
     out.output = (*r).w * out.radiance;
 
     return out;

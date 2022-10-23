@@ -260,10 +260,10 @@ impl Default for HikariConfig {
             emissive_threshold: 0.00390625,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
-            spatial_reuse: false,
-            direct_spatial_denoise: true,
-            indirect_spatial_denoise: true,
-            temporal_anti_aliasing: true,
+            spatial_reuse: true,
+            direct_spatial_denoise: false,
+            indirect_spatial_denoise: false,
+            temporal_anti_aliasing: false,
         }
     }
 }
