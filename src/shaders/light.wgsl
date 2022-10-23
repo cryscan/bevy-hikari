@@ -881,6 +881,28 @@ fn compute_inv_jacobian(current_sample: Sample, neighbor_sample: Sample) -> f32 
     return select(clamp(numerator / denominator, 0.06, 1.0), 0.0, (denominator <= 0.0));
 }
 
+fn compute_inv_jacobian2(q: Sample, r: Sample) -> f32
+{
+    let normal: vec3<f32> = q.sample_normal;
+
+    let cos_phi_1: f32 = abs(dot(normalize(r.visible_position.xyz - q.sample_position.xyz), normal));
+    let cos_phi_2: f32 = abs(dot(normalize(q.visible_position.xyz - q.sample_position.xyz), normal));
+
+    let term1: f32 = cos_phi_1 / max(0.0001, cos_phi_2);
+    
+    var num: f32 = length((q.visible_position.xyz - q.sample_position.xyz));
+    num *= num;
+
+    var denom: f32 = length((r.visible_position.xyz - q.sample_position.xyz));    
+    denom *= denom;
+    
+    let term2: f32 = num / max(denom,0.001);
+    var jacobian: f32 = term1 * term2;
+    
+    jacobian = clamp(jacobian, 0.06, 1.0);    
+    return jacobian;
+}
+
 fn spatial_restir(
     r: ptr<function, Reservoir>,
     coords: vec2<i32>,
@@ -927,7 +949,8 @@ fn spatial_restir(
 
         var inv_jac = 1.0;
         if (q.s.sample_position.w > 0.5) {
-            inv_jac = compute_inv_jacobian(s, q.s);
+            //inv_jac = compute_inv_jacobian(s, q.s);
+            inv_jac = compute_inv_jacobian2(q.s, (*r).s);
         }
 
         //let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
