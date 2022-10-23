@@ -254,16 +254,16 @@ impl Default for HikariConfig {
         Self {
             validation_interval: 4,
             max_temporal_reuse_count: 50,
-            max_spatial_reuse_count: 500,
-            direct_oversample_threshold: 1,
+            max_spatial_reuse_count: 800,
+            direct_oversample_threshold: 16,
             solar_angle: PI / 36.0,
             emissive_threshold: 0.00390625,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
-            direct_spatial_denoise: false,
-            indirect_spatial_denoise: false,
-            temporal_anti_aliasing: false,
+            direct_spatial_denoise: true,
+            indirect_spatial_denoise: true,
+            temporal_anti_aliasing: true,
         }
     }
 }
