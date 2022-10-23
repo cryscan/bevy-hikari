@@ -78,8 +78,9 @@ let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let OVERSAMPLE_THRESHOLD: f32 = 4.0;
-let SPATIAL_REUSE_COUNT: u32 = 7u;
-let SPATIAL_REUSE_RANGE: f32 = 5.0;
+let SPATIAL_REUSE_COUNT: u32 = 16u;
+let SPATIAL_REUSE_RANGE_MIN: f32 = 5.0;
+let SPATIAL_REUSE_RANGE_MAX: f32 = 30.0;
 
 struct Ray {
     origin: vec3<f32>,
@@ -948,8 +949,9 @@ fn spatial_restir(
 
         var inv_jac = 1.0;
         if (q.s.sample_position.w > 0.5) {
-            //inv_jac = compute_inv_jacobian(s, q.s);
-            inv_jac = compute_jacobian(q.s, (*r).s);
+            // This should be the inverse of jacobian:
+            // inv_jac = compute_jacobian(q.s, (*r).s);
+            inv_jac = 1.0 / compute_jacobian(q.s, (*r).s);
         }
 
         //let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
@@ -960,7 +962,9 @@ fn spatial_restir(
         let radiance = shading(
             V,
             q.s.visible_normal,
-            normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
+            // The direction of light source should be
+            normalize(q.s.sample_position.xyz - (*r).s.visible_position.xyz),
+            // normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
             surface,
             q.s.radiance
         );
@@ -1295,9 +1299,13 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
         vec2<f32>(0.707106781, 0.707106781),
         vec2<f32>(-0.707106781, 0.707106781)
     );
-    var offset = sign(s.random.zw - 0.5);
+    var offset = sign(s.random.zw - 0.5);       
+    let max_offset_dist = mix(SPATIAL_REUSE_RANGE_MAX, SPATIAL_REUSE_RANGE_MIN, q.count / f32(frame.max_temporal_reuse_count));
 
-    for (var i = 0u; i < 16u; i += 1u) {
+    for (var i = 1u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
+        let offset_dist = mix(1.414213562, max_offset_dist, f32(i) / f32(SPATIAL_REUSE_COUNT));
+        offset = offset_dist * normalize(offset);
+
         let sample_coords = coords + vec2<i32>(offset);
         if (any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size)) {
             continue;
@@ -1328,7 +1336,8 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
         );
         merge_reservoir(&r, q, luminance(out_radiance) / jacobian);
 
-        offset = mix(1.25, 1.2, q.count / f32(frame.max_temporal_reuse_count)) * rot * offset;
+        // offset = mix(1.25, 1.2, q.count / f32(frame.max_temporal_reuse_count)) * rot * offset;
+        offset = rot * offset;
     }
     // }
 
