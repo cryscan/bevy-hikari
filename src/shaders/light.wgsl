@@ -1128,7 +1128,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let render_size = textureDimensions(render_texture);
     let reservoir_size = render_size;
 
-    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter(frame.number)) / vec2<f32>(render_size);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
     let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
 
@@ -1257,7 +1257,7 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
     let render_size = textureDimensions(render_texture);
     let reservoir_size = render_size;
 
-    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter(frame.number)) / vec2<f32>(render_size);
+    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
     let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
 
@@ -1295,7 +1295,6 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
     );
     merge_reservoir(&r, q, luminance(out_radiance));
 
-    // if (q.count < f32(frame.direct_oversample_threshold)) {
     let rot = mat2x2<f32>(
         vec2<f32>(0.707106781, 0.707106781),
         vec2<f32>(-0.707106781, 0.707106781)
@@ -1314,8 +1313,7 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
 
         let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
         let depth_ratio = depth / sample_depth;
-        let depth_miss = depth_ratio < 0.9 || depth_ratio > 1.1;
-        if (depth_miss) {
+        if (depth_ratio < 0.9 || depth_ratio > 1.1) {
             continue;
         }
 
@@ -1327,7 +1325,8 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
             let tap_dist = f32(j) * tap_interval;
             let tap_offset = tap_dist * normalize(offset);
 
-            let tap_coords = coords + vec2<i32>(tap_offset);
+            let tap_uv = uv + tap_offset / vec2<f32>(render_size);
+            let tap_coords = vec2<i32>(tap_uv * vec2<f32>(deferred_size));
             let tap_depth = textureLoad(position_texture, tap_coords, 0).w;
 
             let ref_depth = mix(depth, sample_depth, f32(j) / f32(tap_count + 1u));
@@ -1366,7 +1365,6 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
         // offset = mix(1.25, 1.2, q.count / f32(frame.max_temporal_reuse_count)) * rot * offset;
         offset = rot * offset;
     }
-    // }
 
     // Clamp...
     let m = f32(frame.max_spatial_reuse_count);
