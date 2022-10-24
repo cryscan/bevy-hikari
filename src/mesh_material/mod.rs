@@ -353,10 +353,8 @@ impl IntoStandardMaterial for StandardMaterial {
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum MeshMaterialSystems {
-    PrePrepareAssets,
     PrepareAssets,
     PrepareInstances,
-    PostPrepareInstances,
 }
 
 pub struct MeshMaterialBindGroupLayout(pub BindGroupLayout);

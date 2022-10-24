@@ -21,13 +21,12 @@ impl Plugin for MaterialPlugin {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                .init_resource::<ExtractedMaterials>()
                 .init_resource::<MaterialRenderAssets>()
                 .init_resource::<GpuStandardMaterials>()
                 .add_system_to_stage(
                     RenderStage::Prepare,
-                    prepare_material_assets
-                        .label(MeshMaterialSystems::PrepareAssets)
-                        .after(MeshMaterialSystems::PrePrepareAssets),
+                    prepare_material_assets.label(MeshMaterialSystems::PrepareAssets),
                 );
         }
     }
@@ -59,10 +58,10 @@ pub struct ExtractedMaterials {
 }
 
 fn extract_material_assets<M: IntoStandardMaterial>(
-    mut commands: Commands,
     mut events: Extract<EventReader<AssetEvent<M>>>,
     assets: Extract<Res<Assets<M>>>,
     mut render_assets: ResMut<MaterialRenderAssets>,
+    mut extracted_assets: ResMut<ExtractedMaterials>,
 ) {
     let mut changed_assets = HashSet::default();
     let mut removed = Vec::new();
@@ -80,14 +79,15 @@ fn extract_material_assets<M: IntoStandardMaterial>(
 
     let mut extracted = Vec::new();
     for handle in changed_assets.drain() {
-        if let Some(material) = assets.get(&handle) {
+        if let Some(material) = assets.get(handle) {
             let handle = handle.clone_weak_untyped();
             let material = material.clone().into_standard_material(&mut render_assets);
             extracted.push((handle, material));
         }
     }
 
-    commands.insert_resource(ExtractedMaterials { extracted, removed });
+    extracted_assets.extracted.append(&mut extracted);
+    extracted_assets.removed.append(&mut removed);
 }
 
 fn prepare_material_assets(
