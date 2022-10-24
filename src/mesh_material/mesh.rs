@@ -23,9 +23,7 @@ impl Plugin for MeshPlugin {
                 .add_system_to_stage(RenderStage::Extract, extract_mesh_assets)
                 .add_system_to_stage(
                     RenderStage::Prepare,
-                    prepare_mesh_assets
-                        .label(MeshMaterialSystems::PrepareAssets)
-                        .after(MeshMaterialSystems::PrePrepareAssets),
+                    prepare_mesh_assets.label(MeshMaterialSystems::PrepareAssets),
                 );
         }
     }

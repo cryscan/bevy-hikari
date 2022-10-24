@@ -33,14 +33,13 @@ impl Plugin for InstancePlugin {
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
-                .init_resource::<GpuInstances>()
-                .init_resource::<GpuLightSources>()
+                .init_resource::<ExtractedInstances>()
                 .init_resource::<InstanceRenderAssets>()
                 .add_system_to_stage(
                     RenderStage::Prepare,
                     prepare_instances
-                        .label(MeshMaterialSystems::PostPrepareInstances)
-                        .after(MeshMaterialSystems::PrepareInstances),
+                        .label(MeshMaterialSystems::PrepareInstances)
+                        .after(MeshMaterialSystems::PrepareAssets),
                 );
         }
     }
@@ -59,14 +58,7 @@ impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
         );
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .add_system_to_stage(RenderStage::Extract, extract_instances::<M>)
-                .add_system_to_stage(
-                    RenderStage::Prepare,
-                    prepare_generic_instances::<M>
-                        .label(MeshMaterialSystems::PrepareInstances)
-                        .after(MeshMaterialSystems::PrepareAssets),
-                );
+            render_app.add_system_to_stage(RenderStage::Extract, extract_instances::<M>);
         }
     }
 }
@@ -122,14 +114,6 @@ impl ExtractComponent for PreviousMeshUniform {
     }
 }
 
-#[derive(Default, Deref, DerefMut)]
-pub struct GpuInstances(
-    BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped, ComputedVisibility)>,
-);
-
-#[derive(Default, Deref, DerefMut)]
-pub struct GpuLightSources(BTreeMap<Entity, GpuLightSource>);
-
 pub enum InstanceEvent<M: IntoStandardMaterial> {
     Created(Entity, Handle<Mesh>, Handle<M>, ComputedVisibility),
     Modified(Entity, Handle<Mesh>, Handle<M>, ComputedVisibility),
@@ -178,22 +162,23 @@ fn instance_event_system<M: IntoStandardMaterial>(
 }
 
 #[allow(clippy::type_complexity)]
-pub struct ExtractedInstances<M: IntoStandardMaterial> {
+#[derive(Default)]
+pub struct ExtractedInstances {
     extracted: Vec<(
         Entity,
         Aabb,
         GlobalTransform,
         Handle<Mesh>,
-        Handle<M>,
+        HandleUntyped,
         ComputedVisibility,
     )>,
     removed: Vec<Entity>,
 }
 
 fn extract_instances<M: IntoStandardMaterial>(
-    mut commands: Commands,
     mut events: Extract<EventReader<InstanceEvent<M>>>,
     query: Extract<Query<(&Aabb, &GlobalTransform)>>,
+    mut extracted_instances: ResMut<ExtractedInstances>,
 ) {
     let mut extracted = vec![];
     let mut removed = vec![];
@@ -208,7 +193,7 @@ fn extract_instances<M: IntoStandardMaterial>(
                         aabb.clone(),
                         *transform,
                         mesh.clone_weak(),
-                        material.clone_weak(),
+                        material.clone_weak_untyped(),
                         visibility.clone(),
                     ));
                 }
@@ -217,13 +202,39 @@ fn extract_instances<M: IntoStandardMaterial>(
         }
     }
 
-    commands.insert_resource(ExtractedInstances { extracted, removed });
+    extracted_instances.extracted.append(&mut extracted);
+    extracted_instances.removed.append(&mut removed);
 }
 
-fn prepare_generic_instances<M: IntoStandardMaterial>(
-    mut extracted_instances: ResMut<ExtractedInstances<M>>,
-    mut instances: ResMut<GpuInstances>,
+#[derive(Component, Default, Clone, Copy, ShaderType)]
+pub struct InstanceIndex {
+    pub instance: u32,
+    pub material: u32,
+}
+
+#[derive(Component, Default, Clone, Copy)]
+pub struct DynamicInstanceIndex(pub u32);
+
+type Instances = BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped, ComputedVisibility)>;
+type LightSources = BTreeMap<Entity, GpuLightSource>;
+
+/// Note: this system must run AFTER [`prepare_mesh_assets`].
+#[allow(clippy::too_many_arguments)]
+fn prepare_instances(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    config: Res<HikariConfig>,
+    mut render_assets: ResMut<InstanceRenderAssets>,
+    mut extracted_instances: ResMut<ExtractedInstances>,
+    mut instances: Local<Instances>,
+    mut sources: Local<LightSources>,
+    meshes: Res<GpuMeshes>,
+    materials: Res<GpuStandardMaterials>,
 ) {
+    let instance_changed =
+        !extracted_instances.extracted.is_empty() || !extracted_instances.removed.is_empty();
+
     for removed in extracted_instances.removed.drain(..) {
         instances.remove(&removed);
     }
@@ -272,32 +283,9 @@ fn prepare_generic_instances<M: IntoStandardMaterial>(
             ),
         );
     }
-}
 
-#[derive(Component, Default, Clone, Copy, ShaderType)]
-pub struct InstanceIndex {
-    pub instance: u32,
-    pub material: u32,
-}
-
-#[derive(Component, Default, Clone, Copy)]
-pub struct DynamicInstanceIndex(pub u32);
-
-/// Note: this system must run AFTER [`prepare_mesh_assets`].
-#[allow(clippy::too_many_arguments)]
-fn prepare_instances(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    config: Res<HikariConfig>,
-    mut render_assets: ResMut<InstanceRenderAssets>,
-    mut instances: ResMut<GpuInstances>,
-    mut sources: ResMut<GpuLightSources>,
-    meshes: Res<GpuMeshes>,
-    materials: Res<GpuStandardMaterials>,
-) {
     // Since entities are cleared every frame, this should always be called.
-    let mut add_instance_indices = |instances: &GpuInstances| {
+    let mut add_instance_indices = |instances: &Instances| {
         render_assets.instance_indices.clear();
         let command_batch: Vec<_> = instances
             .iter()
@@ -314,7 +302,7 @@ fn prepare_instances(
         commands.insert_or_spawn_batch(command_batch);
     };
 
-    if meshes.is_changed() || materials.is_changed() || instances.is_changed() {
+    if instance_changed || meshes.is_changed() || materials.is_changed() {
         // Important: update mesh and material info for every instance
         sources.clear();
         instances.retain(|_, (instance, mesh, material, visibility)| {
