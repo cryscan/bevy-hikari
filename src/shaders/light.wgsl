@@ -904,100 +904,6 @@ fn compute_jacobian(q: Sample, r: Sample) -> f32 {
     return jacobian;
 }
 
-fn spatial_restir(
-    r: ptr<function, Reservoir>,
-    coords: vec2<i32>,
-    reservoir_size: vec2<i32>,
-    V: vec3<f32>,
-    surface: Surface,
-    s: Sample,
-    max_sample_count: u32
-) -> RestirOutput {
-    let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
-    let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
-
-    let instance_miss = (*r).s.visible_instance != s.visible_instance;
-    let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
-
-    if (depth_miss || instance_miss || normal_miss || (*r).count <= 0.0) {
-        *r = load_reservoir(coords.x + coords.x * coords.y);
-    }
-
-    let neighbor_count: i32 = 9;
-
-    for (var i: i32 = 0; i < neighbor_count; i++) {
-        let dist_fact: f32 = f32(i) / f32(neighbor_count - 1);
-        let angle_fact: f32 = 6.2831 * (dist_fact * 13.0 + s.random.x);
-
-        let offset: vec2<i32> = vec2<i32>(30.0 * dist_fact * vec2<f32>(cos(angle_fact), sin(angle_fact)));
-        let sample_coords: vec2<i32> = clamp(coords + offset, vec2<i32>(0), reservoir_size - 1);
-
-        let q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
-
-        // Discard miss samples
-        if (length(q.s.sample_normal) <= 0.0) {
-            continue;
-        }
-
-        let pos_diff = q.s.visible_position.xyz - s.visible_position.xyz;
-        let pos_miss = dot(pos_diff, pos_diff) > 0.01;
-        //let depth_miss = distance(s.visible_position.w, q.s.visible_position.w) > 0.01;
-        let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.906;
-
-        if (q.count <= 0.0 || normal_miss || pos_miss) { // depth_miss
-            continue;
-        }
-
-        var inv_jac = 1.0;
-        if (q.s.sample_position.w > 0.5) {
-            // This should be the inverse of jacobian:
-            // inv_jac = compute_jacobian(q.s, (*r).s);
-            inv_jac = 1.0 / compute_jacobian(q.s, (*r).s);
-        }
-
-        //let sample_direction = normalize(q.s.sample_position.xyz - q.s.visible_position.xyz);
-        //if (dot(sample_direction, (*r).s.visible_normal) < 0.0) {
-            //continue;
-        //}
-
-        let radiance = shading(
-            V,
-            q.s.visible_normal,
-            // The direction of light source should be
-            normalize(q.s.sample_position.xyz - (*r).s.visible_position.xyz),
-            // normalize(q.s.sample_position.xyz - q.s.visible_position.xyz),
-            surface,
-            q.s.radiance
-        );
-
-        let lum = luminance(radiance) * inv_jac;
-        merge_reservoir(r, q, lum);
-    }
-
-    // Clamp...
-    let m = f32(max_sample_count);
-    if ((*r).count > m) {
-        (*r).w_sum *= m / (*r).count;
-        (*r).w2_sum *= m / (*r).count;
-        (*r).count = m;
-    }
-
-    var out: RestirOutput;
-    out.radiance = shading(
-        V,
-        (*r).s.visible_normal,
-        normalize((*r).s.sample_position.xyz - (*r).s.visible_position.xyz),
-        surface,
-        (*r).s.radiance
-    );
-
-    let lum_sum = (*r).count * luminance(out.radiance);
-    (*r).w = select((*r).w_sum / lum_sum, 0.0, lum_sum <= 0.0)
-    out.output = (*r).w * out.radiance;
-
-    return out;
-}
-
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
@@ -1086,7 +992,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         surface,
         r.s.radiance
     );
-    r.w = r.w_sum / max(r.count * luminance(out_radiance), 0.0001);
+    let total_lum = r.count * luminance(out_radiance);
+    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
 
     // Sample validation
@@ -1241,7 +1148,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         surface,
         r.s.radiance
     );
-    r.w = r.w_sum / max(r.count * luminance(out_radiance), 0.0001);
+    let total_lum = r.count * luminance(out_radiance);
+    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
 
     if (frame.suppress_temporal_reuse == 0u) {
@@ -1299,7 +1207,7 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
         vec2<f32>(0.707106781, 0.707106781),
         vec2<f32>(-0.707106781, 0.707106781)
     );
-    var offset = sign(s.random.zw - 0.5);       
+    var offset = sign(s.random.zw - 0.5);
     let max_offset_dist = mix(SPATIAL_REUSE_RANGE_MAX, SPATIAL_REUSE_RANGE_MIN, q.count / f32(frame.max_temporal_reuse_count));
 
     for (var i = 1u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
@@ -1381,9 +1289,8 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
         surface,
         r.s.radiance
     );
-    
     let total_lum = r.count * luminance(out_radiance);
-    r.w = select(r.w_sum / max(total_lum, 0.0001), 0.0, total_lum <= 0.0);
+    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     let out_color = r.w * out_radiance;
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
