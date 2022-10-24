@@ -1381,8 +1381,9 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
         surface,
         r.s.radiance
     );
-    r.w = r.w_sum / max(r.count * luminance(out_radiance), 0.0001);
-
+    
+    let total_lum = r.count * luminance(out_radiance);
+    r.w = select(r.w_sum / max(total_lum, 0.0001), 0.0, total_lum <= 0.0);
     let out_color = r.w * out_radiance;
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
