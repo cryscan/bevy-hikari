@@ -79,8 +79,8 @@ let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let OVERSAMPLE_THRESHOLD: f32 = 4.0;
 let SPATIAL_REUSE_COUNT: u32 = 16u;
-let SPATIAL_REUSE_RANGE_MIN: f32 = 15.0;
-let SPATIAL_REUSE_RANGE_MAX: f32 = 30.0;
+let SPATIAL_REUSE_RANGE_MIN: f32 = 20.0;
+let SPATIAL_REUSE_RANGE_MAX: f32 = 20.0;
 let SPATIAL_REUSE_TAPS: u32 = 4u;
 
 struct Ray {
@@ -1331,7 +1331,7 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
             let tap_depth = textureLoad(position_texture, tap_coords, 0).w;
 
             let ref_depth = mix(depth, sample_depth, f32(j) / f32(tap_count + 1u));
-            if (tap_depth > ref_depth + 0.0001) {
+            if (tap_depth > ref_depth + 0.00001) {
                 occluded = true;
                 break;
             }
