@@ -75,7 +75,8 @@ pub struct FrameUniform {
     pub kernel: Mat3,
     pub clear_color: Vec4,
     pub number: u32,
-    pub validation_interval: u32,
+    pub direct_validate_interval: u32,
+    pub emissive_validate_interval: u32,
     pub suppress_temporal_reuse: u32,
     pub max_temporal_reuse_count: u32,
     pub max_spatial_reuse_count: u32,
@@ -116,7 +117,8 @@ fn prepare_frame_uniform(
     // }
 
     let HikariConfig {
-        validation_interval,
+        direct_validate_interval,
+        emissive_validate_interval,
         max_temporal_reuse_count,
         max_spatial_reuse_count,
         direct_oversample_threshold,
@@ -126,7 +128,8 @@ fn prepare_frame_uniform(
         ..
     } = config.into_inner().clone();
 
-    let validation_interval = validation_interval as u32;
+    let direct_validate_interval = direct_validate_interval as u32;
+    let emissive_validate_interval = emissive_validate_interval as u32;
     let max_temporal_reuse_count = max_temporal_reuse_count as u32;
     let max_spatial_reuse_count = max_spatial_reuse_count as u32;
     let direct_oversample_threshold = direct_oversample_threshold as u32;
@@ -140,7 +143,8 @@ fn prepare_frame_uniform(
         },
         clear_color: clear_color.0.into(),
         number: counter.0 as u32,
-        validation_interval,
+        direct_validate_interval,
+        emissive_validate_interval,
         max_temporal_reuse_count,
         max_spatial_reuse_count,
         direct_oversample_threshold,

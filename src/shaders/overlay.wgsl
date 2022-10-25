@@ -3,14 +3,12 @@
 #import bevy_hikari::utils
 
 @group(2) @binding(0)
-var direct_texture: texture_2d<f32>;
+var render_textures: binding_array<texture_2d<f32>>;
 @group(2) @binding(1)
-var indirect_texture: texture_2d<f32>;
-@group(2) @binding(2)
 var previous_render_texture: texture_2d<f32>;
-@group(2) @binding(3)
+@group(2) @binding(2)
 var previous_render_sampler: sampler;
-@group(2) @binding(4)
+@group(2) @binding(3)
 var temporal_texture: texture_storage_2d<rgba8unorm, write>;
 
 // luminance coefficients from Rec. 709.
@@ -36,12 +34,15 @@ fn tone_mapping(in: vec4<f32>) -> vec4<f32> {
 }
 
 fn fetch_color(coords: vec2<i32>) -> vec3<f32> {
-    let alpha = clamp(textureLoad(normal_texture, coords, 0).a, 0.0, 1.0);
-    let direct = textureLoad(direct_texture, coords, 0);
-    let indirect = textureLoad(indirect_texture, coords, 0);
-    var color = tone_mapping(direct + indirect);
+    var color = vec4<f32>(0.0);
+
+    for (var i = 0u; i < 3u; i += 1u) {
+        color += textureLoad(render_textures[i], coords, 0);
+    }
+    let alpha = clamp(color.a, 0.0, 1.0);
+    color = tone_mapping(color);
+
     color = clamp(color, vec4<f32>(0.0), vec4<f32>(1.0));
-    // return mix(frame.clear_color.rgb, color.rgb, alpha);
     return frame.clear_color.rgb * (1.0 - alpha) + color.rgb * alpha;
 }
 
@@ -124,9 +125,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
 
     textureStore(temporal_texture, coords, vec4<f32>(antialiased, mix_rate));
 #else
-    let direct = textureLoad(direct_texture, coords, 0);
-    let indirect = textureLoad(indirect_texture, coords, 0);
-    out.color = clamp(tone_mapping(direct + indirect), vec4<f32>(0.0), vec4<f32>(1.0));
+    out.color = vec4<f32>(fetch_color(coords), 1.0);
 #endif
 
     return out;
