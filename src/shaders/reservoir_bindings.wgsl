@@ -11,6 +11,11 @@ var<storage, read> previous_spatial_reservoir_buffer: Reservoirs;
 @group(6) @binding(3)
 var<storage, read_write> spatial_reservoir_buffer: Reservoirs;
 
+@group(7) @binding(0)
+var<storage, read> direct_reservoir_cache: Reservoirs;
+@group(7) @binding(1)
+var<storage, read> emissive_reservoir_cache: Reservoirs;
+
 fn load_previous_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> Reservoir {
     var r = empty_reservoir();
     if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
@@ -49,4 +54,14 @@ fn load_spatial_reservoir(index: i32) -> Reservoir {
 
 fn store_spatial_reservoir(index: i32, r: Reservoir) {
     spatial_reservoir_buffer.data[index] = pack_reservoir(r);
+}
+
+fn load_direct_reservoir(index: i32) -> Reservoir {
+    let packed = direct_reservoir_cache.data[index];
+    return unpack_reservoir(packed);
+}
+
+fn load_emissive_reservoir(index: i32) -> Reservoir {
+    let packed = emissive_reservoir_cache.data[index];
+    return unpack_reservoir(packed);
 }

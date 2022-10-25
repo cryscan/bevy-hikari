@@ -72,6 +72,7 @@ pub struct LightPipeline {
     pub noise_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
     pub reservoir_layout: BindGroupLayout,
+    pub cache_reservoir_layout: BindGroupLayout,
 }
 
 impl FromWorld for LightPipeline {
@@ -161,6 +162,35 @@ impl FromWorld for LightPipeline {
             ],
         });
 
+        let cache_reservoir_layout =
+            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    // Direct Cache Reservoir
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                        },
+                        count: None,
+                    },
+                    // Emissive Cache Reservoir
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
         Self {
             view_layout,
             deferred_layout,
@@ -169,6 +199,7 @@ impl FromWorld for LightPipeline {
             noise_layout,
             render_layout,
             reservoir_layout,
+            cache_reservoir_layout,
         }
     }
 }
@@ -204,6 +235,7 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.noise_layout.clone(),
                 self.render_layout.clone(),
                 self.reservoir_layout.clone(),
+                self.cache_reservoir_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs,
@@ -399,11 +431,14 @@ pub struct LightBindGroup {
 
     pub indirect_render: BindGroup,
     pub indirect_reservoir: BindGroup,
+
+    pub cache_reservoir: BindGroup,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn queue_light_bind_groups(
     mut commands: Commands,
+    config: Res<HikariConfig>,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
     noise: Res<NoiseTextures>,
@@ -560,6 +595,25 @@ fn queue_light_bind_groups(
                 ],
             });
 
+            let emissive_cache_reservoir_binding = match config.spatial_reuse {
+                true => reservoir_bindings[4 + current].clone(),
+                false => reservoir_bindings[2 + current].clone(),
+            };
+            let cache_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                layout: &pipeline.cache_reservoir_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: reservoir_bindings[current].clone(),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: emissive_cache_reservoir_binding,
+                    },
+                ],
+            });
+
             commands.entity(entity).insert(LightBindGroup {
                 deferred,
                 noise,
@@ -569,6 +623,7 @@ fn queue_light_bind_groups(
                 emissive_reservoir,
                 indirect_render,
                 indirect_reservoir,
+                cache_reservoir,
             });
         }
     }
@@ -666,6 +721,7 @@ impl Node for LightPassNode {
 
         pass.set_bind_group(5, &light_bind_group.direct_render, &[]);
         pass.set_bind_group(6, &light_bind_group.direct_reservoir, &[]);
+        pass.set_bind_group(7, &light_bind_group.cache_reservoir, &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
             pass.set_pipeline(pipeline);
