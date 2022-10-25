@@ -52,7 +52,7 @@ struct Material {
     occlusion_texture: u32,
 };
 
-struct LightSource {
+struct Emissive {
     emissive: vec4<f32>,
     position: vec3<f32>,
     radius: f32,
@@ -76,7 +76,7 @@ struct Materials {
     data: array<Material>,
 }
 
-struct LightSources {
+struct Emissives {
     count: u32,
-    data: array<LightSource>,
+    data: array<Emissive>,
 };

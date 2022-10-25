@@ -165,7 +165,7 @@ pub struct GpuStandardMaterial {
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
-pub struct GpuLightSource {
+pub struct GpuEmissive {
     pub emissive: Vec4,
     pub position: Vec3,
     pub radius: f32,
@@ -207,7 +207,7 @@ pub struct GpuStandardMaterialBuffer {
 pub struct GpuLightSourceBuffer {
     pub count: u32,
     #[size(runtime)]
-    pub data: Vec<GpuLightSource>,
+    pub data: Vec<GpuEmissive>,
 }
 
 #[derive(Debug)]

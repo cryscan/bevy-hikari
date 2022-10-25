@@ -1,5 +1,5 @@
 use super::{
-    material::GpuStandardMaterials, mesh::GpuMeshes, GpuLightSource, GpuLightSourceBuffer,
+    material::GpuStandardMaterials, mesh::GpuMeshes, GpuEmissive, GpuLightSourceBuffer,
     MeshMaterialSystems,
 };
 use crate::{
@@ -76,7 +76,7 @@ impl InstanceRenderAssets {
         &mut self,
         instances: Vec<GpuInstance>,
         nodes: Vec<GpuNode>,
-        sources: Vec<GpuLightSource>,
+        sources: Vec<GpuEmissive>,
     ) {
         self.instance_buffer.get_mut().data = instances;
 
@@ -216,7 +216,7 @@ pub struct InstanceIndex {
 pub struct DynamicInstanceIndex(pub u32);
 
 type Instances = BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped, ComputedVisibility)>;
-type LightSources = BTreeMap<Entity, GpuLightSource>;
+type Emissives = BTreeMap<Entity, GpuEmissive>;
 
 /// Note: this system must run AFTER [`prepare_mesh_assets`].
 #[allow(clippy::too_many_arguments)]
@@ -228,7 +228,7 @@ fn prepare_instances(
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut extracted_instances: ResMut<ExtractedInstances>,
     mut instances: Local<Instances>,
-    mut sources: Local<LightSources>,
+    mut emissives: Local<Emissives>,
     meshes: Res<GpuMeshes>,
     materials: Res<GpuStandardMaterials>,
 ) {
@@ -304,7 +304,7 @@ fn prepare_instances(
 
     if instance_changed || meshes.is_changed() || materials.is_changed() {
         // Important: update mesh and material info for every instance
-        sources.clear();
+        emissives.clear();
         instances.retain(|_, (instance, mesh, material, visibility)| {
             if !visibility.is_visible_in_hierarchy() {
                 return false;
@@ -344,9 +344,9 @@ fn prepare_instances(
                 if emissive.w * emissive.xyz().length() > config.emissive_threshold {
                     let position = 0.5 * (instance.max + instance.min);
                     let radius = 0.5 * (instance.max - instance.min).length();
-                    sources.insert(
+                    emissives.insert(
                         *entity,
-                        GpuLightSource {
+                        GpuEmissive {
                             emissive,
                             position,
                             radius,
@@ -356,7 +356,7 @@ fn prepare_instances(
                 }
             }
         }
-        let sources = sources.values().cloned().collect();
+        let sources = emissives.values().cloned().collect();
 
         render_assets.set(values, nodes, sources);
         render_assets.write_buffer(&render_device, &render_queue);

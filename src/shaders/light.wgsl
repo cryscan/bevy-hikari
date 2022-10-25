@@ -401,8 +401,8 @@ fn select_light_candidate(
     //     }
     // }
 
-    for (var id = 0u; id < light_source_buffer.count; id += 1u) {
-        let source = light_source_buffer.data[id];
+    for (var id = 0u; id < emissive_buffer.count; id += 1u) {
+        let source = emissive_buffer.data[id];
         let delta = source.position - position;
         let d2 = dot(delta, delta);
         let r2 = source.radius * source.radius;
