@@ -1023,9 +1023,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_reservoir(coords.x + size.x * coords.y, r);
     }
 
-    var out_color = 255.0 * surface.emissive.a * surface.emissive.rgb;
-    out_color += out_radiance;
-
+    var out_color = out_radiance;
+#ifdef INCLUDE_DIRECT
+    out_color += 255.0 * surface.emissive.a * surface.emissive.rgb;
+#endif
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
 
@@ -1160,7 +1161,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let render_size = textureDimensions(render_texture);
     let reservoir_size = render_size;
@@ -1291,7 +1292,11 @@ fn indirect_spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32
     );
     let total_lum = r.count * luminance(out_radiance);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
-    let out_color = r.w * out_radiance;
+
+    var out_color = r.w * out_radiance;
+#ifdef INCLUDE_DIRECT
+    out_color += 255.0 * surface.emissive.a * surface.emissive.rgb;
+#endif
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
 

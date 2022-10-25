@@ -209,7 +209,6 @@ pub struct OverlayBindGroup(pub BindGroup);
 fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    config: Res<HikariConfig>,
     pipeline: Res<OverlayPipeline>,
     query: Query<(Entity, &LightPassTarget)>,
 ) {
@@ -217,27 +216,21 @@ fn queue_overlay_bind_groups(
         let current_id = target.current_id;
         let previous_id = 1 - current_id;
 
-        let direct_view = match config.direct_spatial_denoise {
-            true => &target.direct_denoised_texture.texture_view,
-            false => &target.direct_render_texture.texture_view,
-        };
-
-        let indirect_view = match config.indirect_spatial_denoise {
-            true => &target.indirect_denoised_texture.texture_view,
-            false => &target.indirect_render_texture.texture_view,
-        };
-
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.overlay_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(direct_view),
+                    resource: BindingResource::TextureView(
+                        &target.direct_render_texture.texture_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(indirect_view),
+                    resource: BindingResource::TextureView(
+                        &target.indirect_render_texture.texture_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 2,

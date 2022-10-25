@@ -241,10 +241,6 @@ pub struct HikariConfig {
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
     pub spatial_reuse: bool,
-    /// Whether to perform spatial denoise for direct illumination.
-    pub direct_spatial_denoise: bool,
-    /// Whether to perform spatial denoise for indirect illumination.
-    pub indirect_spatial_denoise: bool,
     /// Whether to perform TAA.
     pub temporal_anti_aliasing: bool,
 }
@@ -261,8 +257,6 @@ impl Default for HikariConfig {
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
-            direct_spatial_denoise: true,
-            indirect_spatial_denoise: true,
             temporal_anti_aliasing: true,
         }
     }

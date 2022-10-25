@@ -218,8 +218,7 @@ impl FromWorld for LightPipeline {
 pub struct LightPipelineKey {
     pub entry_point: String,
     pub texture_count: u8,
-    pub denoiser_level: u8,
-    pub firefly_filter: bool,
+    pub include_direct: bool,
 }
 
 impl SpecializedComputePipeline for LightPipeline {
@@ -232,10 +231,8 @@ impl SpecializedComputePipeline for LightPipeline {
             shader_defs.push("NO_TEXTURE".into());
         }
 
-        shader_defs.push(format!("DENOISER_LEVEL_{}", key.denoiser_level));
-
-        if key.firefly_filter {
-            shader_defs.push("FIREFLY_FILTER".into());
+        if key.include_direct {
+            shader_defs.push("INCLUDE_DIRECT".into());
         }
 
         ComputePipelineDescriptor {
@@ -382,9 +379,8 @@ fn prepare_light_pass_targets(
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     indirect_lit_ambient: CachedComputePipelineId,
+    direct_spatial_reuse: CachedComputePipelineId,
     indirect_spatial_reuse: CachedComputePipelineId,
-    direct_denoise: [CachedComputePipelineId; 4],
-    indirect_denoise: [CachedComputePipelineId; 4],
 }
 
 fn queue_light_pipelines(
@@ -400,52 +396,36 @@ fn queue_light_pipelines(
     let key = LightPipelineKey {
         entry_point: "direct_lit".into(),
         texture_count,
-        denoiser_level: 0,
-        firefly_filter: false,
+        include_direct: true,
     };
     let direct_lit = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     let key = LightPipelineKey {
         entry_point: "indirect_lit_ambient".into(),
         texture_count,
-        denoiser_level: 0,
-        firefly_filter: false,
+        include_direct: false,
     };
     let indirect_lit_ambient = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     let key = LightPipelineKey {
-        entry_point: "indirect_spatial_reuse".into(),
+        entry_point: "spatial_reuse".into(),
         texture_count,
-        denoiser_level: 0,
-        firefly_filter: false,
+        include_direct: true,
+    };
+    let direct_spatial_reuse = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+
+    let key = LightPipelineKey {
+        entry_point: "spatial_reuse".into(),
+        texture_count,
+        include_direct: false,
     };
     let indirect_spatial_reuse = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-
-    let direct_denoise = [0, 1, 2, 3].map(|level| {
-        let key = LightPipelineKey {
-            entry_point: "denoise_atrous".into(),
-            texture_count,
-            denoiser_level: level,
-            firefly_filter: true,
-        };
-        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
-    });
-    let indirect_denoise = [0, 1, 2, 3].map(|level| {
-        let key = LightPipelineKey {
-            entry_point: "denoise_atrous".into(),
-            texture_count,
-            denoiser_level: level,
-            firefly_filter: true,
-        };
-        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
-    });
 
     commands.insert_resource(CachedLightPipelines {
         direct_lit,
         indirect_lit_ambient,
+        direct_spatial_reuse,
         indirect_spatial_reuse,
-        direct_denoise,
-        indirect_denoise,
     })
 }
 
@@ -747,15 +727,15 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if config.direct_spatial_denoise {
-            for pipeline in pipelines.direct_denoise {
-                if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
-                    pass.set_pipeline(pipeline);
+        if config.spatial_reuse {
+            if let Some(pipeline) =
+                pipeline_cache.get_compute_pipeline(pipelines.direct_spatial_reuse)
+            {
+                pass.set_pipeline(pipeline);
 
-                    let size = camera.physical_target_size.unwrap();
-                    let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                    pass.dispatch_workgroups(count.x, count.y, 1);
-                }
+                let size = camera.physical_target_size.unwrap();
+                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
             }
         }
 
@@ -780,18 +760,6 @@ impl Node for LightPassNode {
                 let size = camera.physical_target_size.unwrap();
                 let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
-            }
-        }
-
-        if config.indirect_spatial_denoise {
-            for pipeline in pipelines.indirect_denoise {
-                if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
-                    pass.set_pipeline(pipeline);
-
-                    let size = camera.physical_target_size.unwrap();
-                    let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                    pass.dispatch_workgroups(count.x, count.y, 1);
-                }
             }
         }
 
