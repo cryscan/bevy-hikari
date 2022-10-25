@@ -24,16 +24,8 @@ var noise_texture: binding_array<texture_2d<f32>>;
 var noise_sampler: sampler;
 
 @group(5) @binding(0)
-var denoised_texture_0: texture_storage_2d<rgba16float, read_write>;
-@group(5) @binding(1)
-var denoised_texture_1: texture_storage_2d<rgba16float, read_write>;
-@group(5) @binding(2)
-var denoised_texture_2: texture_storage_2d<rgba16float, read_write>;
-@group(5) @binding(3)
-var denoised_texture_3: texture_storage_2d<rgba16float, read_write>;
-@group(5) @binding(4)
 var albedo_texture: texture_storage_2d<rgba16float, read_write>;
-@group(5) @binding(5)
+@group(5) @binding(1)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
 
 // 64 Bytes
@@ -77,8 +69,7 @@ let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
-let OVERSAMPLE_THRESHOLD: f32 = 4.0;
-#ifdef INCLUDE_DIRECT
+#ifdef INCLUDE_EMISSIVE
 let SPATIAL_REUSE_COUNT: u32 = 8u;
 let SPATIAL_REUSE_RANGE: f32 = 10.0;
 #else
@@ -388,23 +379,12 @@ fn select_light_candidate(
     var selected_flux = sum_flux;
     var selected_pdf = rand_sample.w;
 
+    if (instance == DONT_SAMPLE_EMISSIVE) {
+        candidate.p = selected_pdf;
+        return candidate;
+    }
+
     var rand_1d = fract(rand.x + rand.y);
-
-    // for (var id = 0u; id < lights.n_directional_lights; id += 1u) {
-    //     let directional = lights.directional_lights[id];
-    //     let cone = vec4<f32>(directional.direction_to_light, cos(SOLAR_ANGLE));
-    //     let direction = normal_basis(cone.xyz) * sample_uniform_cone(rand.zw, cone.w);
-
-    //     let flux = luminance(directional.color.rgb) / TAU;
-    //     sum_flux += flux;
-    //     rand_1d = fract(rand_1d + GOLDEN_RATIO);
-    //     if (rand_1d <= flux / sum_flux) {
-    //         candidate.directional_index = id;
-    //         candidate.emissive_index = DONT_SAMPLE_EMISSIVE;
-    //         selected_flux = flux;
-    //     }
-    // }
-
     for (var id = 0u; id < emissive_buffer.count; id += 1u) {
         let source = emissive_buffer.data[id];
         let delta = source.position - position;
@@ -955,7 +935,18 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var hit: Hit;
     var info: HitInfo;
 
-    let candidate = select_light_candidate(s.random, position.xyz, normal, instance_material.x);
+#ifdef INCLUDE_EMISSIVE
+    let select_light_instance = instance_material.x;
+#else
+    let select_light_instance = DONT_SAMPLE_EMISSIVE;
+#endif
+
+    let candidate = select_light_candidate(
+        s.random,
+        s.visible_position.xyz,
+        s.visible_normal,
+        select_light_instance
+    );
     let pdf = candidate.p;
 
     // Direct light sampling
@@ -963,14 +954,24 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     ray.direction = candidate.direction;
     ray.inv_direction = 1.0 / ray.direction;
 
-    if (dot(candidate.direction, normal) > 0.0) {
+    let trace_condition = 
+#ifdef INCLUDE_EMISSIVE
+        candidate.directional_index == DONT_SAMPLE_DIRECTIONAL_LIGHT &&
+#endif
+        dot(candidate.direction, normal) > 0.0;
+
+    if (trace_condition) {
         hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
         info = hit_info(ray, hit);
 
         s.sample_position = info.position;
         s.sample_normal = info.normal;
 
-        s.radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
+#ifdef INCLUDE_EMISSIVE
+        s.radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, candidate.emissive_index);
+#else
+        s.radiance = input_radiance(ray, info, candidate.directional_index, DONT_SAMPLE_EMISSIVE);
+#endif
     } else {
         s.sample_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
         s.sample_normal = -ray.direction;
@@ -1001,7 +1002,12 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     out_radiance *= r.w;
 
     // Sample validation
-    if (frame.number % frame.validation_interval == 0u) {
+#ifdef INCLUDE_EMISSIVE
+    let validate_interval = frame.emissive_validate_interval;
+#else
+    let validate_interval = frame.direct_validate_interval;
+#endif
+    if (frame.number % validate_interval == 0u) {
         ray.origin = r.s.visible_position.xyz + r.s.visible_normal * RAY_BIAS;
         ray.direction = normalize(r.s.sample_position.xyz - ray.origin);
         ray.inv_direction = 1.0 / ray.direction;
@@ -1010,13 +1016,18 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             r.s.random,
             r.s.visible_position.xyz,
             r.s.visible_normal,
-            instance_material.x
+            select_light_instance
         );
 
         hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
         info = hit_info(ray, hit);
 
-        let validation_radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
+#ifdef INCLUDE_EMISSIVE
+        let validation_radiance = input_radiance(ray, info, DONT_SAMPLE_DIRECTIONAL_LIGHT, candidate.emissive_index);
+#else
+        let validation_radiance = input_radiance(ray, info, candidate.directional_index, DONT_SAMPLE_EMISSIVE);
+#endif
+
         let luminance_ratio = luminance(validation_radiance.rgb) / luminance(r.s.radiance.rgb);
         if (luminance_ratio > 1.25 || luminance_ratio < 0.8) {
             set_reservoir(&r, s, luminance(sample_radiance) / pdf);
@@ -1028,7 +1039,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     var out_color = out_radiance;
-#ifdef INCLUDE_DIRECT
+#ifdef INCLUDE_EMISSIVE
     out_color += 255.0 * surface.emissive.a * surface.emissive.rgb;
 #endif
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
@@ -1297,7 +1308,7 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
 
     var out_color = r.w * out_radiance;
-#ifdef INCLUDE_DIRECT
+#ifdef INCLUDE_EMISSIVE
     out_color += 255.0 * surface.emissive.a * surface.emissive.rgb;
 #endif
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
@@ -1326,199 +1337,199 @@ fn instance_weight(i0: u32, i1: u32) -> f32 {
     return f32(i0 == i1);
 }
 
-@compute @workgroup_size(8, 8, 1)
-fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let render_size = textureDimensions(render_texture);
-    let output_size = textureDimensions(denoised_texture_0);
+// @compute @workgroup_size(8, 8, 1)
+// fn denoise_atrous(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+//     let render_size = textureDimensions(render_texture);
+//     let output_size = textureDimensions(denoised_texture_0);
 
-    let output_uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(output_size);
-    let output_coords = vec2<i32>(invocation_id.xy);
-    let render_coords = vec2<i32>(output_uv * vec2<f32>(render_size));
+//     let output_uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(output_size);
+//     let output_coords = vec2<i32>(invocation_id.xy);
+//     let render_coords = vec2<i32>(output_uv * vec2<f32>(render_size));
 
-    let depth = textureLoad(position_texture, output_coords, 0).w;
-    let depth_gradient = textureLoad(depth_gradient_texture, output_coords, 0).xy;
-    let normal = normalize(textureLoad(normal_texture, output_coords, 0).xyz);
-    let instance = textureLoad(instance_material_texture, output_coords, 0).x;
+//     let depth = textureLoad(position_texture, output_coords, 0).w;
+//     let depth_gradient = textureLoad(depth_gradient_texture, output_coords, 0).xy;
+//     let normal = normalize(textureLoad(normal_texture, output_coords, 0).xyz);
+//     let instance = textureLoad(instance_material_texture, output_coords, 0).x;
 
-    let albedo = textureLoad(albedo_texture, output_coords);
+//     let albedo = textureLoad(albedo_texture, output_coords);
 
-    var irradiance = textureLoad(render_texture, render_coords).rgb / max(albedo.rgb, vec3<f32>(0.01));
-    let lum = luminance(irradiance);
+//     var irradiance = textureLoad(render_texture, render_coords).rgb / max(albedo.rgb, vec3<f32>(0.01));
+//     let lum = luminance(irradiance);
 
-    let r = load_reservoir(render_coords.x + output_size.x * render_coords.y);
-    let variance = 1.0 / clamp(r.w2_sum, 1.0, 4.0);
+//     let r = load_reservoir(render_coords.x + output_size.x * render_coords.y);
+//     let variance = 1.0 / clamp(r.w2_sum, 1.0, 4.0);
 
-    var irradiance_sum = vec3<f32>(0.0);
-    var w_sum = 0.0;
+//     var irradiance_sum = vec3<f32>(0.0);
+//     var w_sum = 0.0;
 
-    var w_ff = 1.0;
+//     var w_ff = 1.0;
 
-#ifdef FIREFLY_FILTER
-    // 5x5 Firefly Filter
-    var lum_sum = 0.0;
-    var lum2_sum = 0.0;
-    var ff_count = 0.01;
-    for (var y = -2; y <= 2; y += 1) {
-        for (var x = -2; x <= 2; x += 1) {
-            if (x == 0 && y == 0) {
-                continue;
-            }
+// #ifdef FIREFLY_FILTER
+//     // 5x5 Firefly Filter
+//     var lum_sum = 0.0;
+//     var lum2_sum = 0.0;
+//     var ff_count = 0.01;
+//     for (var y = -2; y <= 2; y += 1) {
+//         for (var x = -2; x <= 2; x += 1) {
+//             if (x == 0 && y == 0) {
+//                 continue;
+//             }
 
-            let offset = vec2<i32>(x, y);
-            let sample_coords = output_coords + offset;
-            let render_sample_coords = render_coords + offset;
-            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
-                continue;
-            }
+//             let offset = vec2<i32>(x, y);
+//             let sample_coords = output_coords + offset;
+//             let render_sample_coords = render_coords + offset;
+//             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
+//                 continue;
+//             }
 
-            let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
-            irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
-            let sample_luminance = luminance(irradiance);
+//             let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
+//             irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
+//             let sample_luminance = luminance(irradiance);
 
-            lum_sum += sample_luminance;
-            lum2_sum += sample_luminance * sample_luminance;
-            ff_count += 1.0;
-        }
-    }
+//             lum_sum += sample_luminance;
+//             lum2_sum += sample_luminance * sample_luminance;
+//             ff_count += 1.0;
+//         }
+//     }
 
-    let lum_mean = lum_sum / ff_count;
-    let lum_var = lum2_sum / ff_count - lum_mean * lum_mean;
-    if (lum > lum_mean + 3.0 * sqrt(lum_var)) {
-        w_ff = 0.0;
-    }
-#endif
+//     let lum_mean = lum_sum / ff_count;
+//     let lum_var = lum2_sum / ff_count - lum_mean * lum_mean;
+//     if (lum > lum_mean + 3.0 * sqrt(lum_var)) {
+//         w_ff = 0.0;
+//     }
+// #endif
 
-#ifdef DENOISER_LEVEL_0
-    // Pass 0, stride 8
-    for (var y = -1; y <= 1; y += 1) {
-        for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y);
-            let sample_coords = output_coords + offset * 8;
-            let render_sample_coords = render_coords + offset * 8;
-            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
-                continue;
-            }
+// #ifdef DENOISER_LEVEL_0
+//     // Pass 0, stride 8
+//     for (var y = -1; y <= 1; y += 1) {
+//         for (var x = -1; x <= 1; x += 1) {
+//             let offset = vec2<i32>(x, y);
+//             let sample_coords = output_coords + offset * 8;
+//             let render_sample_coords = render_coords + offset * 8;
+//             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
+//                 continue;
+//             }
 
-            let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
-            irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
+//             let sample_albedo = textureLoad(albedo_texture, sample_coords).rgb;
+//             irradiance = textureLoad(render_texture, render_sample_coords).rgb / max(sample_albedo, vec3<f32>(0.01));
 
-            let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
-            let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_luminance = luminance(irradiance);
+//             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
+//             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+//             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
+//             let sample_luminance = luminance(irradiance);
 
-            let w_normal = normal_weight(normal, sample_normal);
-            let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
-            let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, variance);
+//             let w_normal = normal_weight(normal, sample_normal);
+//             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+//             let w_instance = instance_weight(instance, sample_instance);
+//             let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
-            let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
+//             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
-            irradiance_sum += irradiance * w * select(1.0, w_ff, (x == 0 && y == 0));
-            w_sum += w;
-        }
-    }
+//             irradiance_sum += irradiance * w * select(1.0, w_ff, (x == 0 && y == 0));
+//             w_sum += w;
+//         }
+//     }
 
-    w_sum = max(w_sum, 0.0001);
-    textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
-#endif
+//     w_sum = max(w_sum, 0.0001);
+//     textureStore(denoised_texture_0, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
+// #endif
 
-#ifdef DENOISER_LEVEL_1
-    // Pass 1, stride 4
-    for (var y = -1; y <= 1; y += 1) {
-        for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y);
-            let sample_coords = output_coords + offset * 4;
-            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
-                continue;
-            }
+// #ifdef DENOISER_LEVEL_1
+//     // Pass 1, stride 4
+//     for (var y = -1; y <= 1; y += 1) {
+//         for (var x = -1; x <= 1; x += 1) {
+//             let offset = vec2<i32>(x, y);
+//             let sample_coords = output_coords + offset * 4;
+//             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
+//                 continue;
+//             }
 
-            irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
-            let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
-            let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_luminance = luminance(irradiance);
+//             irradiance = textureLoad(denoised_texture_0, sample_coords).rgb;
+//             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
+//             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+//             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
+//             let sample_luminance = luminance(irradiance);
 
-            let w_normal = normal_weight(normal, sample_normal);
-            let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
-            let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, variance);
+//             let w_normal = normal_weight(normal, sample_normal);
+//             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+//             let w_instance = instance_weight(instance, sample_instance);
+//             let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
-            let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
+//             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
-            irradiance_sum += irradiance * w;
-            w_sum += w;
-        }
-    }
+//             irradiance_sum += irradiance * w;
+//             w_sum += w;
+//         }
+//     }
 
-    w_sum = max(w_sum, 0.0001);
-    textureStore(denoised_texture_1, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
-#endif
+//     w_sum = max(w_sum, 0.0001);
+//     textureStore(denoised_texture_1, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
+// #endif
 
-#ifdef DENOISER_LEVEL_2
-    // Pass 2, stride 2
-    for (var y = -1; y <= 1; y += 1) {
-        for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y);
-            let sample_coords = output_coords + offset * 2;
-            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
-                continue;
-            }
+// #ifdef DENOISER_LEVEL_2
+//     // Pass 2, stride 2
+//     for (var y = -1; y <= 1; y += 1) {
+//         for (var x = -1; x <= 1; x += 1) {
+//             let offset = vec2<i32>(x, y);
+//             let sample_coords = output_coords + offset * 2;
+//             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
+//                 continue;
+//             }
 
-            irradiance = textureLoad(denoised_texture_1, sample_coords).rgb;
-            let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
-            let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_luminance = luminance(irradiance);
+//             irradiance = textureLoad(denoised_texture_1, sample_coords).rgb;
+//             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
+//             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+//             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
+//             let sample_luminance = luminance(irradiance);
 
-            let w_normal = normal_weight(normal, sample_normal);
-            let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
-            let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, variance);
+//             let w_normal = normal_weight(normal, sample_normal);
+//             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+//             let w_instance = instance_weight(instance, sample_instance);
+//             let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
-            let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
+//             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
-            irradiance_sum += irradiance * w;
-            w_sum += w;
-        }
-    }
+//             irradiance_sum += irradiance * w;
+//             w_sum += w;
+//         }
+//     }
 
-    w_sum = max(w_sum, 0.0001);
-    textureStore(denoised_texture_2, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
-#endif
+//     w_sum = max(w_sum, 0.0001);
+//     textureStore(denoised_texture_2, output_coords, vec4<f32>(irradiance_sum / w_sum, w_sum));
+// #endif
 
-#ifdef DENOISER_LEVEL_3
-    // Pass 3, stride 1
-    for (var y = -1; y <= 1; y += 1) {
-        for (var x = -1; x <= 1; x += 1) {
-            let offset = vec2<i32>(x, y);
-            let sample_coords = output_coords + offset * 1;
-            if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
-                continue;
-            }
+// #ifdef DENOISER_LEVEL_3
+//     // Pass 3, stride 1
+//     for (var y = -1; y <= 1; y += 1) {
+//         for (var x = -1; x <= 1; x += 1) {
+//             let offset = vec2<i32>(x, y);
+//             let sample_coords = output_coords + offset * 1;
+//             if (any(sample_coords < vec2<i32>(0)) || any(sample_coords >= output_size)) {
+//                 continue;
+//             }
 
-            irradiance = textureLoad(denoised_texture_2, sample_coords).rgb;
-            let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
-            let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-            let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
-            let sample_luminance = luminance(irradiance);
+//             irradiance = textureLoad(denoised_texture_2, sample_coords).rgb;
+//             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
+//             let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+//             let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
+//             let sample_luminance = luminance(irradiance);
 
-            let w_normal = normal_weight(normal, sample_normal);
-            let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
-            let w_instance = instance_weight(instance, sample_instance);
-            let w_luminance = luminance_weight(lum, sample_luminance, variance);
+//             let w_normal = normal_weight(normal, sample_normal);
+//             let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+//             let w_instance = instance_weight(instance, sample_instance);
+//             let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
-            let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
+//             let w = saturate(w_normal * w_depth * w_instance * w_luminance) * frame.kernel[y + 1][x + 1];
 
-            irradiance_sum += irradiance * w;
-            w_sum += w;
-        }
-    }
+//             irradiance_sum += irradiance * w;
+//             w_sum += w;
+//         }
+//     }
 
-    w_sum = max(w_sum, 0.0001);
+//     w_sum = max(w_sum, 0.0001);
 
-    irradiance = irradiance_sum / w_sum;
-    let color = vec4<f32>(albedo.rgb * irradiance, albedo.a);
-    textureStore(denoised_texture_3, output_coords, color);
-#endif
-}
+//     irradiance = irradiance_sum / w_sum;
+//     let color = vec4<f32>(albedo.rgb * irradiance, albedo.a);
+//     textureStore(denoised_texture_3, output_coords, color);
+// #endif
+// }

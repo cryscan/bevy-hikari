@@ -1,5 +1,5 @@
 use crate::{
-    light::{LightPassTarget, LightPipeline, SetDeferredBindGroup, OVERLAY_RENDER_TEXTURE_FORMAT},
+    light::{LightPassTextures, LightPipeline, SetDeferredBindGroup, TEMPORAL_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, SetViewBindGroup},
     HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
 };
@@ -29,6 +29,7 @@ use bevy::{
     },
     utils::FloatOrd,
 };
+use std::num::NonZeroU32;
 
 pub struct OverlayPlugin;
 impl Plugin for OverlayPlugin {
@@ -76,7 +77,7 @@ impl FromWorld for OverlayPipeline {
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    count: None,
+                    count: NonZeroU32::new(3),
                 },
                 BindGroupLayoutEntry {
                     binding: 1,
@@ -91,25 +92,15 @@ impl FromWorld for OverlayPipeline {
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
                 BindGroupLayoutEntry {
                     binding: 3,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: OVERLAY_RENDER_TEXTURE_FORMAT,
+                        format: TEMPORAL_TEXTURE_FORMAT,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -210,11 +201,11 @@ fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<OverlayPipeline>,
-    query: Query<(Entity, &LightPassTarget)>,
+    query: Query<(Entity, &LightPassTextures)>,
 ) {
-    for (entity, target) in &query {
-        let current_id = target.current_id;
-        let previous_id = 1 - current_id;
+    for (entity, textures) in &query {
+        let current = textures.head;
+        let previous = 1 - current;
 
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -222,32 +213,26 @@ fn queue_overlay_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(
-                        &target.direct_render_texture.texture_view,
-                    ),
+                    resource: BindingResource::TextureViewArray(&[
+                        &textures.direct_render.texture_view,
+                        &textures.emissive_render.texture_view,
+                        &textures.indirect_render.texture_view,
+                    ]),
                 },
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::TextureView(
-                        &target.indirect_render_texture.texture_view,
+                        &textures.temporal[previous].texture_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(
-                        &target.overlay_render_textures[previous_id].texture_view,
-                    ),
+                    resource: BindingResource::Sampler(&textures.temporal[previous].sampler),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(
-                        &target.overlay_render_textures[previous_id].sampler,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 4,
                     resource: BindingResource::TextureView(
-                        &target.overlay_render_textures[current_id].texture_view,
+                        &textures.temporal[current].texture_view,
                     ),
                 },
             ],
