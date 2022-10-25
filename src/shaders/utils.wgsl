@@ -15,6 +15,13 @@ fn random_float(value: u32) -> f32 {
     return f32(hash(value)) / 4294967295.0;
 }
 
+fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
+    var uv = clip.xy / clip.w;
+    uv = (uv + 1.0) * 0.5;
+    uv.y = 1.0 - uv.y;
+    return uv;
+}
+
 fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
     let s = min(sign(n.z) * 2.0 + 1.0, 1.0);
     let u = -1.0 / (s + n.z);

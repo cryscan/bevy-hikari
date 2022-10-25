@@ -56,13 +56,6 @@ struct FragmentOutput {
     @location(4) velocity_uv: vec4<f32>,
 };
 
-fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
-    var uv = clip.xy / clip.w;
-    uv = (uv + 1.0) * 0.5;
-    uv.y = 1.0 - uv.y;
-    return uv;
-}
-
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
     let clip_position = view.view_proj * in.world_position;

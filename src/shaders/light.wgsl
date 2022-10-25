@@ -755,11 +755,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     ray.direction = candidate.direction;
     ray.inv_direction = 1.0 / ray.direction;
 
-    let trace_condition = 
+    var trace_condition = dot(candidate.direction, normal) > 0.0;
 #ifdef INCLUDE_EMISSIVE
-        candidate.directional_index == DONT_SAMPLE_DIRECTIONAL_LIGHT &&
+    trace_condition = trace_condition && candidate.directional_index == DONT_SAMPLE_DIRECTIONAL_LIGHT;
 #endif
-        dot(candidate.direction, normal) > 0.0;
 
     if (trace_condition) {
         hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
@@ -903,6 +902,40 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     // Second bounce: from sample position
     if (hit.instance_index != U32_MAX) {
+        var out_radiance = vec3<f32>(0.0);
+
+        // surface = retreive_surface(info.material_index, info.uv);
+        // surface.roughness = 1.0;
+
+        // // Check whether the sample point is within the direct reservoir cache
+        // var sample_ndc = view.view_proj * s.sample_position;
+        // sample_ndc = sample_ndc / sample_ndc.w;
+        // let cache_uv = clip_to_uv(sample_ndc);
+        // var cache_hit = all(abs(sample_ndc.xy) < vec2<f32>(1.0));
+        // let cache_coords = vec2<i32>(cache_uv * vec2<f32>(deferred_size));
+
+        // let cache_depth = textureLoad(position_texture, cache_coords, 0).w;
+        // cache_hit = cache_hit && (distance(cache_depth, sample_ndc.z) < 0.0001);
+
+        // if (cache_hit) {
+        //     var cached = load_direct_reservoir(cache_coords.x + reservoir_size.x * cache_coords.y);
+        //     out_radiance = shading(
+        //         normalize(s.visible_position.xyz - s.sample_position.xyz),
+        //         s.sample_normal,
+        //         normalize(cached.s.sample_position.xyz - s.sample_position.xyz),
+        //         surface,
+        //         cached.s.radiance
+        //     ) * cached.w;
+
+        //     cached = load_emissive_reservoir(cache_coords.x + reservoir_size.x * cache_coords.y);
+        //     out_radiance += shading(
+        //         normalize(s.visible_position.xyz - s.sample_position.xyz),
+        //         s.sample_normal,
+        //         normalize(cached.s.sample_position.xyz - s.sample_position.xyz),
+        //         surface,
+        //         cached.s.radiance
+        //     ) * cached.w;
+        // } else {
         let candidate = select_light_candidate(
             s.random,
             s.sample_position.xyz,
@@ -911,24 +944,24 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         );
 
         if (dot(candidate.direction, s.sample_normal) > 0.0 && candidate.p > 0.0) {
-            surface = retreive_surface(info.material_index, info.uv);
-            surface.roughness = 1.0;
-
             ray.origin = s.sample_position.xyz + s.sample_normal * RAY_BIAS;
             ray.direction = candidate.direction;
             ray.inv_direction = 1.0 / ray.direction;
 
+            surface = retreive_surface(info.material_index, info.uv);
+            surface.roughness = 1.0;
+
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
             info = hit_info(ray, hit);
             let in_radiance = input_radiance(ray, info, candidate.directional_index, candidate.emissive_index);
-            var out_radiance = shading(
-                normalize(s.sample_position.xyz - s.visible_position.xyz),
+            out_radiance = shading(
+                normalize(s.visible_position.xyz - s.sample_position.xyz),
                 s.sample_normal,
                 ray.direction,
                 surface,
                 in_radiance
-            );
-            out_radiance = out_radiance / candidate.p;
+            ) / candidate.p;
+            // }
 
             // Do radiance clamping
             let out_luminance = luminance(out_radiance);
@@ -936,7 +969,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                 out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
             }
 
-            s.radiance = vec4<f32>(out_radiance, in_radiance.a);
+            s.radiance = vec4<f32>(out_radiance, 1.0);
         }
     } else {
         // Only ambient radiance
