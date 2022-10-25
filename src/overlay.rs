@@ -1,7 +1,7 @@
 use crate::{
     light::{LightPassTextures, LightPipeline, SetDeferredBindGroup, TEMPORAL_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, SetViewBindGroup},
-    HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_HANDLE,
+    HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
@@ -51,7 +51,7 @@ impl Plugin for OverlayPlugin {
 
 fn setup(mut meshes: ResMut<Assets<Mesh>>) {
     let mesh: Mesh = Quad::new(Vec2::new(2.0, 2.0)).into();
-    meshes.set_untracked(QUAD_HANDLE, mesh);
+    meshes.set_untracked(QUAD_MESH_HANDLE, mesh);
 }
 
 pub struct OverlayPipeline {
@@ -255,7 +255,7 @@ fn queue_overlay_mesh(
 ) {
     let draw_function = draw_functions.read().get_id::<DrawOverlay>().unwrap();
     for mut overlay_phase in &mut views {
-        let mesh_handle = QUAD_HANDLE.typed::<Mesh>();
+        let mesh_handle = QUAD_MESH_HANDLE.typed::<Mesh>();
         if let Some(mesh) = render_meshes.get(&mesh_handle) {
             let key = MeshPipelineKey::from_msaa_samples(msaa.samples)
                 | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);

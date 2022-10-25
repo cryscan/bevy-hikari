@@ -48,23 +48,27 @@ pub const NOISE_TEXTURE_COUNT: usize = 16;
 
 pub const UTILS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4462033275253590181);
-pub const MESH_VIEW_TYPES_HANDLE: HandleUntyped =
+pub const MESH_VIEW_TYPES_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10086770709483722043);
-pub const MESH_VIEW_BINDINGS_HANDLE: HandleUntyped =
+pub const MESH_VIEW_BINDINGS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 8835349515886344623);
-pub const MESH_MATERIAL_TYPES_HANDLE: HandleUntyped =
+pub const MESH_MATERIAL_TYPES_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 15819591594687298858);
-pub const MESH_MATERIAL_BINDINGS_HANDLE: HandleUntyped =
+pub const MESH_MATERIAL_BINDINGS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5025976374517268);
-pub const DEFERRED_BINDINGS_HANDLE: HandleUntyped =
+pub const DEFERRED_BINDINGS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14467895678105108252);
+pub const RESERVOIR_TYPES_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 7770589395703787378);
+pub const RESERVOIR_BINDINGS_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11658053183743104810);
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
 pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10969344919103020615);
-pub const QUAD_HANDLE: HandleUntyped =
+pub const QUAD_MESH_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 
 pub struct HikariPlugin;
@@ -78,32 +82,44 @@ impl Plugin for HikariPlugin {
         );
         load_internal_asset!(
             app,
-            MESH_VIEW_TYPES_HANDLE,
+            MESH_VIEW_TYPES_SHADER_HANDLE,
             "shaders/mesh_view_types.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESH_VIEW_BINDINGS_HANDLE,
+            MESH_VIEW_BINDINGS_SHADER_HANDLE,
             "shaders/mesh_view_bindings.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESH_MATERIAL_TYPES_HANDLE,
+            MESH_MATERIAL_TYPES_SHADER_HANDLE,
             "shaders/mesh_material_types.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESH_MATERIAL_BINDINGS_HANDLE,
+            MESH_MATERIAL_BINDINGS_SHADER_HANDLE,
             "shaders/mesh_material_bindings.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            DEFERRED_BINDINGS_HANDLE,
+            DEFERRED_BINDINGS_SHADER_HANDLE,
             "shaders/deferred_bindings.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            RESERVOIR_TYPES_SHADER_HANDLE,
+            "shaders/reservoir_types.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            RESERVOIR_BINDINGS_SHADER_HANDLE,
+            "shaders/reservoir_bindings.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
