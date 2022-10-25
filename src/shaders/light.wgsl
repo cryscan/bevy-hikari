@@ -78,9 +78,13 @@ let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 let OVERSAMPLE_THRESHOLD: f32 = 4.0;
+#ifdef INCLUDE_DIRECT
+let SPATIAL_REUSE_COUNT: u32 = 8u;
+let SPATIAL_REUSE_RANGE: f32 = 10.0;
+#else
 let SPATIAL_REUSE_COUNT: u32 = 16u;
-let SPATIAL_REUSE_RANGE_MIN: f32 = 20.0;
-let SPATIAL_REUSE_RANGE_MAX: f32 = 20.0;
+let SPATIAL_REUSE_RANGE: f32 = 20.0;
+#endif
 let SPATIAL_REUSE_TAPS: u32 = 4u;
 
 struct Ray {
@@ -831,7 +835,7 @@ fn temporal_restir(
     max_sample_count: u32
 ) {
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
-    let depth_miss = depth_ratio > 2.0 || depth_ratio < 0.5;
+    let depth_miss = depth_ratio > 2.0 * (1.0 + s.random.x) || depth_ratio < 0.5 * s.random.y;
 
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
@@ -1209,10 +1213,9 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         vec2<f32>(-0.707106781, 0.707106781)
     );
     var offset = sign(s.random.zw - 0.5);
-    let max_offset_dist = mix(SPATIAL_REUSE_RANGE_MAX, SPATIAL_REUSE_RANGE_MIN, q.count / f32(frame.max_temporal_reuse_count));
 
     for (var i = 1u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
-        let offset_dist = mix(1.414213562, max_offset_dist, f32(i) / f32(SPATIAL_REUSE_COUNT));
+        let offset_dist = mix(1.414213562, SPATIAL_REUSE_RANGE, f32(i) / f32(SPATIAL_REUSE_COUNT));
         offset = offset_dist * normalize(offset);
 
         let sample_coords = coords + vec2<i32>(offset);
