@@ -1,6 +1,6 @@
 use crate::{
-    light::{LightPassTextures, LightPipeline, SetDeferredBindGroup, TEMPORAL_TEXTURE_FORMAT},
-    prepass::{PrepassBindGroup, PrepassPipeline, SetViewBindGroup},
+    light::{LightPassTextures, SetDeferredBindGroup, TEMPORAL_TEXTURE_FORMAT},
+    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures, SetViewBindGroup},
     HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
@@ -63,9 +63,9 @@ pub struct OverlayPipeline {
 impl FromWorld for OverlayPipeline {
     fn from_world(world: &mut World) -> Self {
         let view_layout = world.resource::<PrepassPipeline>().view_layout.clone();
-        let deferred_layout = world.resource::<LightPipeline>().deferred_layout.clone();
 
         let render_device = world.resource::<RenderDevice>();
+        let deferred_layout = PrepassTextures::bind_group_layout(render_device);
         let overlay_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
             entries: &[

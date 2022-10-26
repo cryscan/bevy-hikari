@@ -46,9 +46,10 @@ impl Plugin for MeshMaterialPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<MeshMaterialBindGroupLayout>()
+                .init_resource::<TextureBindGroupLayout>()
                 .add_system_to_stage(
                     RenderStage::Prepare,
-                    prepare_texture_bind_group_layout.after(MeshMaterialSystems::PrepareAssets),
+                    prepare_texture_bind_group_layout.label(MeshMaterialSystems::PrepareAssets),
                 )
                 .add_system_to_stage(RenderStage::Queue, queue_mesh_material_bind_group);
         }
@@ -357,7 +358,9 @@ pub enum MeshMaterialSystems {
     PrepareInstances,
 }
 
+#[derive(Deref, DerefMut)]
 pub struct MeshMaterialBindGroupLayout(pub BindGroupLayout);
+
 impl FromWorld for MeshMaterialBindGroupLayout {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
@@ -453,12 +456,47 @@ pub struct TextureBindGroupLayout {
     pub texture_count: usize,
 }
 
+impl FromWorld for TextureBindGroupLayout {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+
+        let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                // Textures
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Samplers
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        Self {
+            layout,
+            texture_count: 0,
+        }
+    }
+}
+
 fn prepare_texture_bind_group_layout(
-    mut commands: Commands,
     render_device: Res<RenderDevice>,
     materials: Res<MaterialRenderAssets>,
+    mut texture_layout: ResMut<TextureBindGroupLayout>,
 ) {
-    let count = materials.textures.len();
+    let texture_count = materials.textures.len();
     let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
@@ -471,21 +509,22 @@ fn prepare_texture_bind_group_layout(
                     view_dimension: TextureViewDimension::D2,
                     multisampled: false,
                 },
-                count: NonZeroU32::new(count as u32),
+                count: NonZeroU32::new(texture_count as u32),
             },
             // Samplers
             BindGroupLayoutEntry {
                 binding: 1,
                 visibility: ShaderStages::all(),
                 ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                count: NonZeroU32::new(count as u32),
+                count: NonZeroU32::new(texture_count as u32),
             },
         ],
     });
-    commands.insert_resource(TextureBindGroupLayout {
+
+    *texture_layout = TextureBindGroupLayout {
         layout,
-        texture_count: count,
-    });
+        texture_count,
+    }
 }
 
 pub struct MeshMaterialBindGroup {

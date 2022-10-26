@@ -1,5 +1,8 @@
 use crate::{
-    mesh_material::{MeshMaterialBindGroup, MeshMaterialBindGroupLayout, TextureBindGroupLayout},
+    mesh_material::{
+        MeshMaterialBindGroup, MeshMaterialBindGroupLayout, MeshMaterialSystems,
+        TextureBindGroupLayout,
+    },
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, PreviousViewUniformOffset},
     HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
@@ -35,8 +38,11 @@ impl Plugin for LightPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ReservoirCache>()
-                .init_resource::<LightPipeline>()
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
+                .add_system_to_stage(
+                    RenderStage::Prepare,
+                    prepare_light_pipeline.after(MeshMaterialSystems::PrepareAssets),
+                )
                 .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
                 .add_system_to_stage(RenderStage::Queue, queue_light_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
@@ -68,140 +74,11 @@ pub struct LightPipeline {
     pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
     pub mesh_material_layout: BindGroupLayout,
-    pub texture_layout: Option<BindGroupLayout>,
+    pub texture_layout: BindGroupLayout,
     pub noise_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
     pub reservoir_layout: BindGroupLayout,
     pub cache_reservoir_layout: BindGroupLayout,
-}
-
-impl FromWorld for LightPipeline {
-    fn from_world(world: &mut World) -> Self {
-        let render_device = world.resource::<RenderDevice>();
-        let mesh_material_layout = world.resource::<MeshMaterialBindGroupLayout>().0.clone();
-        let view_layout = world.resource::<PrepassPipeline>().view_layout.clone();
-
-        let deferred_layout = PrepassTextures::bind_group_layout(render_device);
-        let noise_layout = NoiseTextures::bind_group_layout(render_device);
-
-        let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Albedo Texture
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: ALBEDO_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Render Texture
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: RENDER_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let reservoir_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Previous Reservoir
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-                // Current Reservoir
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-                // Previous Spatial Reservoir
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-                // Current Spatial Reservoir
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let cache_reservoir_layout =
-            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[
-                    // Direct Cache Reservoir
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                        },
-                        count: None,
-                    },
-                    // Emissive Cache Reservoir
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        Self {
-            view_layout,
-            deferred_layout,
-            mesh_material_layout,
-            texture_layout: None,
-            noise_layout,
-            render_layout,
-            reservoir_layout,
-            cache_reservoir_layout,
-        }
-    }
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -231,7 +108,7 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.view_layout.clone(),
                 self.deferred_layout.clone(),
                 self.mesh_material_layout.clone(),
-                self.texture_layout.clone().unwrap(),
+                self.texture_layout.clone(),
                 self.noise_layout.clone(),
                 self.render_layout.clone(),
                 self.reservoir_layout.clone(),
@@ -242,6 +119,143 @@ impl SpecializedComputePipeline for LightPipeline {
             entry_point: key.entry_point.into(),
         }
     }
+}
+
+fn prepare_light_pipeline(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    mesh_material_layout: Res<MeshMaterialBindGroupLayout>,
+    texture_layout: Res<TextureBindGroupLayout>,
+    prepass_pipeline: Res<PrepassPipeline>,
+) {
+    if !texture_layout.is_changed() {
+        return;
+    }
+
+    let view_layout = prepass_pipeline.view_layout.clone();
+    let mesh_material_layout = mesh_material_layout.clone();
+    let texture_layout = texture_layout.layout.clone();
+
+    let deferred_layout = PrepassTextures::bind_group_layout(&render_device);
+    let noise_layout = NoiseTextures::bind_group_layout(&render_device);
+
+    let render_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: None,
+        entries: &[
+            // Albedo Texture
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: StorageTextureAccess::ReadWrite,
+                    format: ALBEDO_TEXTURE_FORMAT,
+                    view_dimension: TextureViewDimension::D2,
+                },
+                count: None,
+            },
+            // Render Texture
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: StorageTextureAccess::ReadWrite,
+                    format: RENDER_TEXTURE_FORMAT,
+                    view_dimension: TextureViewDimension::D2,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let reservoir_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: None,
+        entries: &[
+            // Previous Reservoir
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Current Reservoir
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Previous Spatial Reservoir
+            BindGroupLayoutEntry {
+                binding: 2,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                },
+                count: None,
+            },
+            // Current Spatial Reservoir
+            BindGroupLayoutEntry {
+                binding: 3,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let cache_reservoir_layout =
+        render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                // Direct Cache Reservoir
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Emissive Cache Reservoir
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+    commands.insert_resource(LightPipeline {
+        view_layout,
+        deferred_layout,
+        mesh_material_layout,
+        texture_layout,
+        noise_layout,
+        render_layout,
+        reservoir_layout,
+        cache_reservoir_layout,
+    });
 }
 
 #[derive(Component)]
@@ -367,11 +381,10 @@ pub struct CachedLightPipelines {
 fn queue_light_pipelines(
     mut commands: Commands,
     layout: Res<TextureBindGroupLayout>,
-    mut pipeline: ResMut<LightPipeline>,
+    pipeline: Res<LightPipeline>,
     mut pipelines: ResMut<SpecializedComputePipelines<LightPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
-    pipeline.texture_layout = Some(layout.layout.clone());
     let texture_count = layout.texture_count as u8;
 
     let key = LightPipelineKey {
