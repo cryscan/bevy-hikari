@@ -1,12 +1,12 @@
 use crate::{
-    light::{LightPassTextures, SetDeferredBindGroup, TEMPORAL_TEXTURE_FORMAT},
-    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures, SetViewBindGroup},
+    post_process::{PostProcessBindGroup, PostProcessPipeline},
+    prepass::PrepassBindGroup,
     HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
     ecs::system::{
-        lifetimeless::{Read, SQuery},
+        lifetimeless::{Read, SQuery, SRes},
         SystemParamItem,
     },
     pbr::{DrawMesh, MeshPipelineKey},
@@ -22,14 +22,13 @@ use bevy::{
             SetItemPipeline, TrackedRenderPass,
         },
         render_resource::*,
-        renderer::{RenderContext, RenderDevice},
+        renderer::RenderContext,
         texture::BevyDefault,
         view::{ExtractedView, ViewTarget},
         Extract, RenderApp, RenderStage,
     },
     utils::FloatOrd,
 };
-use std::num::NonZeroU32;
 
 pub struct OverlayPlugin;
 impl Plugin for OverlayPlugin {
@@ -43,7 +42,6 @@ impl Plugin for OverlayPlugin {
                 .init_resource::<SpecializedMeshPipelines<OverlayPipeline>>()
                 .add_render_command::<Overlay, DrawOverlay>()
                 .add_system_to_stage(RenderStage::Extract, extract_overlay_camera_phases)
-                .add_system_to_stage(RenderStage::Queue, queue_overlay_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_overlay_mesh);
         }
     }
@@ -55,75 +53,21 @@ fn setup(mut meshes: ResMut<Assets<Mesh>>) {
 }
 
 pub struct OverlayPipeline {
-    pub view_layout: BindGroupLayout,
-    pub deferred_layout: BindGroupLayout,
-    pub overlay_layout: BindGroupLayout,
+    pub input_layout: BindGroupLayout,
 }
 
 impl FromWorld for OverlayPipeline {
     fn from_world(world: &mut World) -> Self {
-        let view_layout = world.resource::<PrepassPipeline>().view_layout.clone();
-
-        let render_device = world.resource::<RenderDevice>();
-        let deferred_layout = PrepassTextures::bind_group_layout(render_device);
-        let overlay_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: NonZeroU32::new(3),
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TEMPORAL_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        Self {
-            view_layout,
-            deferred_layout,
-            overlay_layout,
-        }
+        let input_layout = world
+            .resource::<PostProcessPipeline>()
+            .output_layout
+            .clone();
+        Self { input_layout }
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct OverlayPipelineKey {
-    pub mesh_pipeline_key: MeshPipelineKey,
-    pub temporal_anti_aliasing: bool,
-}
-
 impl SpecializedMeshPipeline for OverlayPipeline {
-    type Key = OverlayPipelineKey;
+    type Key = MeshPipelineKey;
 
     fn specialize(
         &self,
@@ -132,29 +76,20 @@ impl SpecializedMeshPipeline for OverlayPipeline {
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let vertex_attributes = vec![Mesh::ATTRIBUTE_POSITION.at_shader_location(0)];
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
-        let bind_group_layout = vec![
-            self.view_layout.clone(),
-            self.deferred_layout.clone(),
-            self.overlay_layout.clone(),
-        ];
-
-        let mut shader_defs = vec![];
-        if key.temporal_anti_aliasing {
-            shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
-        }
+        let bind_group_layout = vec![self.input_layout.clone()];
 
         Ok(RenderPipelineDescriptor {
             label: None,
             layout: Some(bind_group_layout),
             vertex: VertexState {
                 shader: OVERLAY_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs: shader_defs.clone(),
+                shader_defs: vec![],
                 entry_point: "vertex".into(),
                 buffers: vec![vertex_buffer_layout],
             },
             fragment: Some(FragmentState {
                 shader: OVERLAY_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs,
+                shader_defs: vec![],
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
                     format: TextureFormat::bevy_default(),
@@ -163,7 +98,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
                 })],
             }),
             primitive: PrimitiveState {
-                topology: key.mesh_pipeline_key.primitive_topology(),
+                topology: key.primitive_topology(),
                 strip_index_format: None,
                 front_face: FrontFace::Ccw,
                 cull_mode: None,
@@ -173,7 +108,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
             },
             depth_stencil: None,
             multisample: MultisampleState {
-                count: key.mesh_pipeline_key.msaa_samples(),
+                count: key.msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -194,58 +129,10 @@ fn extract_overlay_camera_phases(
     }
 }
 
-#[derive(Component)]
-pub struct OverlayBindGroup(pub BindGroup);
-
-fn queue_overlay_bind_groups(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    pipeline: Res<OverlayPipeline>,
-    query: Query<(Entity, &LightPassTextures)>,
-) {
-    for (entity, textures) in &query {
-        let current = textures.head;
-        let previous = 1 - current;
-
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.overlay_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureViewArray(&[
-                        &textures.direct_render.texture_view,
-                        &textures.emissive_render.texture_view,
-                        &textures.indirect_render.texture_view,
-                    ]),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(
-                        &textures.temporal[previous].texture_view,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::Sampler(&textures.temporal[previous].sampler),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::TextureView(
-                        &textures.temporal[current].texture_view,
-                    ),
-                },
-            ],
-        });
-        commands.entity(entity).insert(OverlayBindGroup(bind_group));
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn queue_overlay_mesh(
     mut commands: Commands,
     msaa: Res<Msaa>,
-    config: Res<HikariConfig>,
     draw_functions: Res<DrawFunctions<Overlay>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     overlay_pipeline: Res<OverlayPipeline>,
@@ -259,10 +146,7 @@ fn queue_overlay_mesh(
         if let Some(mesh) = render_meshes.get(&mesh_handle) {
             let key = MeshPipelineKey::from_msaa_samples(msaa.samples)
                 | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
-            let key = OverlayPipelineKey {
-                mesh_pipeline_key: key,
-                temporal_anti_aliasing: config.temporal_anti_aliasing,
-            };
+
             let pipeline_id =
                 pipelines.specialize(&mut pipeline_cache, &overlay_pipeline, key, &mesh.layout);
             let pipeline_id = match pipeline_id {
@@ -318,28 +202,28 @@ impl CachedRenderPipelinePhaseItem for Overlay {
     }
 }
 
-type DrawOverlay = (
-    SetItemPipeline,
-    SetViewBindGroup<0>,
-    SetDeferredBindGroup<1>,
-    SetOverlayBindGroup<2>,
-    DrawMesh,
-);
+type DrawOverlay = (SetItemPipeline, SetOverlayBindGroup<0>, DrawMesh);
 
 pub struct SetOverlayBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetOverlayBindGroup<I> {
-    type Param = SQuery<Read<OverlayBindGroup>>;
+    type Param = (SRes<HikariConfig>, SQuery<Read<PostProcessBindGroup>>);
 
     fn render<'w>(
         view: Entity,
         _item: Entity,
-        query: SystemParamItem<'w, '_, Self::Param>,
+        (config, query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let bind_group = query.get_inner(view).unwrap();
-        pass.set_bind_group(I, &bind_group.0, &[]);
-
-        RenderCommandResult::Success
+        if let Ok(bind_group) = query.get_inner(view) {
+            let bind_group = match config.temporal_anti_aliasing {
+                true => &bind_group.taa_output,
+                false => &bind_group.tone_mapping_output,
+            };
+            pass.set_bind_group(0, bind_group, &[]);
+            RenderCommandResult::Success
+        } else {
+            RenderCommandResult::Failure
+        }
     }
 }
 

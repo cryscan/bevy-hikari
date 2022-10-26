@@ -692,8 +692,8 @@ fn compute_jacobian(q: Sample, r: Sample) -> f32 {
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(render_texture);
-    let uv = (vec2<f32>(invocation_id.xy) + frame_jitter(frame.number)) / vec2<f32>(size);
     let coords = vec2<i32>(invocation_id.xy);
+    let uv = coords_to_uv(coords, size);
 
     var s = empty_sample();
 
@@ -720,7 +720,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]);
-    let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
+    let noise_uv = (vec2<f32>(coords) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
     s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
     s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
 
@@ -851,8 +851,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let render_size = textureDimensions(render_texture);
     let reservoir_size = render_size;
 
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
+    let uv = coords_to_uv(coords, render_size);
     let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
 
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
@@ -876,7 +876,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
     let noise_size = textureDimensions(noise_texture[noise_id]);
-    let noise_uv = (vec2<f32>(invocation_id.xy) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
+    let noise_uv = (vec2<f32>(coords) + f32(frame.number) + 0.5) / vec2<f32>(noise_size);
     s.random = textureSampleLevel(noise_texture[noise_id], noise_sampler, noise_uv, 0.0);
     s.random = fract(s.random + f32(frame.number) * GOLDEN_RATIO);
 

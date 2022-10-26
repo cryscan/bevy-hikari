@@ -22,6 +22,10 @@ fn clip_to_uv(clip: vec4<f32>) -> vec2<f32> {
     return uv;
 }
 
+fn coords_to_uv(coords: vec2<i32>, size: vec2<i32>) -> vec2<f32> {
+    return (vec2<f32>(coords) + 0.5) / vec2<f32>(size);
+}
+
 fn normal_basis(n: vec3<f32>) -> mat3x3<f32> {
     let s = min(sign(n.z) * 2.0 + 1.0, 1.0);
     let u = -1.0 / (s + n.z);

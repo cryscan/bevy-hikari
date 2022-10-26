@@ -8,17 +8,12 @@ use crate::{
     HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
-    ecs::system::{
-        lifetimeless::{Read, SQuery},
-        SystemParamItem,
-    },
     pbr::ViewLightsUniformOffset,
     prelude::*,
     render::{
         camera::ExtractedCamera,
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
-        render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{FallbackImage, GpuImage, TextureCache},
@@ -31,7 +26,6 @@ use serde::Serialize;
 
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const TEMPORAL_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -44,7 +38,7 @@ impl Plugin for LightPlugin {
                     RenderStage::Prepare,
                     prepare_light_pipeline.after(MeshMaterialSystems::PrepareAssets),
                 )
-                .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_targets)
+                .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_textures)
                 .add_system_to_stage(RenderStage::Queue, queue_light_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
         }
@@ -75,7 +69,10 @@ pub struct LightPipeline {
     pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
     pub mesh_material_layout: BindGroupLayout,
+
+    pub texture_count: u32,
     pub texture_layout: BindGroupLayout,
+
     pub noise_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
     pub reservoir_layout: BindGroupLayout,
@@ -83,14 +80,12 @@ pub struct LightPipeline {
 }
 
 #[repr(C)]
-#[derive(Default, Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize)]
+#[derive(Default, Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, FromPrimitive)]
+#[serde(rename_all = "snake_case")]
 pub enum LightEntryPoint {
     #[default]
-    #[serde(rename(serialize = "direct_lit"))]
-    Direct = 0,
-    #[serde(rename(serialize = "indirect_lit_ambient"))]
-    Indirect = 1,
-    #[serde(rename(serialize = "spatial_reuse"))]
+    DirectLit = 0,
+    IndirectLitAmbient = 1,
     SpatialReuse = 2,
 }
 
@@ -116,12 +111,7 @@ impl LightPipelineKey {
 
     pub fn entry_point(&self) -> LightEntryPoint {
         let entry_point_bits = self.bits & Self::ENTRY_POINT_MASK_BITS;
-        match entry_point_bits {
-            x if x == LightEntryPoint::Direct as u32 => LightEntryPoint::Direct,
-            x if x == LightEntryPoint::Indirect as u32 => LightEntryPoint::Indirect,
-            x if x == LightEntryPoint::SpatialReuse as u32 => LightEntryPoint::SpatialReuse,
-            _ => LightEntryPoint::default(),
-        }
+        num_traits::FromPrimitive::from_u32(entry_point_bits).unwrap()
     }
 
     pub fn from_texture_count(texture_count: u32) -> Self {
@@ -184,6 +174,8 @@ fn prepare_light_pipeline(
 
     let view_layout = prepass_pipeline.view_layout.clone();
     let mesh_material_layout = mesh_material_layout.clone();
+
+    let texture_count = texture_layout.texture_count;
     let texture_layout = texture_layout.layout.clone();
 
     let deferred_layout = PrepassTextures::bind_group_layout(&render_device);
@@ -300,6 +292,7 @@ fn prepare_light_pipeline(
         view_layout,
         deferred_layout,
         mesh_material_layout,
+        texture_count,
         texture_layout,
         noise_layout,
         render_layout,
@@ -313,13 +306,12 @@ pub struct LightPassTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
     pub albedo: GpuImage,
-    pub temporal: [GpuImage; 2],
     pub direct_render: GpuImage,
     pub emissive_render: GpuImage,
     pub indirect_render: GpuImage,
 }
 
-fn prepare_light_pass_targets(
+fn prepare_light_pass_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
@@ -331,7 +323,7 @@ fn prepare_light_pass_targets(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let mut create_texture_sampler = |texture_format, filter_mode| -> GpuImage {
+            let mut create_texture = |texture_format| -> GpuImage {
                 let extent = Extent3d {
                     width: size.x,
                     height: size.y,
@@ -342,9 +334,9 @@ fn prepare_light_pass_targets(
                     address_mode_u: AddressMode::ClampToEdge,
                     address_mode_v: AddressMode::ClampToEdge,
                     address_mode_w: AddressMode::ClampToEdge,
-                    mag_filter: filter_mode,
-                    min_filter: filter_mode,
-                    mipmap_filter: filter_mode,
+                    mag_filter: FilterMode::Nearest,
+                    min_filter: FilterMode::Nearest,
+                    mipmap_filter: FilterMode::Nearest,
                     ..Default::default()
                 });
                 let texture = texture_cache.get(
@@ -368,21 +360,10 @@ fn prepare_light_pass_targets(
                 }
             };
 
-            let mut create_texture =
-                |texture_format| create_texture_sampler(texture_format, FilterMode::Nearest);
-
             let albedo = create_texture(ALBEDO_TEXTURE_FORMAT);
             let direct_render = create_texture(RENDER_TEXTURE_FORMAT);
             let emissive_render = create_texture(RENDER_TEXTURE_FORMAT);
             let indirect_render = create_texture(RENDER_TEXTURE_FORMAT);
-
-            let mut create_texture =
-                |texture_format| create_texture_sampler(texture_format, FilterMode::Linear);
-
-            let temporal = [
-                create_texture(TEMPORAL_TEXTURE_FORMAT),
-                create_texture(TEMPORAL_TEXTURE_FORMAT),
-            ];
 
             if match reservoir_cache.get(&entity) {
                 Some(reservoirs) => {
@@ -410,7 +391,6 @@ fn prepare_light_pass_targets(
             commands.entity(entity).insert(LightPassTextures {
                 head: frame_counter.0 % 2,
                 albedo,
-                temporal,
                 direct_render,
                 emissive_render,
                 indirect_render,
@@ -430,13 +410,12 @@ pub struct CachedLightPipelines {
 
 fn queue_light_pipelines(
     mut commands: Commands,
-    layout: Res<TextureBindGroupLayout>,
     pipeline: Res<LightPipeline>,
     mut pipelines: ResMut<SpecializedComputePipelines<LightPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
-    let texture_count_key = LightPipelineKey::from_texture_count(layout.texture_count);
-    let key = texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::Direct);
+    let texture_count_key = LightPipelineKey::from_texture_count(pipeline.texture_count);
+    let key = texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::DirectLit);
 
     let direct_lit = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
     let direct_emissive = pipelines.specialize(
@@ -445,7 +424,8 @@ fn queue_light_pipelines(
         key | LightPipelineKey::INCLUDE_EMISSIVE_BIT,
     );
 
-    let key = texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::Indirect);
+    let key =
+        texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::IndirectLitAmbient);
     let indirect_lit_ambient = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     let key = texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::SpatialReuse);
@@ -485,7 +465,6 @@ pub struct LightBindGroup {
 #[allow(clippy::too_many_arguments)]
 fn queue_light_bind_groups(
     mut commands: Commands,
-    config: Res<HikariConfig>,
     render_device: Res<RenderDevice>,
     pipeline: Res<LightPipeline>,
     noise: Res<NoiseTextures>,
@@ -642,10 +621,6 @@ fn queue_light_bind_groups(
                 ],
             });
 
-            let emissive_cache_reservoir_binding = match config.spatial_reuse {
-                true => reservoir_bindings[4 + current].clone(),
-                false => reservoir_bindings[2 + current].clone(),
-            };
             let cache_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
                 label: None,
                 layout: &pipeline.cache_reservoir_layout,
@@ -656,7 +631,7 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: emissive_cache_reservoir_binding,
+                        resource: reservoir_bindings[2 + current].clone(),
                     },
                 ],
             });
@@ -672,25 +647,6 @@ fn queue_light_bind_groups(
                 indirect_reservoir,
                 cache_reservoir,
             });
-        }
-    }
-}
-
-pub struct SetDeferredBindGroup<const I: usize>;
-impl<const I: usize> EntityRenderCommand for SetDeferredBindGroup<I> {
-    type Param = SQuery<Read<LightBindGroup>>;
-
-    fn render<'w>(
-        view: Entity,
-        _item: Entity,
-        query: SystemParamItem<'w, '_, Self::Param>,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        if let Ok(bind_group) = query.get_inner(view) {
-            pass.set_bind_group(I, &bind_group.deferred, &[]);
-            RenderCommandResult::Success
-        } else {
-            RenderCommandResult::Failure
         }
     }
 }
@@ -744,6 +700,7 @@ impl Node for LightPassNode {
             Some(bind_group) => bind_group,
             None => return Ok(()),
         };
+
         let pipelines = world.resource::<CachedLightPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
         let config = world.resource::<HikariConfig>();

@@ -2,6 +2,7 @@ use crate::{
     light::{LightPassNode, LightPlugin},
     mesh_material::MeshMaterialPlugin,
     overlay::{OverlayPassNode, OverlayPlugin},
+    post_process::{PostProcessPassNode, PostProcessPlugin},
     prepass::{PrepassNode, PrepassPlugin},
     transform::TransformPlugin,
     view::ViewPlugin,
@@ -23,6 +24,9 @@ use bevy::{
 };
 use std::{f32::consts::PI, num::NonZeroU32};
 
+#[macro_use]
+extern crate num_derive;
+
 pub mod light;
 pub mod mesh_material;
 pub mod overlay;
@@ -40,6 +44,7 @@ pub mod graph {
     pub mod node {
         pub const PREPASS: &str = "prepass";
         pub const LIGHT_PASS: &str = "light_pass";
+        pub const POST_PROCESS_PASS: &str = "post_process_pass";
         pub const OVERLAY_PASS: &str = "overlay_pass";
     }
 }
@@ -191,20 +196,22 @@ impl Plugin for HikariPlugin {
             .add_plugin(MeshMaterialPlugin)
             .add_plugin(PrepassPlugin)
             .add_plugin(LightPlugin)
+            .add_plugin(PostProcessPlugin)
             .add_plugin(OverlayPlugin)
             .add_startup_system(noise_load_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
             let light_pass_node = LightPassNode::new(&mut render_app.world);
+            let post_process_pass_node = PostProcessPassNode::new(&mut render_app.world);
             let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
-            // let pass_node_3d = MainPass3dNode::new(&mut render_app.world);
 
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
 
             let mut hikari_graph = RenderGraph::default();
             hikari_graph.add_node(graph::node::PREPASS, prepass_node);
             hikari_graph.add_node(graph::node::LIGHT_PASS, light_pass_node);
+            hikari_graph.add_node(graph::node::POST_PROCESS_PASS, post_process_pass_node);
             hikari_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
             let input_node_id = hikari_graph.set_input(vec![SlotInfo::new(
                 graph::input::VIEW_ENTITY,
@@ -233,12 +240,23 @@ impl Plugin for HikariPlugin {
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
+                    graph::node::POST_PROCESS_PASS,
+                    LightPassNode::IN_VIEW,
+                )
+                .unwrap();
+            hikari_graph
+                .add_node_edge(graph::node::LIGHT_PASS, graph::node::POST_PROCESS_PASS)
+                .unwrap();
+            hikari_graph
+                .add_slot_edge(
+                    input_node_id,
+                    graph::input::VIEW_ENTITY,
                     graph::node::OVERLAY_PASS,
                     MainPass3dNode::IN_VIEW,
                 )
                 .unwrap();
             hikari_graph
-                .add_node_edge(graph::node::LIGHT_PASS, graph::node::OVERLAY_PASS)
+                .add_node_edge(graph::node::POST_PROCESS_PASS, graph::node::OVERLAY_PASS)
                 .unwrap();
             graph.add_sub_graph(graph::NAME, hikari_graph);
         }
