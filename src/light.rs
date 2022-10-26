@@ -27,6 +27,7 @@ use bevy::{
     },
     utils::HashMap,
 };
+use serde::Serialize;
 
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
@@ -81,11 +82,57 @@ pub struct LightPipeline {
     pub cache_reservoir_layout: BindGroupLayout,
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
-pub struct LightPipelineKey {
-    pub entry_point: String,
-    pub texture_count: u8,
-    pub include_emissive: bool,
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize)]
+pub enum LightEntryPoint {
+    #[default]
+    #[serde(rename(serialize = "direct_lit"))]
+    Direct = 0,
+    #[serde(rename(serialize = "indirect_lit_ambient"))]
+    Indirect = 1,
+    #[serde(rename(serialize = "spatial_reuse"))]
+    SpatialReuse = 2,
+}
+
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct LightPipelineKey: u32 {
+        const ENTRY_POINT_BITS      = LightPipelineKey::ENTRY_POINT_MASK_BITS;
+        const INCLUDE_EMISSIVE_BIT  = 1 << LightPipelineKey::INCLUDE_EMISSIVE_SHIFT_BITS;
+        const TEXTURE_COUNT_BITS    = LightPipelineKey::TEXTURE_COUNT_MASK_BITS << LightPipelineKey::TEXTURE_COUNT_SHIFT_BITS;
+    }
+}
+
+impl LightPipelineKey {
+    const ENTRY_POINT_MASK_BITS: u32 = 0b11;
+    const INCLUDE_EMISSIVE_SHIFT_BITS: u32 = 4;
+    const TEXTURE_COUNT_MASK_BITS: u32 = 0xFFFF;
+    const TEXTURE_COUNT_SHIFT_BITS: u32 = 32 - 16;
+
+    pub fn from_entry_point(entry_point: LightEntryPoint) -> Self {
+        let entry_point_bits = (entry_point as u32) & Self::ENTRY_POINT_MASK_BITS;
+        Self::from_bits(entry_point_bits).unwrap()
+    }
+
+    pub fn entry_point(&self) -> LightEntryPoint {
+        let entry_point_bits = self.bits & Self::ENTRY_POINT_MASK_BITS;
+        match entry_point_bits {
+            x if x == LightEntryPoint::Direct as u32 => LightEntryPoint::Direct,
+            x if x == LightEntryPoint::Indirect as u32 => LightEntryPoint::Indirect,
+            x if x == LightEntryPoint::SpatialReuse as u32 => LightEntryPoint::SpatialReuse,
+            _ => LightEntryPoint::default(),
+        }
+    }
+
+    pub fn from_texture_count(texture_count: u32) -> Self {
+        let texture_count_bits =
+            (texture_count & Self::TEXTURE_COUNT_MASK_BITS) << Self::TEXTURE_COUNT_SHIFT_BITS;
+        Self::from_bits(texture_count_bits).unwrap()
+    }
+
+    pub fn texture_count(&self) -> u32 {
+        (self.bits >> Self::TEXTURE_COUNT_SHIFT_BITS) & Self::TEXTURE_COUNT_MASK_BITS
+    }
 }
 
 impl SpecializedComputePipeline for LightPipeline {
@@ -94,13 +141,16 @@ impl SpecializedComputePipeline for LightPipeline {
     fn specialize(&self, key: Self::Key) -> ComputePipelineDescriptor {
         let mut shader_defs = vec![];
 
-        if key.texture_count < 1 {
+        if key.texture_count() == 0 {
             shader_defs.push("NO_TEXTURE".into());
         }
-
-        if key.include_emissive {
+        if key.contains(LightPipelineKey::INCLUDE_EMISSIVE_BIT) {
             shader_defs.push("INCLUDE_EMISSIVE".into());
         }
+
+        let entry_point = serde_variant::to_variant_name(&key.entry_point())
+            .unwrap()
+            .into();
 
         ComputePipelineDescriptor {
             label: None,
@@ -116,7 +166,7 @@ impl SpecializedComputePipeline for LightPipeline {
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs,
-            entry_point: key.entry_point.into(),
+            entry_point,
         }
     }
 }
@@ -385,41 +435,25 @@ fn queue_light_pipelines(
     mut pipelines: ResMut<SpecializedComputePipelines<LightPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
-    let texture_count = layout.texture_count as u8;
+    let texture_count_key = LightPipelineKey::from_texture_count(layout.texture_count);
+    let key = texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::Direct);
 
-    let key = LightPipelineKey {
-        entry_point: "direct_lit".into(),
-        texture_count,
-        include_emissive: false,
-    };
     let direct_lit = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+    let direct_emissive = pipelines.specialize(
+        &mut pipeline_cache,
+        &pipeline,
+        key | LightPipelineKey::INCLUDE_EMISSIVE_BIT,
+    );
 
-    let key = LightPipelineKey {
-        entry_point: "direct_lit".into(),
-        texture_count,
-        include_emissive: true,
-    };
-    let direct_emissive = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-
-    let key = LightPipelineKey {
-        entry_point: "indirect_lit_ambient".into(),
-        texture_count,
-        include_emissive: false,
-    };
+    let key = texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::Indirect);
     let indirect_lit_ambient = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    let key = LightPipelineKey {
-        entry_point: "spatial_reuse".into(),
-        texture_count,
-        include_emissive: true,
-    };
-    let emissive_spatial_reuse = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-
-    let key = LightPipelineKey {
-        entry_point: "spatial_reuse".into(),
-        texture_count,
-        include_emissive: false,
-    };
+    let key = texture_count_key | LightPipelineKey::from_entry_point(LightEntryPoint::SpatialReuse);
+    let emissive_spatial_reuse = pipelines.specialize(
+        &mut pipeline_cache,
+        &pipeline,
+        key | LightPipelineKey::INCLUDE_EMISSIVE_BIT,
+    );
     let indirect_spatial_reuse = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     commands.insert_resource(CachedLightPipelines {

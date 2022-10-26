@@ -453,7 +453,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
 
 pub struct TextureBindGroupLayout {
     pub layout: BindGroupLayout,
-    pub texture_count: usize,
+    pub texture_count: u32,
 }
 
 impl FromWorld for TextureBindGroupLayout {
@@ -496,7 +496,7 @@ fn prepare_texture_bind_group_layout(
     materials: Res<MaterialRenderAssets>,
     mut texture_layout: ResMut<TextureBindGroupLayout>,
 ) {
-    let texture_count = materials.textures.len();
+    let texture_count = materials.textures.len() as u32;
     let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
