@@ -577,8 +577,11 @@ fn input_radiance(
 
     if (info.instance_index == U32_MAX) {
         // Ray hits nothing, input radiance could be either directional or ambient
-        if (sample_directional) {
-            let directional = lights.directional_lights[0];
+        let directional = lights.directional_lights[0];
+        let cone = compute_directional_cone(directional);
+        let hit_directional = dot(ray.direction, cone.xyz) >= cone.w;
+
+        if (sample_directional && hit_directional) {
             radiance = directional.color.rgb;
             ambient = 0.0;
         } else {
