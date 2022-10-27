@@ -49,14 +49,13 @@ fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
 fn tone_mapping(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let coords = vec2<i32>(invocation_id.xy);
 
-    let s = textureLoad(direct_render_texture, coords, 0);
-    var color = s.rgb;
-    color += textureLoad(emissive_render_texture, coords, 0).rgb;
-    color += textureLoad(indirect_render_texture, coords, 0).rgb;
+    var color = textureLoad(direct_render_texture, coords, 0);
+    color += textureLoad(emissive_render_texture, coords, 0);
+    color += textureLoad(indirect_render_texture, coords, 0);
 
-    color = reinhard_luminance(color);
-    color = select(frame.clear_color.rgb, color, s.a > 0.5);
-    textureStore(output_texture, coords, vec4<f32>(color, 1.0));
+    color = vec4<f32>(reinhard_luminance(color.rgb), color.a);
+    color = select(frame.clear_color, color, color.a > 0.0);
+    textureStore(output_texture, coords, color);
 }
 
 @compute @workgroup_size(8, 8, 1)
