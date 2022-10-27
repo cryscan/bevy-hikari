@@ -172,7 +172,8 @@ impl FromWorld for PostProcessPipeline {
 pub enum PostProcessEntryPoint {
     #[default]
     ToneMapping = 0,
-    JasmineTaa = 1,
+    Taa = 1,
+    JasmineTaa = 2,
 }
 
 bitflags::bitflags! {
@@ -183,7 +184,7 @@ bitflags::bitflags! {
 }
 
 impl PostProcessPipelineKey {
-    const ENTRY_POINT_MASK_BITS: u32 = 0b1;
+    const ENTRY_POINT_MASK_BITS: u32 = 0b11;
 
     pub fn from_entry_point(entry_point: PostProcessEntryPoint) -> Self {
         let entry_point_bits = (entry_point as u32) & Self::ENTRY_POINT_MASK_BITS;
@@ -295,6 +296,7 @@ fn prepare_post_process_textures(
 pub struct CachedPostProcessPipelines {
     tone_mapping: CachedComputePipelineId,
     taa: CachedComputePipelineId,
+    taa_jasmine: CachedComputePipelineId,
 }
 
 fn queue_post_process_pipelines(
@@ -306,10 +308,17 @@ fn queue_post_process_pipelines(
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::ToneMapping);
     let tone_mapping = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
+    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Taa);
     let taa = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    commands.insert_resource(CachedPostProcessPipelines { tone_mapping, taa })
+    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
+    let taa_jasmine = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+
+    commands.insert_resource(CachedPostProcessPipelines {
+        tone_mapping,
+        taa,
+        taa_jasmine,
+    })
 }
 
 #[derive(Component, Clone)]
@@ -530,19 +539,22 @@ impl Node for PostProcessPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if !config.temporal_anti_aliasing {
-            return Ok(());
-        }
+        if let Some(taa_version) = config.temporal_anti_aliasing {
+            let pipeline = match taa_version {
+                crate::TaaVersion::Cryscan => pipelines.taa,
+                crate::TaaVersion::Jasmine => pipelines.taa_jasmine,
+            };
 
-        pass.set_bind_group(3, &post_process_bind_group.taa, &[]);
-        pass.set_bind_group(4, &post_process_bind_group.taa_output, &[]);
+            pass.set_bind_group(3, &post_process_bind_group.taa, &[]);
+            pass.set_bind_group(4, &post_process_bind_group.taa_output, &[]);
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.taa) {
-            pass.set_pipeline(pipeline);
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
+                pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
+                let size = camera.physical_target_size.unwrap();
+                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
+            }
         }
 
         Ok(())

@@ -216,8 +216,8 @@ impl<const I: usize> EntityRenderCommand for SetOverlayBindGroup<I> {
     ) -> RenderCommandResult {
         if let Ok(bind_group) = query.get_inner(view) {
             let bind_group = match config.temporal_anti_aliasing {
-                true => &bind_group.taa_output,
-                false => &bind_group.tone_mapping_output,
+                Some(_) => &bind_group.taa_output,
+                None => &bind_group.tone_mapping_output,
             };
             pass.set_bind_group(0, bind_group, &[]);
             RenderCommandResult::Success

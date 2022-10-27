@@ -442,7 +442,7 @@ fn queue_prepass_meshes(
                 let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                 let key = PrepassPipelineKey {
                     mesh_pipeline_key: key,
-                    temporal_anti_aliasing: config.temporal_anti_aliasing,
+                    temporal_anti_aliasing: config.temporal_anti_aliasing.is_some(),
                 };
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);

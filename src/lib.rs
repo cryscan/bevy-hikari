@@ -286,8 +286,8 @@ pub struct HikariConfig {
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
     pub spatial_reuse: bool,
-    /// Whether to perform TAA.
-    pub temporal_anti_aliasing: bool,
+    /// Which TAA implementation to use.
+    pub temporal_anti_aliasing: Option<TaaVersion>,
 }
 
 impl Default for HikariConfig {
@@ -303,9 +303,16 @@ impl Default for HikariConfig {
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
-            temporal_anti_aliasing: true,
+            temporal_anti_aliasing: Some(TaaVersion::default()),
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
+pub enum TaaVersion {
+    Cryscan,
+    #[default]
+    Jasmine,
 }
 
 #[derive(Clone, Deref, ExtractResource)]

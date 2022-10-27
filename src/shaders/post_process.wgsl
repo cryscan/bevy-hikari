@@ -45,26 +45,18 @@ fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
 //     return vec4<f32>(reinhard_luminance(in.rgb), in.a);
 // }
 
-fn fetch_color(coords: vec2<i32>) -> vec3<f32> {
-    let color = textureLoad(render_texture, coords, 0);
-    return mix(frame.clear_color.rgb, color.rgb, color.a);
-}
-
 @compute @workgroup_size(8, 8, 1)
 fn tone_mapping(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let coords = vec2<i32>(invocation_id.xy);
-    var color = vec4<f32>(0.0);
 
-    let direct_uv = coords_to_uv(coords, textureDimensions(direct_render_texture));
-    let emissive_uv = coords_to_uv(coords, textureDimensions(emissive_render_texture));
-    let indirect_uv = coords_to_uv(coords, textureDimensions(indirect_render_texture));
+    let s = textureLoad(direct_render_texture, coords, 0);
+    var color = s.rgb;
+    color += textureLoad(emissive_render_texture, coords, 0).rgb;
+    color += textureLoad(indirect_render_texture, coords, 0).rgb;
 
-    color += textureSampleLevel(direct_render_texture, nearest_sampler, direct_uv, 0.0);
-    color += textureSampleLevel(emissive_render_texture, nearest_sampler, emissive_uv, 0.0);
-    color += textureSampleLevel(indirect_render_texture, nearest_sampler, indirect_uv, 0.0);
-
-    color = vec4<f32>(reinhard_luminance(color.rgb), color.a);
-    textureStore(output_texture, coords, color);
+    color = reinhard_luminance(color);
+    color = select(frame.clear_color.rgb, color, s.a > 0.5);
+    textureStore(output_texture, coords, vec4<f32>(color, 1.0));
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -80,17 +72,17 @@ fn taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var mix_rate = min(previous_color.a, 0.5);
 
     var colors: array<vec3<f32>, 9>;
-    colors[0] = fetch_color(coords);
+    colors[0] = textureLoad(render_texture, coords, 0).rgb;
     antialiased = sqrt(mix(antialiased * antialiased, colors[0] * colors[0], mix_rate));
 
-    colors[1] = fetch_color(coords + vec2<i32>(1, 0));
-    colors[2] = fetch_color(coords + vec2<i32>(-1, 0));
-    colors[3] = fetch_color(coords + vec2<i32>(0, 1));
-    colors[4] = fetch_color(coords + vec2<i32>(0, -1));
-    colors[5] = fetch_color(coords + vec2<i32>(1, 1));
-    colors[6] = fetch_color(coords + vec2<i32>(-1, 1));
-    colors[7] = fetch_color(coords + vec2<i32>(1, -1));
-    colors[8] = fetch_color(coords + vec2<i32>(-1, -1));
+    colors[1] = textureLoad(render_texture, coords + vec2<i32>(1, 0), 0).rgb;
+    colors[2] = textureLoad(render_texture, coords + vec2<i32>(-1, 0), 0).rgb;
+    colors[3] = textureLoad(render_texture, coords + vec2<i32>(0, 1), 0).rgb;
+    colors[4] = textureLoad(render_texture, coords + vec2<i32>(0, -1), 0).rgb;
+    colors[5] = textureLoad(render_texture, coords + vec2<i32>(1, 1), 0).rgb;
+    colors[6] = textureLoad(render_texture, coords + vec2<i32>(-1, 1), 0).rgb;
+    colors[7] = textureLoad(render_texture, coords + vec2<i32>(1, -1), 0).rgb;
+    colors[8] = textureLoad(render_texture, coords + vec2<i32>(-1, -1), 0).rgb;
 
     antialiased = encode_pal_yuv(antialiased);
     colors[0] = encode_pal_yuv(colors[0]);
@@ -209,7 +201,7 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_color = YCoCg_to_RGB(previous_color);
 
     // Blend current and past sample
-    let output = (current_color * 0.1) + (previous_color * 0.9);
+    let output = mix(previous_color, current_color, 0.05);
 
     // return vec4<f32>(output, original_color.a);
     textureStore(accumulation_texture, coords, vec4<f32>(output, original_color.a));
