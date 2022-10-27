@@ -80,14 +80,14 @@ fn RGB_to_YCoCg(rgb: vec3<f32>) -> vec3<f32> {
     let y = (rgb.r / 4.0) + (rgb.g / 2.0) + (rgb.b / 4.0);
     let co = (rgb.r / 2.0) - (rgb.b / 2.0);
     let cg = (-rgb.r / 4.0) + (rgb.g / 2.0) - (rgb.b / 4.0);
-    return vec3(y, co, cg);
+    return vec3<f32>(y, co, cg);
 }
 
 fn YCoCg_to_RGB(ycocg: vec3<f32>) -> vec3<f32> {
     let r = ycocg.x + ycocg.y - ycocg.z;
     let g = ycocg.x + ycocg.z;
     let b = ycocg.x - ycocg.y - ycocg.z;
-    return clamp(vec3(r, g, b), vec3(0.0), vec3(1.0));
+    return clamp(vec3<f32>(r, g, b), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn clip_towards_aabb_center(previous_color: vec3<f32>, current_color: vec3<f32>, aabb_min: vec3<f32>, aabb_max: vec3<f32>) -> vec3<f32> {
@@ -133,23 +133,23 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let texel_position_0 = (texel_position_1 - 1.0) * texel_size;
     let texel_position_3 = (texel_position_1 + 2.0) * texel_size;
     let texel_position_12 = (texel_position_1 + offset12) * texel_size;
-    var previous_color = vec3(0.0);
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2(texel_position_12.x, texel_position_0.y), 0.0).rgb * w12.x * w0.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2(texel_position_0.x, texel_position_12.y), 0.0).rgb * w0.x * w12.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2(texel_position_12.x, texel_position_12.y), 0.0).rgb * w12.x * w12.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2(texel_position_3.x, texel_position_12.y), 0.0).rgb * w3.x * w12.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2(texel_position_12.x, texel_position_3.y), 0.0).rgb * w12.x * w3.y;
+    var previous_color = vec3<f32>(0.0);
+    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_12.x, texel_position_0.y), 0.0).rgb * w12.x * w0.y;
+    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_0.x, texel_position_12.y), 0.0).rgb * w0.x * w12.y;
+    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_12.x, texel_position_12.y), 0.0).rgb * w12.x * w12.y;
+    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_3.x, texel_position_12.y), 0.0).rgb * w3.x * w12.y;
+    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_12.x, texel_position_3.y), 0.0).rgb * w12.x * w3.y;
 
     // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
-    let s_tl = sample_render_texture(uv + vec2(-texel_size.x, texel_size.y));
-    let s_tm = sample_render_texture(uv + vec2(0.0, texel_size.y));
+    let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
+    let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
     let s_tr = sample_render_texture(uv + texel_size);
-    let s_ml = sample_render_texture(uv - vec2(texel_size.x, 0.0));
+    let s_ml = sample_render_texture(uv - vec2<f32>(texel_size.x, 0.0));
     let s_mm = RGB_to_YCoCg(current_color);
-    let s_mr = sample_render_texture(uv + vec2(texel_size.x, 0.0));
+    let s_mr = sample_render_texture(uv + vec2<f32>(texel_size.x, 0.0));
     let s_bl = sample_render_texture(uv - texel_size);
-    let s_bm = sample_render_texture(uv - vec2(0.0, texel_size.y));
-    let s_br = sample_render_texture(uv + vec2(texel_size.x, -texel_size.y));
+    let s_bm = sample_render_texture(uv - vec2<f32>(0.0, texel_size.y));
+    let s_br = sample_render_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
     let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
     let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
     let mean = moment_1 / 9.0;
