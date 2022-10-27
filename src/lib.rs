@@ -72,8 +72,10 @@ pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
-pub const POST_PROCESS_SHADER_HANDLE: HandleUntyped =
+pub const TONE_MAPPING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 3567017338952956671);
+pub const TAA_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1780446804546284);
 pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10969344919103020615);
 pub const QUAD_MESH_HANDLE: HandleUntyped =
@@ -144,8 +146,14 @@ impl Plugin for HikariPlugin {
         );
         load_internal_asset!(
             app,
-            POST_PROCESS_SHADER_HANDLE,
-            "shaders/post_process.wgsl",
+            TONE_MAPPING_SHADER_HANDLE,
+            "shaders/tone_mapping.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            TAA_SHADER_HANDLE,
+            "shaders/taa.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(

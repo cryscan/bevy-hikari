@@ -2,7 +2,7 @@ use crate::{
     light::LightPassTextures,
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, PreviousViewUniformOffset},
-    HikariConfig, POST_PROCESS_SHADER_HANDLE, WORKGROUP_SIZE,
+    HikariConfig, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
     pbr::ViewLightsUniformOffset,
@@ -39,6 +39,7 @@ impl Plugin for PostProcessPlugin {
 pub struct PostProcessPipeline {
     pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
+    pub sampler_layout: BindGroupLayout,
     pub tone_mapping_layout: BindGroupLayout,
     pub taa_layout: BindGroupLayout,
     pub output_layout: BindGroupLayout,
@@ -50,6 +51,24 @@ impl FromWorld for PostProcessPipeline {
 
         let render_device = world.resource::<RenderDevice>();
         let deferred_layout = PrepassTextures::bind_group_layout(render_device);
+
+        let sampler_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
 
         let tone_mapping_layout =
             render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -86,18 +105,6 @@ impl FromWorld for PostProcessPipeline {
                             view_dimension: TextureViewDimension::D2,
                             multisampled: false,
                         },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
                         count: None,
                     },
                 ],
@@ -159,6 +166,7 @@ impl FromWorld for PostProcessPipeline {
         Self {
             view_layout,
             deferred_layout,
+            sampler_layout,
             tone_mapping_layout,
             taa_layout,
             output_layout,
@@ -205,16 +213,35 @@ impl SpecializedComputePipeline for PostProcessPipeline {
             .unwrap()
             .into();
 
+        let (layout, shader) = match key.entry_point() {
+            PostProcessEntryPoint::ToneMapping => {
+                let layout = vec![
+                    self.view_layout.clone(),
+                    self.deferred_layout.clone(),
+                    self.sampler_layout.clone(),
+                    self.tone_mapping_layout.clone(),
+                    self.output_layout.clone(),
+                ];
+                let shader = TONE_MAPPING_SHADER_HANDLE.typed();
+                (layout, shader)
+            }
+            PostProcessEntryPoint::Taa | PostProcessEntryPoint::JasmineTaa => {
+                let layout = vec![
+                    self.view_layout.clone(),
+                    self.deferred_layout.clone(),
+                    self.sampler_layout.clone(),
+                    self.taa_layout.clone(),
+                    self.output_layout.clone(),
+                ];
+                let shader = TAA_SHADER_HANDLE.typed();
+                (layout, shader)
+            }
+        };
+
         ComputePipelineDescriptor {
             label: None,
-            layout: Some(vec![
-                self.view_layout.clone(),
-                self.deferred_layout.clone(),
-                self.tone_mapping_layout.clone(),
-                self.taa_layout.clone(),
-                self.output_layout.clone(),
-            ]),
-            shader: POST_PROCESS_SHADER_HANDLE.typed::<Shader>(),
+            layout: Some(layout),
+            shader,
             shader_defs: vec![],
             entry_point,
         }
@@ -324,8 +351,8 @@ fn queue_post_process_pipelines(
 #[derive(Component, Clone)]
 pub struct PostProcessBindGroup {
     pub deferred: BindGroup,
+    pub sampler: BindGroup,
     pub tone_mapping: BindGroup,
-    pub taa_no_render: BindGroup,
     pub taa: BindGroup,
     pub tone_mapping_output: BindGroup,
     pub taa_output: BindGroup,
@@ -362,6 +389,21 @@ fn queue_post_process_bind_groups(
         }
         .bind_group;
 
+        let sampler = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.sampler_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Sampler(&post_process.nearest_sampler),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&post_process.linear_sampler),
+                },
+            ],
+        });
+
         let tone_mapping = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.tone_mapping_layout,
@@ -378,39 +420,9 @@ fn queue_post_process_bind_groups(
                     binding: 2,
                     resource: BindingResource::TextureView(&light.indirect_render.default_view),
                 },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::Sampler(&post_process.nearest_sampler),
-                },
-                BindGroupEntry {
-                    binding: 4,
-                    resource: BindingResource::Sampler(&post_process.linear_sampler),
-                },
             ],
         });
 
-        let taa_no_render = render_device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.taa_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(
-                        &post_process.temporal[previous].default_view,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(&*fallback.texture_view),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(
-                        &post_process.temporal[current].default_view,
-                    ),
-                },
-            ],
-        });
         let taa = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.taa_layout,
@@ -453,8 +465,8 @@ fn queue_post_process_bind_groups(
 
         commands.entity(entity).insert(PostProcessBindGroup {
             deferred,
+            sampler,
             tone_mapping,
-            taa_no_render,
             taa,
             tone_mapping_output,
             taa_output,
@@ -526,9 +538,9 @@ impl Node for PostProcessPassNode {
             ],
         );
         pass.set_bind_group(1, &post_process_bind_group.deferred, &[]);
-        pass.set_bind_group(2, &post_process_bind_group.tone_mapping, &[]);
+        pass.set_bind_group(2, &post_process_bind_group.sampler, &[]);
 
-        pass.set_bind_group(3, &post_process_bind_group.taa_no_render, &[]);
+        pass.set_bind_group(3, &post_process_bind_group.tone_mapping, &[]);
         pass.set_bind_group(4, &post_process_bind_group.tone_mapping_output, &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.tone_mapping) {
