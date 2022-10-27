@@ -16,7 +16,7 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::{FallbackImage, GpuImage, TextureCache},
+        texture::{CachedTexture, FallbackImage, TextureCache},
         view::ViewUniformOffset,
         RenderApp, RenderStage,
     },
@@ -305,10 +305,10 @@ fn prepare_light_pipeline(
 pub struct LightPassTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
-    pub albedo: GpuImage,
-    pub direct_render: GpuImage,
-    pub emissive_render: GpuImage,
-    pub indirect_render: GpuImage,
+    pub albedo: CachedTexture,
+    pub direct_render: CachedTexture,
+    pub emissive_render: CachedTexture,
+    pub indirect_render: CachedTexture,
 }
 
 fn prepare_light_pass_textures(
@@ -323,23 +323,13 @@ fn prepare_light_pass_textures(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let mut create_texture = |texture_format| -> GpuImage {
+            let mut create_texture = |texture_format| {
                 let extent = Extent3d {
                     width: size.x,
                     height: size.y,
                     depth_or_array_layers: 1,
                 };
-                let sampler = render_device.create_sampler(&SamplerDescriptor {
-                    label: None,
-                    address_mode_u: AddressMode::ClampToEdge,
-                    address_mode_v: AddressMode::ClampToEdge,
-                    address_mode_w: AddressMode::ClampToEdge,
-                    mag_filter: FilterMode::Nearest,
-                    min_filter: FilterMode::Nearest,
-                    mipmap_filter: FilterMode::Nearest,
-                    ..Default::default()
-                });
-                let texture = texture_cache.get(
+                texture_cache.get(
                     &render_device,
                     TextureDescriptor {
                         label: None,
@@ -350,14 +340,7 @@ fn prepare_light_pass_textures(
                         format: texture_format,
                         usage: texture_usage,
                     },
-                );
-                GpuImage {
-                    texture: texture.texture,
-                    texture_view: texture.default_view,
-                    texture_format,
-                    sampler,
-                    size: size.as_vec2(),
-                }
+                )
             };
 
             let albedo = create_texture(ALBEDO_TEXTURE_FORMAT);
@@ -473,14 +456,14 @@ fn queue_light_bind_groups(
     reservoir_cache: Res<ReservoirCache>,
     query: Query<(Entity, &PrepassTextures, &LightPassTextures), With<ExtractedCamera>>,
 ) {
-    for (entity, prepass, light_pass) in &query {
+    for (entity, prepass, light) in &query {
         let reservoirs = reservoir_cache.get(&entity).unwrap();
         if let Some(reservoir_bindings) = reservoirs
             .iter()
             .map(|buffer| buffer.binding())
             .collect::<Option<Vec<_>>>()
         {
-            let current = light_pass.head;
+            let current = light.head;
             let previous = 1 - current;
 
             let deferred = match prepass.as_bind_group(
@@ -511,13 +494,11 @@ fn queue_light_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureView(&light_pass.albedo.texture_view),
+                        resource: BindingResource::TextureView(&light.albedo.default_view),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureView(
-                            &light_pass.direct_render.texture_view,
-                        ),
+                        resource: BindingResource::TextureView(&light.direct_render.default_view),
                     },
                 ],
             });
@@ -527,13 +508,11 @@ fn queue_light_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureView(&light_pass.albedo.texture_view),
+                        resource: BindingResource::TextureView(&light.albedo.default_view),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureView(
-                            &light_pass.emissive_render.texture_view,
-                        ),
+                        resource: BindingResource::TextureView(&light.emissive_render.default_view),
                     },
                 ],
             });
@@ -543,13 +522,11 @@ fn queue_light_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureView(&light_pass.albedo.texture_view),
+                        resource: BindingResource::TextureView(&light.albedo.default_view),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureView(
-                            &light_pass.indirect_render.texture_view,
-                        ),
+                        resource: BindingResource::TextureView(&light.indirect_render.default_view),
                     },
                 ],
             });

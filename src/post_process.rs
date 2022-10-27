@@ -13,7 +13,7 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
-        texture::{FallbackImage, GpuImage, TextureCache},
+        texture::{CachedTexture, FallbackImage, TextureCache},
         view::ViewUniformOffset,
         RenderApp, RenderStage,
     },
@@ -66,13 +66,18 @@ impl FromWorld for PostProcessPipeline {
                         },
                         count: None,
                     },
+                    // Emissive Render
                     BindGroupLayoutEntry {
                         binding: 1,
                         visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
                         count: None,
                     },
-                    // Emissive Render
+                    // Indirect Render
                     BindGroupLayoutEntry {
                         binding: 2,
                         visibility: ShaderStages::COMPUTE,
@@ -89,19 +94,8 @@ impl FromWorld for PostProcessPipeline {
                         ty: BindingType::Sampler(SamplerBindingType::Filtering),
                         count: None,
                     },
-                    // Indirect Render
                     BindGroupLayoutEntry {
                         binding: 4,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: true },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 5,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Sampler(SamplerBindingType::Filtering),
                         count: None,
@@ -123,15 +117,9 @@ impl FromWorld for PostProcessPipeline {
                     },
                     count: None,
                 },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
                 // Current Render
                 BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 1,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Float { filterable: true },
@@ -140,15 +128,9 @@ impl FromWorld for PostProcessPipeline {
                     },
                     count: None,
                 },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
                 // TAA Output
                 BindGroupLayoutEntry {
-                    binding: 4,
+                    binding: 2,
                     visibility: ShaderStages::all(),
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::ReadWrite,
@@ -190,7 +172,7 @@ impl FromWorld for PostProcessPipeline {
 pub enum PostProcessEntryPoint {
     #[default]
     ToneMapping = 0,
-    Taa = 1,
+    JasmineTaa = 1,
 }
 
 bitflags::bitflags! {
@@ -241,9 +223,11 @@ impl SpecializedComputePipeline for PostProcessPipeline {
 #[derive(Component)]
 pub struct PostProcessTextures {
     pub head: usize,
-    pub temporal: [GpuImage; 2],
-    pub tone_mapping: GpuImage,
-    pub taa: GpuImage,
+    pub temporal: [CachedTexture; 2],
+    pub tone_mapping: CachedTexture,
+    pub taa: CachedTexture,
+    pub nearest_sampler: Sampler,
+    pub linear_sampler: Sampler,
 }
 
 fn prepare_post_process_textures(
@@ -256,23 +240,13 @@ fn prepare_post_process_textures(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let mut create_texture = |texture_format| -> GpuImage {
+            let mut create_texture = |texture_format| {
                 let extent = Extent3d {
                     width: size.x,
                     height: size.y,
                     depth_or_array_layers: 1,
                 };
-                let sampler = render_device.create_sampler(&SamplerDescriptor {
-                    label: None,
-                    address_mode_u: AddressMode::ClampToEdge,
-                    address_mode_v: AddressMode::ClampToEdge,
-                    address_mode_w: AddressMode::ClampToEdge,
-                    mag_filter: FilterMode::Linear,
-                    min_filter: FilterMode::Linear,
-                    mipmap_filter: FilterMode::Linear,
-                    ..Default::default()
-                });
-                let texture = texture_cache.get(
+                texture_cache.get(
                     &render_device,
                     TextureDescriptor {
                         label: None,
@@ -283,14 +257,7 @@ fn prepare_post_process_textures(
                         format: texture_format,
                         usage: texture_usage,
                     },
-                );
-                GpuImage {
-                    texture: texture.texture,
-                    texture_view: texture.default_view,
-                    texture_format,
-                    sampler,
-                    size: size.as_vec2(),
-                }
+                )
             };
 
             let temporal = [
@@ -300,11 +267,26 @@ fn prepare_post_process_textures(
             let tone_mapping = create_texture(POST_PROCESS_TEXTURE_FORMAT);
             let taa = create_texture(POST_PROCESS_TEXTURE_FORMAT);
 
+            let nearest_sampler = render_device.create_sampler(&SamplerDescriptor {
+                mag_filter: FilterMode::Nearest,
+                min_filter: FilterMode::Nearest,
+                mipmap_filter: FilterMode::Nearest,
+                ..Default::default()
+            });
+            let linear_sampler = render_device.create_sampler(&SamplerDescriptor {
+                mag_filter: FilterMode::Linear,
+                min_filter: FilterMode::Linear,
+                mipmap_filter: FilterMode::Linear,
+                ..Default::default()
+            });
+
             commands.entity(entity).insert(PostProcessTextures {
                 head: frame_counter.0 % 2,
                 temporal,
                 tone_mapping,
                 taa,
+                nearest_sampler,
+                linear_sampler,
             });
         }
     }
@@ -324,7 +306,7 @@ fn queue_post_process_pipelines(
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::ToneMapping);
     let tone_mapping = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Taa);
+    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
     let taa = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     commands.insert_resource(CachedPostProcessPipelines { tone_mapping, taa })
@@ -356,7 +338,7 @@ fn queue_post_process_bind_groups(
         With<ExtractedCamera>,
     >,
 ) {
-    for (entity, prepass, light_pass, post_process) in &query {
+    for (entity, prepass, light, post_process) in &query {
         let current = post_process.head;
         let previous = 1 - current;
 
@@ -377,31 +359,23 @@ fn queue_post_process_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&*light_pass.direct_render.texture_view),
+                    resource: BindingResource::TextureView(&light.direct_render.default_view),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&light_pass.direct_render.sampler),
+                    resource: BindingResource::TextureView(&light.emissive_render.default_view),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(
-                        &*light_pass.emissive_render.texture_view,
-                    ),
+                    resource: BindingResource::TextureView(&light.indirect_render.default_view),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&light_pass.emissive_render.sampler),
+                    resource: BindingResource::Sampler(&post_process.nearest_sampler),
                 },
                 BindGroupEntry {
                     binding: 4,
-                    resource: BindingResource::TextureView(
-                        &*light_pass.indirect_render.texture_view,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::Sampler(&light_pass.indirect_render.sampler),
+                    resource: BindingResource::Sampler(&post_process.linear_sampler),
                 },
             ],
         });
@@ -413,25 +387,17 @@ fn queue_post_process_bind_groups(
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &*post_process.temporal[previous].texture_view,
+                        &post_process.temporal[previous].default_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&post_process.temporal[previous].sampler),
-                },
-                BindGroupEntry {
-                    binding: 2,
                     resource: BindingResource::TextureView(&*fallback.texture_view),
                 },
                 BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::Sampler(&fallback.sampler),
-                },
-                BindGroupEntry {
-                    binding: 4,
+                    binding: 2,
                     resource: BindingResource::TextureView(
-                        &*post_process.temporal[current].texture_view,
+                        &post_process.temporal[current].default_view,
                     ),
                 },
             ],
@@ -443,27 +409,17 @@ fn queue_post_process_bind_groups(
                 BindGroupEntry {
                     binding: 0,
                     resource: BindingResource::TextureView(
-                        &*post_process.temporal[previous].texture_view,
+                        &post_process.temporal[previous].default_view,
                     ),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&post_process.temporal[previous].sampler),
+                    resource: BindingResource::TextureView(&post_process.tone_mapping.default_view),
                 },
                 BindGroupEntry {
                     binding: 2,
                     resource: BindingResource::TextureView(
-                        &*post_process.tone_mapping.texture_view,
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::Sampler(&post_process.tone_mapping.sampler),
-                },
-                BindGroupEntry {
-                    binding: 4,
-                    resource: BindingResource::TextureView(
-                        &*post_process.temporal[current].texture_view,
+                        &post_process.temporal[current].default_view,
                     ),
                 },
             ],
@@ -474,7 +430,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&*post_process.tone_mapping.texture_view),
+                resource: BindingResource::TextureView(&post_process.tone_mapping.default_view),
             }],
         });
         let taa_output = render_device.create_bind_group(&BindGroupDescriptor {
@@ -482,7 +438,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&*post_process.taa.texture_view),
+                resource: BindingResource::TextureView(&post_process.taa.default_view),
             }],
         });
 
