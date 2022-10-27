@@ -25,7 +25,6 @@ fn main() {
         //     ..Default::default()
         // })
         .insert_resource(Msaa { samples: 4 })
-        .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
         .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
@@ -35,6 +34,7 @@ fn main() {
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .add_system(camera_input_map)
+        .add_system(sphere_rotate_system)
         .add_system_to_stage(
             CoreStage::First,
             control_directional_light.before(RaycastSystem::BuildRays::<RaycastSet>),
@@ -43,6 +43,9 @@ fn main() {
 }
 
 pub struct RaycastSet;
+
+#[derive(Component)]
+pub struct EmissiveSphere;
 
 fn setup(
     mut commands: Commands,
@@ -89,6 +92,7 @@ fn setup(
             transform: Transform::from_xyz(2.0, 2.0, 0.0),
             ..Default::default()
         })
+        .insert(EmissiveSphere)
         .insert(Name::new("Emissive Sphere"));
 
     // Only directional light is supported
@@ -119,9 +123,6 @@ fn setup(
         ))
         .insert(RayCastSource::<RaycastSet>::default());
 }
-
-#[derive(Deref, DerefMut)]
-pub struct LoadTimer(Timer);
 
 pub fn camera_input_map(
     mut events: EventWriter<ControlEvent>,
@@ -206,5 +207,11 @@ pub fn control_directional_light(
         if let Ok(mut transform) = queries.p0().get_single_mut() {
             transform.look_at(*target, Vec3::Z);
         }
+    }
+}
+
+fn sphere_rotate_system(time: Res<Time>, mut query: Query<&mut Transform, With<EmissiveSphere>>) {
+    for mut transform in &mut query {
+        transform.rotate_y(0.1 * time.delta_seconds());
     }
 }
