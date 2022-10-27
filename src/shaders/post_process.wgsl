@@ -201,7 +201,7 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_color = YCoCg_to_RGB(previous_color);
 
     // Blend current and past sample
-    let output = mix(previous_color, current_color, 0.05);
+    let output = mix(previous_color, current_color, 0.1);
 
     // return vec4<f32>(output, original_color.a);
     textureStore(accumulation_texture, coords, vec4<f32>(output, original_color.a));
