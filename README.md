@@ -26,12 +26,42 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [ ] ReSTIR: Better spatial sample reuse
 - [x] Spatial filtering
 - [x] Temporal anti-aliasing
+- [ ] Temporal up-scaling 
 - [ ] Hardware ray tracing (upstream related)
 
 ## Basic Usage
 1. Add `HikariPlugin` to your `App` after `PbrPlugin`
 2. Setup the scene with a directional light
 3. Set your camera's `camera_render_graph` to `CameraRenderGraph::new(bevy_hikari::graph::NAME)`
+
+One can also configure the renderer by inserting the `HikariConfig` resource.
+Its definition is:
+```rust
+pub struct HikariConfig {
+    /// The interval of frames between sample validation passes.
+    pub direct_validate_interval: usize,
+    /// The interval of frames between sample validation passes.
+    pub emissive_validate_interval: usize,
+    /// Temporal reservoir sample count is capped by this value.
+    pub max_temporal_reuse_count: usize,
+    /// Spatial reservoir sample count is capped by this value.
+    pub max_spatial_reuse_count: usize,
+    /// Threshold for oversampling the direct illumination if the sample count is low.
+    pub direct_oversample_threshold: usize,
+    /// Half angle of the solar cone apex in radians.
+    pub solar_angle: f32,
+    /// Threshold that emissive objects begin to lit others.
+    pub emissive_threshold: f32,
+    /// Threshold for the indirect luminance to reduce fireflies.
+    pub max_indirect_luminance: f32,
+    /// Whether to do temporal sample reuse in ReSTIR.
+    pub temporal_reuse: bool,
+    /// Whether to do spatial sample reuse in ReSTIR.
+    pub spatial_reuse: bool,
+    /// Which TAA implementation to use.
+    pub temporal_anti_aliasing: Option<TaaVersion>,
+}
+```
 
 Notes:
 - Please run with `--release` flag to avoid the texture non-uniform indexing error
