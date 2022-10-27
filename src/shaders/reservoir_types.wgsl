@@ -135,7 +135,21 @@ fn update_reservoir(
 
     let rand = fract(dot(s.random, vec4<f32>(1.0)));
     if (rand < w_new / (*r).w_sum) {
+        // trsh suggests that instead of substituting the sample in the reservoir,
+        // merging the two with similar luminance works better.
+        // (*r).s = s;
+
+        let l1 = luminance(s.radiance.rgb);
+        let l2 = luminance((*r).s.radiance.rgb);
+        let ratio = l1 / l2;
+        var radiance = s.radiance;
+
+        if (ratio > 0.8 && ratio < 1.25) {
+            radiance = mix((*r).s.radiance, s.radiance, 0.5);
+        }
+
         (*r).s = s;
+        (*r).s.radiance = radiance;
     }
 }
 
