@@ -141,7 +141,7 @@ fn update_reservoir(
 
         let l1 = luminance(s.radiance.rgb);
         let l2 = luminance((*r).s.radiance.rgb);
-        let ratio = l1 / l2;
+        let ratio = l1 / max(l2, 0.0001);
         var radiance = s.radiance;
 
         if (ratio > 0.8 && ratio < 1.25) {

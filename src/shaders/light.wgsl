@@ -1086,6 +1086,17 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             continue;
         }
 
+        q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
+        let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.866;
+        if (q.count < F32_EPSILON || normal_miss) {
+            continue;
+        }
+
+        let sample_direction = normalize(q.s.sample_position.xyz - s.visible_position.xyz);
+        if (dot(sample_direction, s.visible_normal) < 0.0) {
+            continue;
+        }
+
         // Perform screen-space ray-marching the depth to reject samples
         let tap_interval = max(1.0, offset_dist / f32(SPATIAL_REUSE_TAPS + 1u));
         let tap_count = u32(offset_dist / tap_interval);
@@ -1108,19 +1119,8 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             continue;
         }
 
-        q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
-        let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.866;
-        if (q.count < F32_EPSILON || normal_miss) {
-            continue;
-        }
-
         // let inv_jac = select(1.0, compute_inv_jacobian(s, q.s), q.s.sample_position.w > 0.5);
         let jacobian = select(1.0, compute_jacobian(q.s, s), q.s.sample_position.w > 0.5);
-
-        let sample_direction = normalize(q.s.sample_position.xyz - s.visible_position.xyz);
-        if (dot(sample_direction, s.visible_normal) < 0.0) {
-            continue;
-        }
 
         out_radiance = shading(
             view_direction,
