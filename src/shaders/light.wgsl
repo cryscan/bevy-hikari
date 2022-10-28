@@ -372,7 +372,8 @@ fn select_light_candidate(
 
         cone = compute_emissive_cone(source, position, normal);
         rand_sample = sample_uniform_cone(rand.zw, cone.w);
-        if (dot(rand_sample.xyz, normal) < 0.0) {
+        let direction = normal_basis(cone.xyz) * rand_sample.xyz;
+        if (dot(direction, normal) < 0.0) {
             continue;
         }
 
@@ -381,7 +382,7 @@ fn select_light_candidate(
         sum_lum += lum;
         if (rand_1d <= lum / max(sum_lum, 0.01)) {
             candidate.cone = cone;
-            candidate.direction = normal_basis(cone.xyz) * rand_sample.xyz;
+            candidate.direction = direction;
             candidate.emissive_index = source.instance;
 
             let dist = distance(source.position, position);
@@ -402,7 +403,8 @@ fn select_light_candidate(
 
             cone = compute_emissive_cone(source, position, normal);
             rand_sample = sample_uniform_cone(rand.zw, cone.w);
-            if (dot(rand_sample.xyz, normal) < 0.0) {
+            let direction = normal_basis(cone.xyz) * rand_sample.xyz;
+            if (dot(direction, normal) < 0.0) {
                 continue;
             }
 
