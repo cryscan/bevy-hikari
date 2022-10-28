@@ -68,6 +68,8 @@ pub const RESERVOIR_TYPES_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 7770589395703787378);
 pub const RESERVOIR_BINDINGS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11658053183743104810);
+pub const RESERVOIR_FUNCTIONS_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 7650021494161056224);
 pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
@@ -130,6 +132,12 @@ impl Plugin for HikariPlugin {
             app,
             RESERVOIR_BINDINGS_SHADER_HANDLE,
             "shaders/reservoir_bindings.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            RESERVOIR_FUNCTIONS_SHADER_HANDLE,
+            "shaders/reservoir_functions.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(

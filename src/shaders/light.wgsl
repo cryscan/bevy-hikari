@@ -104,6 +104,8 @@ struct LightCandidate {
     p: f32,
 };
 
+#import bevy_hikari::reservoir_functions
+
 fn instance_position_world_to_local(instance: Instance, world_position: vec3<f32>) -> vec3<f32> {
     let inverse_model = transpose(instance.inverse_transpose_model);
     let position = inverse_model * vec4<f32>(world_position, 1.0);
@@ -969,7 +971,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
             info = hit_info(ray, hit);
 
-            let in_radiance = input_radiance(ray, info, sample_directional, true, true);
+            let in_radiance = input_radiance(ray, info, sample_directional, true, false);
             out_radiance = shading(
                 normalize(s.visible_position.xyz - s.sample_position.xyz),
                 s.sample_normal,
