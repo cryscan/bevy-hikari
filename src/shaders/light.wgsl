@@ -790,6 +790,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         s.visible_normal,
         select_light_instance
     );
+    let pdf = candidate.p;
 
     // Direct light sampling
     ray.origin = position.xyz + normal * RAY_BIAS;
@@ -832,7 +833,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
-    temporal_restir(&r, s, luminance(sample_radiance), candidate.p, frame.max_temporal_reuse_count);
+    temporal_restir(&r, s, luminance(sample_radiance), pdf, frame.max_temporal_reuse_count);
 
     var out_radiance = shading(
         view_direction,
@@ -874,7 +875,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         let luminance_ratio = luminance(validation_radiance.rgb) / luminance(r.s.radiance.rgb);
         if (luminance_ratio > 1.25 || luminance_ratio < 0.8) {
-            set_reservoir(&r, s, luminance(sample_radiance) / candidate.p);
+            let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
+            set_reservoir(&r, s, w_new);
         }
     }
 
