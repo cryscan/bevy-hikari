@@ -15,7 +15,6 @@ use smooth_bevy_cameras::{
     },
     LookTransformPlugin,
 };
-use std::f32::consts::PI;
 
 fn main() {
     App::new()
@@ -49,20 +48,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn_bundle(SceneBundle {
         scene: asset_server.load("models/cornell.glb#Scene0"),
         ..default()
-    });
-
-    // Only directional light is supported
-    commands.spawn_bundle(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 1.0,
-            ..Default::default()
-        },
-        transform: Transform {
-            translation: Vec3::new(0.0, 5.0, 0.0),
-            rotation: Quat::from_euler(EulerRot::XYZ, -PI / 4.0, PI / 4.0, 0.0),
-            ..Default::default()
-        },
-        ..Default::default()
     });
 
     // Camera
