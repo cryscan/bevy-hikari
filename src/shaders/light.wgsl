@@ -389,12 +389,12 @@ fn select_light_candidate(
 
     // MIS
     if (candidate.emissive_index != DONT_SAMPLE_EMISSIVE) {
-        var sum_pdf = 0.0;
+        var sum_pdf = select(luminance(directional.color.rgb) / sum_lum, 0.0, sum_lum < 0.01);
         var selected_pdf = 0.0;
         for (var id = 0u; id < emissive_buffer.count; id += 1u) {
             let source = emissive_buffer.data[id];
             if (source.instance == instance) {
-            continue;
+                continue;
             }
 
             cone = compute_emissive_cone(source, position, normal);
