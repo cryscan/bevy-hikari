@@ -25,6 +25,7 @@ use bevy::{
 use serde::Serialize;
 
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const VARIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct LightPlugin;
@@ -195,9 +196,20 @@ fn prepare_light_pipeline(
                 },
                 count: None,
             },
-            // Render Texture
+            // Variance Texture
             BindGroupLayoutEntry {
                 binding: 1,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: StorageTextureAccess::ReadWrite,
+                    format: VARIANCE_TEXTURE_FORMAT,
+                    view_dimension: TextureViewDimension::D2,
+                },
+                count: None,
+            },
+            // Render Texture
+            BindGroupLayoutEntry {
+                binding: 2,
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::StorageTexture {
                     access: StorageTextureAccess::ReadWrite,
@@ -306,8 +318,11 @@ pub struct LightPassTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
     pub albedo: CachedTexture,
+    pub direct_variance: CachedTexture,
     pub direct_render: CachedTexture,
+    pub emissive_variance: CachedTexture,
     pub emissive_render: CachedTexture,
+    pub indirect_variance: CachedTexture,
     pub indirect_render: CachedTexture,
 }
 
@@ -343,11 +358,6 @@ fn prepare_light_pass_textures(
                 )
             };
 
-            let albedo = create_texture(ALBEDO_TEXTURE_FORMAT);
-            let direct_render = create_texture(RENDER_TEXTURE_FORMAT);
-            let emissive_render = create_texture(RENDER_TEXTURE_FORMAT);
-            let indirect_render = create_texture(RENDER_TEXTURE_FORMAT);
-
             if match reservoir_cache.get(&entity) {
                 Some(reservoirs) => {
                     let len = (size.x * size.y) as usize;
@@ -373,10 +383,13 @@ fn prepare_light_pass_textures(
 
             commands.entity(entity).insert(LightPassTextures {
                 head: frame_counter.0 % 2,
-                albedo,
-                direct_render,
-                emissive_render,
-                indirect_render,
+                albedo: create_texture(ALBEDO_TEXTURE_FORMAT),
+                direct_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
+                direct_render: create_texture(RENDER_TEXTURE_FORMAT),
+                emissive_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
+                emissive_render: create_texture(RENDER_TEXTURE_FORMAT),
+                indirect_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
+                indirect_render: create_texture(RENDER_TEXTURE_FORMAT),
             });
         }
     }
@@ -498,6 +511,10 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
+                        resource: BindingResource::TextureView(&light.direct_variance.default_view),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
                         resource: BindingResource::TextureView(&light.direct_render.default_view),
                     },
                 ],
@@ -512,6 +529,12 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
+                        resource: BindingResource::TextureView(
+                            &light.emissive_variance.default_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
                         resource: BindingResource::TextureView(&light.emissive_render.default_view),
                     },
                 ],
@@ -526,6 +549,12 @@ fn queue_light_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 1,
+                        resource: BindingResource::TextureView(
+                            &light.indirect_variance.default_view,
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
                         resource: BindingResource::TextureView(&light.indirect_render.default_view),
                     },
                 ],

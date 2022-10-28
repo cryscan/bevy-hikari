@@ -27,6 +27,8 @@ var noise_sampler: sampler;
 @group(5) @binding(0)
 var albedo_texture: texture_storage_2d<rgba16float, read_write>;
 @group(5) @binding(1)
+var variance_texture: texture_storage_2d<r32float, read_write>;
+@group(5) @binding(2)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
 
 let TAU: f32 = 6.283185307;
@@ -753,6 +755,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_spatial_reservoir(coords.x + size.x * coords.y, r);
 
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
+        textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
 
         return;
@@ -885,6 +888,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     if (frame.suppress_temporal_reuse == 0u) {
         store_reservoir(coords.x + size.x * coords.y, r);
     }
+
+    var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
+    variance = select(variance / r.count, 0.0, r.count < 0.0001);
+    textureStore(variance_texture, coords, vec4<f32>(variance));
 
     var out_color = out_radiance;
 #ifdef INCLUDE_EMISSIVE
@@ -1023,6 +1030,10 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     if (frame.suppress_temporal_reuse == 0u) {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
     }
+
+    var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
+    variance = select(variance / r.count, 0.0, r.count < 0.0001);
+    textureStore(variance_texture, coords, vec4<f32>(variance));
 
     textureStore(render_texture, coords, vec4<f32>(out_radiance, 1.0));
 }
