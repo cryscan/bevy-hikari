@@ -307,7 +307,7 @@ fn sample_uniform_cone(rand: vec2<f32>, cos_angle: f32) -> vec4<f32> {
 }
 
 fn cone_pdf(cone: vec4<f32>, direction: vec3<f32>) -> f32 {
-    return select(0.0, INV_TAU / (1.0 - cone.w), dot(direction, cone.xyz) > cone.w);
+    return select(INV_TAU / (1.0 - cone.w), 0.0, (1.0 - cone.w < 0.0001) || (dot(direction, cone.xyz) < cone.w));
 }
 
 fn compute_directional_cone(directional: DirectionalLight) -> vec4<f32> {
@@ -372,6 +372,9 @@ fn select_light_candidate(
 
         cone = compute_emissive_cone(source, position, normal);
         rand_sample = sample_uniform_cone(rand.zw, cone.w);
+        if (dot(rand_sample.xyz, normal) < 0.0) {
+            continue;
+        }
 
         lum = luminance(compute_emissive_radiance(source.emissive));
         lum = lum * TAU * (1.0 - cone.w);
@@ -398,6 +401,11 @@ fn select_light_candidate(
             }
 
             cone = compute_emissive_cone(source, position, normal);
+            rand_sample = sample_uniform_cone(rand.zw, cone.w);
+            if (dot(rand_sample.xyz, normal) < 0.0) {
+                continue;
+            }
+
             lum = luminance(compute_emissive_radiance(source.emissive));
             lum = lum * TAU * (1.0 - cone.w);
 
