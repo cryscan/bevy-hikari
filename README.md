@@ -22,11 +22,12 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] Next event estimation
 - [ ] Better light sampling strategy
 - [x] ReSTIR: Temporal sample reuse
-- [x] ReSTIR: Basic spatial sample reuse
-- [ ] ReSTIR: Better spatial sample reuse
+- [x] ReSTIR: Spatial sample reuse
 - [x] Spatial filtering
+- [ ] Spatiotemporal filtering
 - [x] Temporal anti-aliasing
 - [ ] Temporal up-scaling 
+- [ ] Skinned animation
 - [ ] Hardware ray tracing (upstream related)
 
 ## Basic Usage
