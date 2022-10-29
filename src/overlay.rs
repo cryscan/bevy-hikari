@@ -277,9 +277,9 @@ impl Node for OverlayPassNode {
 
         {
             #[cfg(feature = "trace")]
-            let _main_prepass_span = info_span!("main_prepass").entered();
+            let _main_overlay_span = info_span!("main_overlay").entered();
             let pass_descriptor = RenderPassDescriptor {
-                label: Some("main_prepass"),
+                label: Some("main_overlay"),
                 color_attachments: &[Some(target.get_color_attachment(Operations {
                     load: match camera_3d.clear_color {
                         ClearColorConfig::Default => {
