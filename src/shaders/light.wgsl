@@ -7,6 +7,8 @@
 #import bevy_hikari::deferred_bindings
 #import bevy_hikari::reservoir_bindings
 
+#import bevy_hikari::reservoir_functions
+
 #ifdef NO_TEXTURE
 @group(3) @binding(0)
 var textures: texture_2d<f32>;
@@ -107,8 +109,6 @@ struct LightCandidate {
     emissive_index: u32,
     p: f32,
 };
-
-#import bevy_hikari::reservoir_functions
 
 fn instance_position_world_to_local(instance: Instance, world_position: vec3<f32>) -> vec3<f32> {
     let inverse_model = transpose(instance.inverse_transpose_model);

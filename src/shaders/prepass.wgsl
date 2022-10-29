@@ -34,8 +34,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     
 #ifdef TEMPORAL_ANTI_ALIASING
     let jitter = 2.0 * (frame_jitter(frame.number) - 0.5) / vec2<f32>(view.width, view.height);
-    projection[2][0] += jitter.x;
-    projection[2][1] -= jitter.y;
+    if projection[3].w != 1.0 {
+        // Perspective
+        projection[2][0] += jitter.x;
+        projection[2][1] -= jitter.y;
+    }
 #endif
 
     var out: VertexOutput;
@@ -44,6 +47,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.world_normal = mesh_normal_local_to_world(vertex.normal);
     out.clip_position = projection * view.inverse_view * out.world_position;
     out.uv = vertex.uv;
+
+#ifdef TEMPORAL_ANTI_ALIASING
+    if projection[3].w == 1.0 {
+        // Orthogonal
+        out.clip_position += vec4<f32>(jitter, 0.0, 0.0);
+    }
+#endif
 
     return out;
 }
@@ -58,9 +68,7 @@ struct FragmentOutput {
 
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
-    let clip_position = view.view_proj * in.world_position;
-    let previous_clip_position = previous_view.view_proj * in.previous_world_position;
-    let velocity = clip_to_uv(clip_position) - clip_to_uv(previous_clip_position);
+    let velocity = clip_to_uv(view.view_proj * in.world_position) - clip_to_uv(previous_view.view_proj * in.previous_world_position);
 
     var out: FragmentOutput;
     out.position = vec4<f32>(in.world_position.xyz, in.clip_position.z);
