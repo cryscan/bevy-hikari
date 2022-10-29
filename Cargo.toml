@@ -27,13 +27,12 @@ num-derive = "0.3"
 
 [dependencies.bevy]
 git = "https://github.com/bevyengine/bevy"
-# branch = "main"
-rev = "dfb80ee"
+branch = "main"
 default-features = false
 features = ["bevy_asset", "bevy_render", "bevy_pbr", "bevy_core_pipeline"]
 
 [dev-dependencies]
-bevy = { git = "https://github.com/bevyengine/bevy", rev = "dfb80ee", default-features = true, features = [
+bevy = { git = "https://github.com/bevyengine/bevy", branch = "main", default-features = true, features = [
     "bevy_gltf",
     "jpeg",
     "png",
