@@ -33,7 +33,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var projection = view.projection;
     
 #ifdef TEMPORAL_ANTI_ALIASING
-    let jitter = 2.0 * (frame_jitter(frame.number) - 0.5) / view.viewport.xy;
+    let jitter = 2.0 * (frame_jitter(frame.number) - 0.5) / view.viewport.zw;
     projection[2][0] += jitter.x;
     projection[2][1] -= jitter.y;
 #endif
