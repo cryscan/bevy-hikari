@@ -23,7 +23,6 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [ ] Better light sampling strategy
 - [x] ReSTIR: Temporal sample reuse
 - [x] ReSTIR: Spatial sample reuse
-- [x] Spatial filtering
 - [ ] Spatiotemporal filtering
 - [x] Temporal anti-aliasing
 - [ ] Temporal up-scaling 
