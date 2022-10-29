@@ -29,7 +29,7 @@ pub struct PreviousViewUniform {
     inverse_view_proj: Mat4,
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct PreviousViewUniforms {
     pub uniforms: DynamicUniformBuffer<PreviousViewUniform>,
 }
@@ -67,7 +67,7 @@ fn prepare_view_uniforms(
         .write_buffer(&render_device, &render_queue);
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct FrameCounter(pub usize);
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
@@ -85,7 +85,7 @@ pub struct FrameUniform {
     pub max_indirect_luminance: f32,
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct FrameUniformBuffer {
     pub buffer: UniformBuffer<FrameUniform>,
 }

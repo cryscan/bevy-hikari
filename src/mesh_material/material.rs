@@ -42,16 +42,16 @@ impl<M: IntoStandardMaterial> Plugin for GenericMaterialPlugin<M> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct MaterialRenderAssets {
     pub buffer: StorageBuffer<GpuStandardMaterialBuffer>,
     pub textures: BTreeSet<Handle<Image>>,
 }
 
-#[derive(Default, Deref, DerefMut)]
+#[derive(Default, Resource, Deref, DerefMut)]
 pub struct GpuStandardMaterials(HashMap<HandleUntyped, (GpuStandardMaterial, u32)>);
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct ExtractedMaterials {
     extracted: Vec<(HandleUntyped, StandardMaterial)>,
     removed: Vec<HandleUntyped>,

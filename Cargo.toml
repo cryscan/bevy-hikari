@@ -16,12 +16,6 @@ default = []
 warn_mesh_load = []
 
 [dependencies]
-bevy = { version = "0.8", default-features = false, features = [
-    "bevy_asset",
-    "bevy_render",
-    "bevy_pbr",
-    "bevy_core_pipeline",
-] }
 bytemuck = "1.9"
 itertools = "0.10"
 bvh = "0.7.0"
@@ -31,13 +25,21 @@ serde_variant = "0.1.1"
 num-traits = "0.2"
 num-derive = "0.3"
 
+[dependencies.bevy]
+git = "https://github.com/bevyengine/bevy"
+# branch = "main"
+rev = "dfb80ee"
+default-features = false
+features = ["bevy_asset", "bevy_render", "bevy_pbr", "bevy_core_pipeline"]
+
 [dev-dependencies]
-bevy = { version = "0.8", default-features = true, features = [
-    "bevy_gltf",
-    "jpeg",
-    "png",
-    "x11",
-] }
 smooth-bevy-cameras = "0.5"
 bevy_mod_raycast = "0.6"
 bevy-inspector-egui = "0.13"
+
+[dev_dependencies.bevy]
+git = "https://github.com/bevyengine/bevy"
+# branch = "main"
+rev = "dfb80ee"
+default-features = true
+features = ["bevy_gltf", "jpeg", "png", "x11"]

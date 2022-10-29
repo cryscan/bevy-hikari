@@ -279,7 +279,7 @@ impl Plugin for HikariPlugin {
     }
 }
 
-#[derive(Debug, Clone, ExtractResource, Reflect)]
+#[derive(Debug, Clone, Resource, ExtractResource, Reflect, FromReflect)]
 #[reflect(Resource)]
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
@@ -324,14 +324,14 @@ impl Default for HikariConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect, FromReflect)]
 pub enum TaaVersion {
     Cryscan,
     #[default]
     Jasmine,
 }
 
-#[derive(Clone, Deref, ExtractResource)]
+#[derive(Clone, Deref, Resource, ExtractResource)]
 pub struct NoiseTextures(pub Vec<Handle<Image>>);
 
 impl AsBindGroup for NoiseTextures {

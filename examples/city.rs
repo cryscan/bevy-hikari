@@ -55,8 +55,8 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    commands
-        .spawn_bundle(PbrBundle {
+    commands.spawn((
+        PbrBundle {
             mesh: meshes.add(shape::Plane::default().into()),
             material: materials.add(StandardMaterial {
                 base_color: Color::rgb(0.8, 0.7, 0.6).into(),
@@ -69,8 +69,9 @@ fn setup(
                 ..Default::default()
             },
             ..Default::default()
-        })
-        .insert(RayCastMesh::<RaycastSet>::default());
+        },
+        RayCastMesh::<RaycastSet>::default(),
+    ));
 
     // Sphere
     commands
@@ -120,7 +121,7 @@ fn setup(
         .insert(RayCastSource::<RaycastSet>::default());
 }
 
-#[derive(Deref, DerefMut)]
+#[derive(Resource, Deref, DerefMut)]
 pub struct LoadTimer(Timer);
 
 fn load_models(
