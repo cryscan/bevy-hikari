@@ -1167,7 +1167,7 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     out_radiance = shading(
         view_direction,
         s.visible_normal,
-        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+        normalize(r.s.sample_position.xyz - s.visible_position.xyz),
         surface,
         r.s.radiance
     );
