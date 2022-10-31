@@ -946,62 +946,89 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var hit: Hit;
     var info: HitInfo;
     var surface: Surface;
+    var pdf: f32;
+    var color_transport = vec3<f32>(1.0);
+    var bnounce_s: Sample;
 
-    var rand_sample = sample_cosine_hemisphere(s.random.xy);
-    ray.origin = position.xyz + normal * RAY_BIAS;
-    ray.direction = normal_basis(normal) * rand_sample.xyz;
-    ray.inv_direction = 1.0 / ray.direction;
-    let pdf = rand_sample.w;
+    for (var n = 0u; n < frame.indirect_bounces; n += 1u) {
+        if (n == 0u) {
+            bnounce_s = s;
+        }
 
-    hit = traverse_top(ray, F32_MAX, 0.0);
-    info = hit_info(ray, hit);
-    s.sample_position = info.position;
-    s.sample_normal = info.normal;
+        var rand_sample = sample_cosine_hemisphere(bnounce_s.random.xy);
+        ray.origin = bnounce_s.visible_position.xyz + bnounce_s.visible_normal * RAY_BIAS;
+        ray.direction = normal_basis(bnounce_s.visible_normal) * rand_sample.xyz;
+        ray.inv_direction = 1.0 / ray.direction;
 
-    // Second bounce: from sample position
-    if hit.instance_index != U32_MAX {
-        var out_radiance = vec3<f32>(0.0);
+        hit = traverse_top(ray, F32_MAX, 0.0);
+        info = hit_info(ray, hit);
 
-        let candidate = select_light_candidate(
-            s.random,
-            s.sample_position.xyz,
-            s.sample_normal,
-            info.instance_index
-        );
-        let sample_directional = (candidate.emissive_index == DONT_SAMPLE_EMISSIVE);
+        if (n == 0u) {
+            s.sample_position = info.position;
+            s.sample_normal = info.normal;
+            pdf = rand_sample.w;            
+        }
 
-        if dot(candidate.direction, s.sample_normal) > 0.0 && candidate.p > 0.0 {
-            ray.origin = s.sample_position.xyz + s.sample_normal * RAY_BIAS;
-            ray.direction = candidate.direction;
-            ray.inv_direction = 1.0 / ray.direction;
+        bnounce_s.sample_position = info.position;
+        bnounce_s.sample_normal = info.normal;
+
+        // N bounce: from sample position
+        if hit.instance_index != U32_MAX {
+            var out_radiance = vec3<f32>(0.0);
+
+            let candidate = select_light_candidate(
+                bnounce_s.random,
+                bnounce_s.sample_position.xyz,
+                bnounce_s.sample_normal,
+                info.instance_index
+            );
+            let sample_directional = (candidate.emissive_index == DONT_SAMPLE_EMISSIVE);
 
             surface = retreive_surface(info.material_index, info.uv);
             surface.roughness = 1.0;
 
-            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-            info = hit_info(ray, hit);
+            if dot(candidate.direction, bnounce_s.sample_normal) > 0.0 && candidate.p > 0.0 {
+                ray.origin = bnounce_s.sample_position.xyz + bnounce_s.sample_normal * RAY_BIAS;
+                ray.direction = candidate.direction;
+                ray.inv_direction = 1.0 / ray.direction;
 
-            let in_radiance = input_radiance(ray, info, sample_directional, true, false);
-            out_radiance = shading(
-                normalize(s.visible_position.xyz - s.sample_position.xyz),
-                s.sample_normal,
-                ray.direction,
-                surface,
-                in_radiance
-            );
-            out_radiance = out_radiance / candidate.p;
+                hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
+                info = hit_info(ray, hit);
 
-            // Do radiance clamping
-            let out_luminance = luminance(out_radiance);
-            if out_luminance > frame.max_indirect_luminance {
-                out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
+                let in_radiance = input_radiance(ray, info, sample_directional, true, false);
+                out_radiance = shading(
+                    normalize(bnounce_s.visible_position.xyz - bnounce_s.sample_position.xyz),
+                    bnounce_s.sample_normal,
+                    ray.direction,
+                    surface,
+                    in_radiance
+                );
+                out_radiance = out_radiance / candidate.p;
+
+                // Do radiance clamping
+                let out_luminance = luminance(out_radiance);
+                if out_luminance > frame.max_indirect_luminance {
+                    out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
+                }
+
+                s.radiance += vec4<f32>(out_radiance, 1.0) * vec4<f32>(color_transport, 1.0);
             }
 
-            s.radiance = vec4<f32>(out_radiance, 1.0);
+            color_transport *= surface.base_color.rgb; // TODO: This part will need work
+
+            bnounce_s.random = fract(bnounce_s.random + f32(frame.number) * GOLDEN_RATIO);
+            bnounce_s.visible_position = bnounce_s.sample_position;
+            bnounce_s.visible_normal = bnounce_s.sample_normal;
+            bnounce_s.visible_instance = info.material_index;
+            bnounce_s.sample_position = vec4<f32>(0.0);
+            bnounce_s.sample_normal = vec3<f32>(0.0);
+            bnounce_s.radiance = vec4<f32>(0.0);
+
+        } else {
+            // Only ambient radiance
+            s.radiance += input_radiance(ray, info, false, false, true) * vec4<f32>(color_transport, 1.0);
+            break;
         }
-    } else {
-        // Only ambient radiance
-        s.radiance = input_radiance(ray, info, false, false, true);
     }
 
     surface = retreive_surface(instance_material.y, velocity_uv.zw);
