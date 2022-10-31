@@ -77,12 +77,12 @@ pub struct FrameUniform {
     pub number: u32,
     pub direct_validate_interval: u32,
     pub emissive_validate_interval: u32,
+    pub indirect_bounces: u32,
     pub suppress_temporal_reuse: u32,
     pub max_temporal_reuse_count: u32,
     pub max_spatial_reuse_count: u32,
     pub solar_angle: f32,
     pub max_indirect_luminance: f32,
-    pub indirect_bounces: u32,
 }
 
 #[derive(Default)]
@@ -122,17 +122,17 @@ fn prepare_frame_uniform(
         max_temporal_reuse_count,
         max_spatial_reuse_count,
         solar_angle,
+        indirect_bounces,
         max_indirect_luminance,
         temporal_reuse,
-        indirect_bounces,
         ..
     } = config.into_inner().clone();
 
     let direct_validate_interval = direct_validate_interval as u32;
     let emissive_validate_interval = emissive_validate_interval as u32;
+    let indirect_bounces = indirect_bounces as u32;
     let max_temporal_reuse_count = max_temporal_reuse_count as u32;
     let max_spatial_reuse_count = max_spatial_reuse_count as u32;
-    let indirect_bounces = indirect_bounces as u32;
     let suppress_temporal_reuse = if temporal_reuse { 0 } else { 1 };
 
     uniform.buffer.set(FrameUniform {
@@ -145,12 +145,12 @@ fn prepare_frame_uniform(
         number: counter.0 as u32,
         direct_validate_interval,
         emissive_validate_interval,
+        indirect_bounces,
         max_temporal_reuse_count,
         max_spatial_reuse_count,
         solar_angle,
         max_indirect_luminance,
         suppress_temporal_reuse,
-        indirect_bounces,
     });
     uniform.buffer.write_buffer(&render_device, &render_queue);
     counter.0 += 1;

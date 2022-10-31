@@ -23,6 +23,11 @@ fn main() {
         //     height: 300.,
         //     ..Default::default()
         // })
+        .insert_resource(HikariConfig {
+            denoise: false,
+            indirect_bounces: 3,
+            ..Default::default()
+        })
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins)

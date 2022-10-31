@@ -302,6 +302,8 @@ pub struct HikariConfig {
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
     pub emissive_threshold: f32,
+    /// Count of indirect bounces
+    pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
     /// Whether to do temporal sample reuse in ReSTIR.
@@ -312,8 +314,6 @@ pub struct HikariConfig {
     pub denoise: bool,
     /// Which TAA implementation to use.
     pub temporal_anti_aliasing: Option<TaaVersion>,
-    /// Count of indirect bounces
-    pub indirect_bounces: usize,
 }
 
 impl Default for HikariConfig {
@@ -325,12 +325,12 @@ impl Default for HikariConfig {
             max_spatial_reuse_count: 800,
             solar_angle: PI / 36.0,
             emissive_threshold: 0.00390625,
+            indirect_bounces: 1,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
-            denoise: false,
+            denoise: true,
             temporal_anti_aliasing: Some(TaaVersion::default()),
-            indirect_bounces: 3,
         }
     }
 }

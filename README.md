@@ -46,18 +46,20 @@ pub struct HikariConfig {
     pub max_temporal_reuse_count: usize,
     /// Spatial reservoir sample count is capped by this value.
     pub max_spatial_reuse_count: usize,
-    /// Threshold for oversampling the direct illumination if the sample count is low.
-    pub direct_oversample_threshold: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
     pub emissive_threshold: f32,
+    /// Count of indirect bounces
+    pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
     /// Whether to do temporal sample reuse in ReSTIR.
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
     pub spatial_reuse: bool,
+    /// Whether to do noise filtering.
+    pub denoise: bool,
     /// Which TAA implementation to use.
     pub temporal_anti_aliasing: Option<TaaVersion>,
 }
