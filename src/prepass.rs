@@ -333,6 +333,7 @@ impl PrepassTextures {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn prepass_textures_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
