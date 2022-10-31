@@ -1013,8 +1013,11 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
                 s.radiance += vec4<f32>(out_radiance, 1.0) * vec4<f32>(color_transport, 1.0);
             }
-
-            color_transport *= surface.base_color.rgb; // TODO: This part will need work
+            
+            // TODO: This part needs more work. We need to caculate how much color was 
+            // absorbed my the surface taking into account sufrace color AND its
+            // properties.
+            color_transport *= surface.base_color.rgb; 
 
             bnounce_s.random = fract(bnounce_s.random + f32(frame.number) * GOLDEN_RATIO);
             bnounce_s.visible_position = bnounce_s.sample_position;
