@@ -1019,10 +1019,12 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                 s.radiance += vec4<f32>(color_transport * out_radiance, 1.0);
             }
             
-            // TODO: This part needs more work. We need to caculate how much color was 
-            // absorbed my the surface taking into account sufrace color AND its
-            // properties.
+            // Env BRDF approximates the reflection of the surface regardless of the input direction,
+            // which may be a good choice for color transport.
             color_transport *= env_brdf(bounce_view_direction, bounce_sample.sample_normal, bounce_surface);
+            if all(color_transport < vec3<f32>(0.01)) {
+                break;
+            }
 
             bounce_sample.random = fract(bounce_sample.random + f32(frame.number) * GOLDEN_RATIO);
             bounce_sample.visible_position = bounce_sample.sample_position;
