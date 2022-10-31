@@ -945,51 +945,53 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var ray: Ray;
     var hit: Hit;
     var info: HitInfo;
-    var surface: Surface;
-    var pdf: f32;    
-    var bnounce_s: Sample;
-    let origin_surface = retreive_surface(instance_material.y, velocity_uv.zw);
-    var color_transport = vec3<f32>(origin_surface.base_color.rgb);
+    var pdf: f32;
+    var bounce_sample: Sample;
+    var bounce_surface: Surface;
+    var color_transport = vec3<f32>(1.0);
+
+    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
     for (var n = 0u; n < frame.indirect_bounces; n += 1u) {
-        if (n == 0u) {
-            bnounce_s = s;
+        if n == 0u {
+            bounce_sample = s;
         }
 
-        var rand_sample = sample_cosine_hemisphere(bnounce_s.random.xy);
-        ray.origin = bnounce_s.visible_position.xyz + bnounce_s.visible_normal * RAY_BIAS;
-        ray.direction = normal_basis(bnounce_s.visible_normal) * rand_sample.xyz;
+        var rand_sample = sample_cosine_hemisphere(bounce_sample.random.xy);
+        ray.origin = bounce_sample.visible_position.xyz + bounce_sample.visible_normal * RAY_BIAS;
+        ray.direction = normal_basis(bounce_sample.visible_normal) * rand_sample.xyz;
         ray.inv_direction = 1.0 / ray.direction;
 
         hit = traverse_top(ray, F32_MAX, 0.0);
         info = hit_info(ray, hit);
 
-        if (n == 0u) {
+        if n == 0u {
             s.sample_position = info.position;
             s.sample_normal = info.normal;
-            pdf = rand_sample.w;            
+            pdf = rand_sample.w;
         }
 
-        bnounce_s.sample_position = info.position;
-        bnounce_s.sample_normal = info.normal;
+        bounce_sample.sample_position = info.position;
+        bounce_sample.sample_normal = info.normal;
 
         // N bounce: from sample position
         if hit.instance_index != U32_MAX {
             var out_radiance = vec3<f32>(0.0);
 
             let candidate = select_light_candidate(
-                bnounce_s.random,
-                bnounce_s.sample_position.xyz,
-                bnounce_s.sample_normal,
+                bounce_sample.random,
+                bounce_sample.sample_position.xyz,
+                bounce_sample.sample_normal,
                 info.instance_index
             );
             let sample_directional = (candidate.emissive_index == DONT_SAMPLE_EMISSIVE);
+            let bounce_view_direction = normalize(bounce_sample.visible_position.xyz - bounce_sample.sample_position.xyz);
 
-            surface = retreive_surface(info.material_index, info.uv);
-            surface.roughness = 1.0;
+            bounce_surface = retreive_surface(info.material_index, info.uv);
+            bounce_surface.roughness = 1.0;
 
-            if dot(candidate.direction, bnounce_s.sample_normal) > 0.0 && candidate.p > 0.0 {
-                ray.origin = bnounce_s.sample_position.xyz + bnounce_s.sample_normal * RAY_BIAS;
+            if dot(candidate.direction, bounce_sample.sample_normal) > 0.0 && candidate.p > 0.0 {
+                ray.origin = bounce_sample.sample_position.xyz + bounce_sample.sample_normal * RAY_BIAS;
                 ray.direction = candidate.direction;
                 ray.inv_direction = 1.0 / ray.direction;
 
@@ -997,13 +999,13 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                 info = hit_info(ray, hit);
 
                 var in_radiance = input_radiance(ray, info, sample_directional, true, false);
-                in_radiance = vec4<f32>(in_radiance.xyz * color_transport, in_radiance.a);
+                in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
 
                 out_radiance = shading(
-                    normalize(bnounce_s.visible_position.xyz - bnounce_s.sample_position.xyz),
-                    bnounce_s.sample_normal,
+                    bounce_view_direction,
+                    bounce_sample.sample_normal,
                     ray.direction,
-                    surface,
+                    bounce_surface,
                     in_radiance
                 );
                 out_radiance = out_radiance / candidate.p;
@@ -1014,22 +1016,21 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
                 }
 
-                s.radiance += vec4<f32>(out_radiance, 1.0);
+                s.radiance += vec4<f32>(color_transport * out_radiance, 1.0);
             }
             
             // TODO: This part needs more work. We need to caculate how much color was 
             // absorbed my the surface taking into account sufrace color AND its
             // properties.
-            color_transport *= surface.base_color.rgb; 
+            color_transport *= env_brdf(bounce_view_direction, bounce_sample.sample_normal, bounce_surface);
 
-            bnounce_s.random = fract(bnounce_s.random + f32(frame.number) * GOLDEN_RATIO);
-            bnounce_s.visible_position = bnounce_s.sample_position;
-            bnounce_s.visible_normal = bnounce_s.sample_normal;
-            bnounce_s.visible_instance = info.material_index;
-            bnounce_s.sample_position = vec4<f32>(0.0);
-            bnounce_s.sample_normal = vec3<f32>(0.0);
-            bnounce_s.radiance = vec4<f32>(0.0);
-
+            bounce_sample.random = fract(bounce_sample.random + f32(frame.number) * GOLDEN_RATIO);
+            bounce_sample.visible_position = bounce_sample.sample_position;
+            bounce_sample.visible_normal = bounce_sample.sample_normal;
+            bounce_sample.visible_instance = info.material_index;
+            bounce_sample.sample_position = vec4<f32>(0.0);
+            bounce_sample.sample_normal = vec3<f32>(0.0);
+            bounce_sample.radiance = vec4<f32>(0.0);
         } else {
             // Only ambient radiance
             s.radiance += input_radiance(ray, info, false, false, true) * vec4<f32>(color_transport, 1.0);
@@ -1042,7 +1043,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         view_direction,
         s.visible_normal,
         normalize(s.sample_position.xyz - s.visible_position.xyz),
-        origin_surface,
+        surface,
         s.radiance
     );
 
@@ -1055,7 +1056,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         view_direction,
         r.s.visible_normal,
         normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
-        origin_surface,
+        surface,
         r.s.radiance
     );
     let total_lum = r.count * luminance(out_radiance);
