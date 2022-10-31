@@ -165,13 +165,3 @@ fn load_spatial_reservoir(index: i32) -> Reservoir {
 fn store_spatial_reservoir(index: i32, r: Reservoir) {
     spatial_reservoir_buffer.data[index] = pack_reservoir(r);
 }
-
-fn load_direct_reservoir(index: i32) -> Reservoir {
-    let packed = direct_reservoir_cache.data[index];
-    return unpack_reservoir(packed);
-}
-
-fn load_emissive_reservoir(index: i32) -> Reservoir {
-    let packed = emissive_reservoir_cache.data[index];
-    return unpack_reservoir(packed);
-}

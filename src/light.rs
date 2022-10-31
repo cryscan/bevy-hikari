@@ -77,7 +77,6 @@ pub struct LightPipeline {
     pub noise_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
     pub reservoir_layout: BindGroupLayout,
-    pub cache_reservoir_layout: BindGroupLayout,
 }
 
 #[repr(C)]
@@ -153,7 +152,6 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.noise_layout.clone(),
                 self.render_layout.clone(),
                 self.reservoir_layout.clone(),
-                self.cache_reservoir_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs,
@@ -271,35 +269,6 @@ fn prepare_light_pipeline(
         ],
     });
 
-    let cache_reservoir_layout =
-        render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Direct Cache Reservoir
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-                // Emissive Cache Reservoir
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
     commands.insert_resource(LightPipeline {
         view_layout,
         deferred_layout,
@@ -309,7 +278,6 @@ fn prepare_light_pipeline(
         noise_layout,
         render_layout,
         reservoir_layout,
-        cache_reservoir_layout,
     });
 }
 
@@ -318,12 +286,8 @@ pub struct LightPassTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
     pub albedo: CachedTexture,
-    pub direct_variance: CachedTexture,
-    pub direct_render: CachedTexture,
-    pub emissive_variance: CachedTexture,
-    pub emissive_render: CachedTexture,
-    pub indirect_variance: CachedTexture,
-    pub indirect_render: CachedTexture,
+    pub variance: [CachedTexture; 3],
+    pub render: [CachedTexture; 3],
 }
 
 fn prepare_light_pass_textures(
@@ -381,15 +345,14 @@ fn prepare_light_pass_textures(
                 reservoir_cache.insert(entity, reservoirs);
             }
 
+            let variance = [(); 3].map(|_| create_texture(VARIANCE_TEXTURE_FORMAT));
+            let render = [(); 3].map(|_| create_texture(RENDER_TEXTURE_FORMAT));
+
             commands.entity(entity).insert(LightPassTextures {
                 head: frame_counter.0 % 2,
                 albedo: create_texture(ALBEDO_TEXTURE_FORMAT),
-                direct_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
-                direct_render: create_texture(RENDER_TEXTURE_FORMAT),
-                emissive_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
-                emissive_render: create_texture(RENDER_TEXTURE_FORMAT),
-                indirect_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
-                indirect_render: create_texture(RENDER_TEXTURE_FORMAT),
+                variance,
+                render,
             });
         }
     }
@@ -445,17 +408,8 @@ fn queue_light_pipelines(
 pub struct LightBindGroup {
     pub deferred: BindGroup,
     pub noise: BindGroup,
-
-    pub direct_render: BindGroup,
-    pub direct_reservoir: BindGroup,
-
-    pub emissive_render: BindGroup,
-    pub emissive_reservoir: BindGroup,
-
-    pub indirect_render: BindGroup,
-    pub indirect_reservoir: BindGroup,
-
-    pub cache_reservoir: BindGroup,
+    pub render: [BindGroup; 3],
+    pub reservoir: [BindGroup; 3],
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -501,157 +455,65 @@ fn queue_light_bind_groups(
             }
             .bind_group;
 
-            let direct_render = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(&light.direct_variance.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(&light.direct_render.default_view),
-                    },
-                ],
-            });
-            let emissive_render = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(
-                            &light.emissive_variance.default_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(&light.emissive_render.default_view),
-                    },
-                ],
-            });
-            let indirect_render = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(
-                            &light.indirect_variance.default_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(&light.indirect_render.default_view),
-                    },
-                ],
+            let render = [0, 1, 2].map(|id| {
+                let variance = &light.variance[id].default_view;
+                let render = &light.render[id].default_view;
+
+                render_device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.render_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&light.albedo.default_view),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::TextureView(variance),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: BindingResource::TextureView(render),
+                        },
+                    ],
+                })
             });
 
-            let direct_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[previous].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: reservoir_bindings[4 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: reservoir_bindings[4 + previous].clone(),
-                    },
-                ],
-            });
-            let emissive_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[2 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[2 + previous].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: reservoir_bindings[4 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: reservoir_bindings[4 + previous].clone(),
-                    },
-                ],
-            });
-            let indirect_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[6 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[6 + previous].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: reservoir_bindings[8 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: reservoir_bindings[8 + previous].clone(),
-                    },
-                ],
-            });
+            let reservoir = [(0, 4), (2, 4), (6, 8)].map(|(temporal, spatial)| {
+                let current_temporal = reservoir_bindings[current + temporal].clone();
+                let previous_temporal = reservoir_bindings[previous + temporal].clone();
+                let current_spatial = reservoir_bindings[current + spatial].clone();
+                let previous_spatial = reservoir_bindings[previous + spatial].clone();
 
-            let cache_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.cache_reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[2 + current].clone(),
-                    },
-                ],
+                render_device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.reservoir_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: current_temporal,
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: previous_temporal,
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: current_spatial,
+                        },
+                        BindGroupEntry {
+                            binding: 3,
+                            resource: previous_spatial,
+                        },
+                    ],
+                })
             });
 
             commands.entity(entity).insert(LightBindGroup {
                 deferred,
                 noise,
-                direct_render,
-                direct_reservoir,
-                emissive_render,
-                emissive_reservoir,
-                indirect_render,
-                indirect_reservoir,
-                cache_reservoir,
+                render,
+                reservoir,
             });
         }
     }
@@ -729,9 +591,8 @@ impl Node for LightPassNode {
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &light_bind_group.noise, &[]);
 
-        pass.set_bind_group(5, &light_bind_group.direct_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.direct_reservoir, &[]);
-        pass.set_bind_group(7, &light_bind_group.cache_reservoir, &[]);
+        pass.set_bind_group(5, &light_bind_group.render[0], &[]);
+        pass.set_bind_group(6, &light_bind_group.reservoir[0], &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
             pass.set_pipeline(pipeline);
@@ -741,8 +602,8 @@ impl Node for LightPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        pass.set_bind_group(5, &light_bind_group.emissive_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.emissive_reservoir, &[]);
+        pass.set_bind_group(5, &light_bind_group.render[1], &[]);
+        pass.set_bind_group(6, &light_bind_group.reservoir[1], &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_emissive) {
             pass.set_pipeline(pipeline);
@@ -764,8 +625,8 @@ impl Node for LightPassNode {
             }
         }
 
-        pass.set_bind_group(5, &light_bind_group.indirect_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.indirect_reservoir, &[]);
+        pass.set_bind_group(5, &light_bind_group.render[2], &[]);
+        pass.set_bind_group(6, &light_bind_group.reservoir[2], &[]);
 
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.indirect_lit_ambient)
         {

@@ -74,6 +74,8 @@ pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
+pub const DENOISE_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5179661212363325472);
 pub const TONE_MAPPING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 3567017338952956671);
 pub const TAA_SHADER_HANDLE: HandleUntyped =
@@ -150,6 +152,12 @@ impl Plugin for HikariPlugin {
             app,
             LIGHT_SHADER_HANDLE,
             "shaders/light.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            DENOISE_SHADER_HANDLE,
+            "shaders/denoise.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
@@ -290,8 +298,6 @@ pub struct HikariConfig {
     pub max_temporal_reuse_count: usize,
     /// Spatial reservoir sample count is capped by this value.
     pub max_spatial_reuse_count: usize,
-    /// Threshold for oversampling the direct illumination if the sample count is low.
-    pub direct_oversample_threshold: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
@@ -302,6 +308,8 @@ pub struct HikariConfig {
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
     pub spatial_reuse: bool,
+    /// Whether to do noise filtering.
+    pub denoise: bool,
     /// Which TAA implementation to use.
     pub temporal_anti_aliasing: Option<TaaVersion>,
 }
@@ -313,12 +321,12 @@ impl Default for HikariConfig {
             emissive_validate_interval: 7,
             max_temporal_reuse_count: 50,
             max_spatial_reuse_count: 800,
-            direct_oversample_threshold: 16,
             solar_angle: PI / 36.0,
             emissive_threshold: 0.00390625,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
+            denoise: true,
             temporal_anti_aliasing: Some(TaaVersion::default()),
         }
     }

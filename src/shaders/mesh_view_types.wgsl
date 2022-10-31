@@ -9,7 +9,6 @@ struct Frame {
     suppress_temporal_reuse: u32,
     max_temporal_reuse_count: u32,
     max_spatial_reuse_count: u32,
-    direct_oversample_threshold: u32,
     solar_angle: f32,
     max_indirect_luminance: f32,
 };

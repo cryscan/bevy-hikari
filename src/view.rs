@@ -80,7 +80,6 @@ pub struct FrameUniform {
     pub suppress_temporal_reuse: u32,
     pub max_temporal_reuse_count: u32,
     pub max_spatial_reuse_count: u32,
-    pub direct_oversample_threshold: u32,
     pub solar_angle: f32,
     pub max_indirect_luminance: f32,
 }
@@ -121,7 +120,6 @@ fn prepare_frame_uniform(
         emissive_validate_interval,
         max_temporal_reuse_count,
         max_spatial_reuse_count,
-        direct_oversample_threshold,
         solar_angle,
         max_indirect_luminance,
         temporal_reuse,
@@ -132,7 +130,6 @@ fn prepare_frame_uniform(
     let emissive_validate_interval = emissive_validate_interval as u32;
     let max_temporal_reuse_count = max_temporal_reuse_count as u32;
     let max_spatial_reuse_count = max_spatial_reuse_count as u32;
-    let direct_oversample_threshold = direct_oversample_threshold as u32;
     let suppress_temporal_reuse = if temporal_reuse { 0 } else { 1 };
 
     uniform.buffer.set(FrameUniform {
@@ -147,7 +144,6 @@ fn prepare_frame_uniform(
         emissive_validate_interval,
         max_temporal_reuse_count,
         max_spatial_reuse_count,
-        direct_oversample_threshold,
         solar_angle,
         max_indirect_luminance,
         suppress_temporal_reuse,

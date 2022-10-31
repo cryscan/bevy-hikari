@@ -923,6 +923,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
         store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
+        textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
