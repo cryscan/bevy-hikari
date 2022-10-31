@@ -1,5 +1,5 @@
 use crate::{
-    light::LightPassTextures,
+    light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, PreviousViewUniformOffset},
     HikariConfig, DENOISE_SHADER_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE,
@@ -78,6 +78,56 @@ impl FromWorld for PostProcessPipeline {
             render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: None,
                 entries: &[
+                    // Internal 0
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::ReadWrite,
+                            format: DENOISE_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    // Internal 1
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::ReadWrite,
+                            format: DENOISE_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    // Internal 2
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::ReadWrite,
+                            format: DENOISE_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    // Internal Variance
+                    BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::ReadWrite,
+                            format: VARIANCE_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let denoise_render_layout =
+            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
                     // Albedo
                     BindGroupLayoutEntry {
                         binding: 0,
@@ -89,37 +139,20 @@ impl FromWorld for PostProcessPipeline {
                         },
                         count: None,
                     },
-                    // Internal 0
+                    // Variance
                     BindGroupLayoutEntry {
                         binding: 1,
                         visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
                             view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
                         },
                         count: None,
                     },
-                    // Internal 1
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
-                            view_dimension: TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-        let denoise_render_layout =
-            render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[
                     // Previous Render
                     BindGroupLayoutEntry {
-                        binding: 0,
+                        binding: 2,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Texture {
                             sample_type: TextureSampleType::Float { filterable: true },
@@ -130,7 +163,7 @@ impl FromWorld for PostProcessPipeline {
                     },
                     // Render
                     BindGroupLayoutEntry {
-                        binding: 1,
+                        binding: 3,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Texture {
                             sample_type: TextureSampleType::Float { filterable: true },
@@ -141,7 +174,7 @@ impl FromWorld for PostProcessPipeline {
                     },
                     // Output
                     BindGroupLayoutEntry {
-                        binding: 2,
+                        binding: 4,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
@@ -348,11 +381,14 @@ impl SpecializedComputePipeline for PostProcessPipeline {
             }
         };
 
+        let mut shader_defs = vec![];
+        shader_defs.push(format!("DENOISE_LEVEL_{}", key.denoise_level()));
+
         ComputePipelineDescriptor {
             label: None,
             layout: Some(layout),
             shader,
-            shader_defs: vec![],
+            shader_defs,
             entry_point,
         }
     }
@@ -361,7 +397,8 @@ impl SpecializedComputePipeline for PostProcessPipeline {
 #[derive(Component)]
 pub struct PostProcessTextures {
     pub head: usize,
-    pub denoise_internal: [CachedTexture; 2],
+    pub denoise_internal: [CachedTexture; 3],
+    pub denoise_internal_variance: CachedTexture,
     pub denoise_render: [CachedTexture; 6],
     pub tone_mapping_output: CachedTexture,
     pub taa_internal: [CachedTexture; 2],
@@ -400,10 +437,8 @@ fn prepare_post_process_textures(
                 )
             };
 
-            let denoise_internal = [
-                create_texture(DENOISE_TEXTURE_FORMAT),
-                create_texture(DENOISE_TEXTURE_FORMAT),
-            ];
+            let denoise_internal = [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT));
+            let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT);
             let denoise_render = [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT));
 
             let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT);
@@ -430,6 +465,7 @@ fn prepare_post_process_textures(
             commands.entity(entity).insert(PostProcessTextures {
                 head: frame_counter.0 % 2,
                 denoise_internal,
+                denoise_internal_variance,
                 denoise_render,
                 tone_mapping_output,
                 taa_internal,
@@ -542,18 +578,26 @@ fn queue_post_process_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&light.albedo.default_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
                     resource: BindingResource::TextureView(
                         &post_process.denoise_internal[0].default_view,
                     ),
                 },
                 BindGroupEntry {
-                    binding: 2,
+                    binding: 1,
                     resource: BindingResource::TextureView(
                         &post_process.denoise_internal[1].default_view,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(
+                        &post_process.denoise_internal[2].default_view,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(
+                        &post_process.denoise_internal_variance.default_view,
                     ),
                 },
             ],
@@ -565,16 +609,24 @@ fn queue_post_process_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
+                        resource: BindingResource::TextureView(&light.albedo.default_view),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::TextureView(&light.variance[id].default_view),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
                         resource: BindingResource::TextureView(
                             &post_process.denoise_render[previous + 2 * id].default_view,
                         ),
                     },
                     BindGroupEntry {
-                        binding: 1,
+                        binding: 3,
                         resource: BindingResource::TextureView(&light.render[id].default_view),
                     },
                     BindGroupEntry {
-                        binding: 2,
+                        binding: 4,
                         resource: BindingResource::TextureView(
                             &post_process.denoise_render[current + 2 * id].default_view,
                         ),
@@ -584,12 +636,12 @@ fn queue_post_process_bind_groups(
         });
 
         let (direct_render, emissive_render, indirect_render) = match config.denoise {
-            true => (
+            false => (
                 &light.render[0].default_view,
                 &light.render[1].default_view,
                 &light.render[2].default_view,
             ),
-            false => (
+            true => (
                 &post_process.denoise_render[current].default_view,
                 &post_process.denoise_render[current + 2].default_view,
                 &post_process.denoise_render[current + 4].default_view,
