@@ -203,7 +203,9 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).xy;
     let previous_uv = uv - velocity;
     let previous_color = textureSampleLevel(previous_render_texture, linear_sampler, previous_uv, 0.0);
-    color = mix(color, previous_color, 0.8);
+
+    var mix_rate = select(0.0, 0.8, previous_color.a > 0.0);
+    color = mix(color, previous_color, mix_rate);
 #endif
 
     store_output(coords, color);
