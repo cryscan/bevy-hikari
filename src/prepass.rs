@@ -292,6 +292,12 @@ pub struct PrepassTextures {
     pub instance_material: Handle<Image>,
     #[texture(4, visibility(all))]
     pub velocity_uv: Handle<Image>,
+    #[texture(5, visibility(all))]
+    pub previous_position: Handle<Image>,
+    #[texture(6, visibility(all))]
+    pub previous_normal: Handle<Image>,
+    #[texture(7, visibility(all), sample_type = "u_int")]
+    pub previous_instance_material: Handle<Image>,
 }
 
 impl ExtractComponent for PrepassTextures {
@@ -330,9 +336,12 @@ impl PrepassTextures {
 fn prepass_textures_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    query: Query<(Entity, &Camera), Changed<Camera>>,
+    mut queries: ParamSet<(
+        Query<(Entity, &Camera), Changed<Camera>>,
+        Query<&mut PrepassTextures>,
+    )>,
 ) {
-    for (entity, camera) in &query {
+    for (entity, camera) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
             let size = Extent3d {
                 width: size.x,
@@ -375,6 +384,10 @@ fn prepass_textures_system(
             let instance_material = images.add(create_texture(INSTANCE_MATERIAL_FORMAT));
             let velocity_uv = images.add(create_texture(VELOCITY_UV_FORMAT));
 
+            let previous_position = images.add(create_texture(POSITION_FORMAT));
+            let previous_normal = images.add(create_texture(NORMAL_FORMAT));
+            let previous_instance_material = images.add(create_texture(INSTANCE_MATERIAL_FORMAT));
+
             commands.entity(entity).insert(PrepassTextures {
                 size,
                 position,
@@ -382,8 +395,25 @@ fn prepass_textures_system(
                 depth_gradient,
                 instance_material,
                 velocity_uv,
+                previous_position,
+                previous_normal,
+                previous_instance_material,
             });
         }
+    }
+
+    for mut textures in &mut queries.p1() {
+        let position = textures.position.clone();
+        let normal = textures.normal.clone();
+        let instance_material = textures.instance_material.clone();
+
+        textures.position = textures.previous_position.clone();
+        textures.normal = textures.previous_normal.clone();
+        textures.instance_material = textures.previous_instance_material.clone();
+
+        textures.previous_position = position;
+        textures.previous_normal = normal;
+        textures.previous_instance_material = instance_material;
     }
 }
 

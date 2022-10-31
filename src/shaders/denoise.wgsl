@@ -147,12 +147,15 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, size);
 
-    let depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    let deferred_size = textureDimensions(position_texture);
+    let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
+
+    let position_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0);
     let depth_gradient = textureSampleLevel(depth_gradient_texture, nearest_sampler, uv, 0.0).xy;
     let normal = normalize(textureSampleLevel(normal_texture, nearest_sampler, uv, 0.0).xyz);
-    let instance = textureLoad(instance_material_texture, vec2<i32>(uv * vec2<f32>(textureDimensions(instance_material_texture))), 0).x;
+    let instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
 
-    if depth < F32_EPSILON {
+    if position_depth.w < F32_EPSILON {
         store_output(coords, vec4<f32>(0.0));
         return;
     }
@@ -183,7 +186,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let sample_luminance = luminance(irradiance);
 
             let w_normal = normal_weight(normal, sample_normal);
-            let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
+            let w_depth = depth_weight(position_depth.w, sample_depth, depth_gradient, offset);
             let w_instance = instance_weight(instance, sample_instance);
             let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
@@ -202,9 +205,45 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).xy;
     let previous_uv = uv - velocity;
-    let previous_color = textureSampleLevel(previous_render_texture, linear_sampler, previous_uv, 0.0);
+    // var previous_color = textureSampleLevel(previous_render_texture, linear_sampler, previous_uv, 0.0);
+    var previous_color = color;
 
-    var mix_rate = select(0.0, 0.8, previous_color.a > 0.0);
+    var min_distance = F32_MAX;
+    for (var y = -1; y <= 1; y += 1) {
+        for (var x = -1; x <= 1; x += 1) {
+            let offset = vec2<i32>(x, y);
+            let uv_offset = vec2<f32>(offset) / vec2<f32>(deferred_size);
+            let sample_uv = previous_uv + uv_offset;
+
+            let sample_coords = vec2<i32>(sample_uv * vec2<f32>(deferred_size));
+            let previous_instance = textureLoad(previous_instance_material_texture, sample_coords, 0).x;
+            if (instance != previous_instance) {
+                continue;
+            }
+
+            let previous_position_depth = textureSampleLevel(previous_position_texture, nearest_sampler, sample_uv, 0.0);
+            if previous_position_depth.w == 0.0 {
+                continue;
+            }
+            let depth_ratio = position_depth.w / previous_position_depth.w;
+            if depth_ratio < 0.9 || depth_ratio > 1.1 {
+                continue;
+            }
+
+            let previous_normal = normalize(textureSampleLevel(previous_normal_texture, nearest_sampler, sample_uv, 0.0).xyz);
+            if dot(normal, previous_normal) < 0.866 {
+                continue;
+            }
+
+            let dist = distance(previous_position_depth.xyz, position_depth.xyz);
+            if (dist < min_distance) {
+                min_distance = dist;
+                previous_color = textureSampleLevel(previous_render_texture, linear_sampler, sample_uv, 0.0);
+            }
+        }
+    }
+
+    let mix_rate = select(0.0, 0.8, previous_color.a > 0.0);
     color = mix(color, previous_color, mix_rate);
 #endif
 
