@@ -996,7 +996,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                 hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
                 info = hit_info(ray, hit);
 
-                let in_radiance = input_radiance(ray, info, sample_directional, true, false);
+                var in_radiance = input_radiance(ray, info, sample_directional, true, false);
+                in_radiance = vec4<f32>(in_radiance.xyz * color_transport, in_radiance.a);
+
                 out_radiance = shading(
                     normalize(bnounce_s.visible_position.xyz - bnounce_s.sample_position.xyz),
                     bnounce_s.sample_normal,
@@ -1005,7 +1007,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     in_radiance
                 );
                 out_radiance = out_radiance / candidate.p;
-                out_radiance *= color_transport;
 
                 // Do radiance clamping
                 let out_luminance = luminance(out_radiance);
