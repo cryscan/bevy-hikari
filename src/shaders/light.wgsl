@@ -1009,6 +1009,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     in_radiance
                 );
                 out_radiance = out_radiance / candidate.p;
+                if n > 0u {
+                    out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.0001);
+                }
 
                 // Do radiance clamping
                 let out_luminance = luminance(out_radiance);
@@ -1035,7 +1038,11 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             bounce_sample.radiance = vec4<f32>(0.0);
         } else {
             // Only ambient radiance
-            s.radiance += input_radiance(ray, info, false, false, true) * vec4<f32>(color_transport, 1.0);
+            var out_radiance = input_radiance(ray, info, false, false, true).rgb;
+            if n > 0u {
+                out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.0001);
+            }
+            s.radiance += vec4<f32>(color_transport * out_radiance, 0.0);
             break;
         }
     }
