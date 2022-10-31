@@ -946,9 +946,10 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var hit: Hit;
     var info: HitInfo;
     var surface: Surface;
-    var pdf: f32;
-    var color_transport = vec3<f32>(1.0);
+    var pdf: f32;    
     var bnounce_s: Sample;
+    let origin_surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    var color_transport = vec3<f32>(origin_surface.base_color.rgb);
 
     for (var n = 0u; n < frame.indirect_bounces; n += 1u) {
         if (n == 0u) {
@@ -1034,13 +1035,12 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         }
     }
 
-    surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
     let sample_radiance = shading(
         view_direction,
         s.visible_normal,
         normalize(s.sample_position.xyz - s.visible_position.xyz),
-        surface,
+        origin_surface,
         s.radiance
     );
 
@@ -1053,7 +1053,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         view_direction,
         r.s.visible_normal,
         normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
-        surface,
+        origin_surface,
         r.s.radiance
     );
     let total_lum = r.count * luminance(out_radiance);
