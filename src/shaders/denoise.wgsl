@@ -60,52 +60,42 @@ fn instance_weight(i0: u32, i1: u32) -> f32 {
     return f32(i0 == i1);
 }
 
-fn load_input(coords: vec2<i32>) -> vec3<f32> {
+fn load_input(coords: vec2<i32>) -> vec4<f32> {
 #ifdef DENOISE_LEVEL_0
-    var input = textureLoad(render_texture, coords, 0).rgb;
+    return textureLoad(render_texture, coords, 0);
+#endif
+#ifdef DENOISE_LEVEL_1
+    return textureLoad(internal_texture_0, coords);
+#endif
+#ifdef DENOISE_LEVEL_2
+    return textureLoad(internal_texture_1, coords);
+#endif
+#ifdef DENOISE_LEVEL_3
+    return textureLoad(internal_texture_2, coords);
+#endif
+}
+
+fn load_irradiance(coords: vec2<i32>) -> vec3<f32> {
+    var irradiance = load_input(coords).rgb;
+#ifdef DENOISE_LEVEL_0
     let albedo = textureLoad(albedo_texture, coords, 0).rgb;
-    input = select(input / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
-    return input;
+    irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
 #endif
-#ifdef DENOISE_LEVEL_1
-    return textureLoad(internal_texture_0, coords).rgb;
-#endif
-#ifdef DENOISE_LEVEL_2
-    return textureLoad(internal_texture_1, coords).rgb;
-#endif
-#ifdef DENOISE_LEVEL_3
-    return textureLoad(internal_texture_2, coords).rgb;
-#endif
+    return irradiance;
 }
 
-fn store_output(coords: vec2<i32>, value: vec3<f32>) {
+fn store_output(coords: vec2<i32>, value: vec4<f32>) {
 #ifdef DENOISE_LEVEL_0
-    textureStore(internal_texture_0, coords, vec4<f32>(value, 1.0));
+    textureStore(internal_texture_0, coords, value);
 #endif
 #ifdef DENOISE_LEVEL_1
-    textureStore(internal_texture_1, coords, vec4<f32>(value, 1.0));
+    textureStore(internal_texture_1, coords, value);
 #endif
 #ifdef DENOISE_LEVEL_2
-    textureStore(internal_texture_2, coords, vec4<f32>(value, 1.0));
+    textureStore(internal_texture_2, coords, value);
 #endif
 #ifdef DENOISE_LEVEL_3
-    let albedo = textureLoad(albedo_texture, coords, 0);
-    textureStore(output_texture, coords, vec4<f32>(value, 1.0) * albedo);
-#endif
-}
-
-fn store_empty_output(coords: vec2<i32>) {
-#ifdef DENOISE_LEVEL_0
-    textureStore(internal_texture_0, coords, vec4<f32>(0.0));
-#endif
-#ifdef DENOISE_LEVEL_1
-    textureStore(internal_texture_1, coords, vec4<f32>(0.0));
-#endif
-#ifdef DENOISE_LEVEL_2
-    textureStore(internal_texture_2, coords, vec4<f32>(0.0));
-#endif
-#ifdef DENOISE_LEVEL_3
-    textureStore(output_texture, coords, vec4<f32>(0.0));
+    textureStore(output_texture, coords, value);
 #endif
 }
 
@@ -163,13 +153,13 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let instance = textureLoad(instance_material_texture, vec2<i32>(uv * vec2<f32>(textureDimensions(instance_material_texture))), 0).x;
 
     if depth < F32_EPSILON {
-        store_empty_output(coords);
+        store_output(coords, vec4<f32>(0.0));
         return;
     }
 
     let variance = load_cache_variance(coords, size);
 
-    var irradiance = load_input(coords);
+    var irradiance = load_irradiance(coords);
     irradiance = select(irradiance, vec3<f32>(0.0), irradiance > vec3<f32>(F32_MAX));
     let lum = luminance(irradiance);
 
@@ -184,7 +174,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
                 continue;
             }
 
-            irradiance = load_input(sample_coords);
+            irradiance = load_irradiance(sample_coords);
             irradiance = select(irradiance, vec3<f32>(0.0), irradiance > vec3<f32>(F32_MAX));
 
             let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
@@ -204,5 +194,17 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
-    store_output(coords, irradiance);
+    var color = vec4<f32>(irradiance, 1.0);
+
+#ifdef DENOISE_LEVEL_3
+    let albedo = textureLoad(albedo_texture, coords, 0);
+    color *= albedo;
+
+    let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).xy;
+    let previous_uv = uv - velocity;
+    let previous_color = textureSampleLevel(previous_render_texture, linear_sampler, previous_uv, 0.0);
+    color = mix(color, previous_color, 0.8);
+#endif
+
+    store_output(coords, color);
 }
