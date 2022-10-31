@@ -312,6 +312,8 @@ pub struct HikariConfig {
     pub denoise: bool,
     /// Which TAA implementation to use.
     pub temporal_anti_aliasing: Option<TaaVersion>,
+    /// Count of indirect bounces
+    pub indirect_bounces: usize,
 }
 
 impl Default for HikariConfig {
@@ -326,8 +328,9 @@ impl Default for HikariConfig {
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
-            denoise: true,
+            denoise: false,
             temporal_anti_aliasing: Some(TaaVersion::default()),
+            indirect_bounces: 3,
         }
     }
 }

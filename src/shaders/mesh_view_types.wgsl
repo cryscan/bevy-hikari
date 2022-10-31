@@ -11,6 +11,7 @@ struct Frame {
     max_spatial_reuse_count: u32,
     solar_angle: f32,
     max_indirect_luminance: f32,
+    indirect_bounces: u32,
 };
 
 struct PreviousView {
