@@ -1005,6 +1005,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     in_radiance
                 );
                 out_radiance = out_radiance / candidate.p;
+                out_radiance *= color_transport;
 
                 // Do radiance clamping
                 let out_luminance = luminance(out_radiance);
@@ -1012,7 +1013,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
                 }
 
-                s.radiance += vec4<f32>(out_radiance, 1.0) * vec4<f32>(color_transport, 1.0);
+                s.radiance += vec4<f32>(out_radiance, 1.0);
             }
             
             // TODO: This part needs more work. We need to caculate how much color was 
