@@ -238,7 +238,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let dist = distance(previous_position_depth.xyz, position_depth.xyz);
             if (dist < min_distance) {
                 min_distance = dist;
-                previous_color = textureSampleLevel(previous_render_texture, linear_sampler, sample_uv, 0.0);
+                previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, sample_uv, 0.0);
             }
         }
     }
