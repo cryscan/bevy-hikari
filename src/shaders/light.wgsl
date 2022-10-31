@@ -946,11 +946,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var hit: Hit;
     var info: HitInfo;
     var pdf: f32;
+    var surface: Surface;
     var bounce_sample: Sample;
-    var bounce_surface: Surface;
     var color_transport = vec3<f32>(1.0);
-
-    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
 
     for (var n = 0u; n < frame.indirect_bounces; n += 1u) {
         if n == 0u {
@@ -987,8 +985,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             let sample_directional = (candidate.emissive_index == DONT_SAMPLE_EMISSIVE);
             let bounce_view_direction = normalize(bounce_sample.visible_position.xyz - bounce_sample.sample_position.xyz);
 
-            bounce_surface = retreive_surface(info.material_index, info.uv);
-            bounce_surface.roughness = 1.0;
+            surface = retreive_surface(info.material_index, info.uv);
+            surface.roughness = 1.0;
 
             if dot(candidate.direction, bounce_sample.sample_normal) > 0.0 && candidate.p > 0.0 {
                 ray.origin = bounce_sample.sample_position.xyz + bounce_sample.sample_normal * RAY_BIAS;
@@ -1005,7 +1003,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     bounce_view_direction,
                     bounce_sample.sample_normal,
                     ray.direction,
-                    bounce_surface,
+                    surface,
                     in_radiance
                 );
                 out_radiance = out_radiance / candidate.p;
@@ -1024,7 +1022,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             
             // Env BRDF approximates the reflection of the surface regardless of the input direction,
             // which may be a good choice for color transport.
-            color_transport *= env_brdf(bounce_view_direction, bounce_sample.sample_normal, bounce_surface);
+            color_transport *= env_brdf(bounce_view_direction, bounce_sample.sample_normal, surface);
             if all(color_transport < vec3<f32>(0.01)) {
                 break;
             }
@@ -1033,9 +1031,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             bounce_sample.visible_position = bounce_sample.sample_position;
             bounce_sample.visible_normal = bounce_sample.sample_normal;
             bounce_sample.visible_instance = info.material_index;
-            bounce_sample.sample_position = vec4<f32>(0.0);
-            bounce_sample.sample_normal = vec3<f32>(0.0);
-            bounce_sample.radiance = vec4<f32>(0.0);
         } else {
             // Only ambient radiance
             var out_radiance = input_radiance(ray, info, false, false, true).rgb;
@@ -1047,6 +1042,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         }
     }
 
+    surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
     let sample_radiance = shading(
         view_direction,
