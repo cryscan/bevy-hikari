@@ -302,7 +302,7 @@ pub struct HikariConfig {
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
     pub emissive_threshold: f32,
-    /// Count of indirect bounces
+    /// Count of indirect bounces.
     pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,

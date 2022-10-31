@@ -17,15 +17,15 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 ## Progress
 - [x] Extraction and preparation of mesh assets and instances
 - [x] G-Buffer generation
-- [x] 2-bounce path tracing
+- [x] N-bounce indirect lighting
 - [ ] Transparency
 - [x] Next event estimation
 - [ ] Better light sampling strategy
 - [x] ReSTIR: Temporal sample reuse
 - [x] ReSTIR: Spatial sample reuse
-- [ ] Spatiotemporal filtering
+- [x] Spatiotemporal filtering
 - [x] Temporal anti-aliasing
-- [ ] Temporal up-scaling 
+- [ ] Temporal up-scaling
 - [ ] Skinned animation
 - [ ] Hardware ray tracing (upstream related)
 
@@ -50,7 +50,7 @@ pub struct HikariConfig {
     pub solar_angle: f32,
     /// Threshold that emissive objects begin to lit others.
     pub emissive_threshold: f32,
-    /// Count of indirect bounces
+    /// Count of indirect bounces.
     pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
@@ -152,5 +152,6 @@ Just like Bevy, all code in this repository is dual-licensed under either:
 at your option.
 
 ## Credits
-"Fire Extinguisher" model and textures Copyright (C) 2021 by Cameron 'cron' Fraser.
-Released under Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0) license.
+- "Fire Extinguisher" model and textures Copyright (C) 2021 by Cameron 'cron' Fraser.
+  Released under Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0) license.
+- "WW2 City Scene" from [sketchfab](https://sketchfab.com/3d-models/ww2-cityscene-carentan-inspired-639dc3d330a940a2b9d7f40542eabdf3).
