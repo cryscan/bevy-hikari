@@ -659,8 +659,7 @@ fn env_brdf(
 fn temporal_restir(
     r: ptr<function, Reservoir>,
     s: Sample,
-    out_luminance: f32,
-    pdf: f32,
+    luminance: f32,
     max_sample_count: u32
 ) {
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
@@ -669,11 +668,10 @@ fn temporal_restir(
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
-    let w_new = select(out_luminance / pdf, 0.0, pdf < 0.0001);
     if depth_miss || instance_miss || normal_miss {
-        set_reservoir(r, s, w_new);
+        set_reservoir(r, s, luminance);
     } else {
-        update_reservoir(r, s, w_new);
+        update_reservoir(r, s, luminance);
     }
 
     // Clamp...
@@ -836,11 +834,12 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         surface,
         s.radiance
     );
+    let sample_luminance = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
-    temporal_restir(&r, s, luminance(sample_radiance), pdf, frame.max_temporal_reuse_count);
+    temporal_restir(&r, s, sample_luminance, frame.max_temporal_reuse_count);
 
     var out_radiance = shading(
         view_direction,
@@ -947,14 +946,10 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var info: HitInfo;
     var pdf: f32;
     var surface: Surface;
-    var bounce_sample: Sample;
+    var bounce_sample = s;
     var color_transport = vec3<f32>(1.0);
 
     for (var n = 0u; n < frame.indirect_bounces; n += 1u) {
-        if n == 0u {
-            bounce_sample = s;
-        }
-
         var rand_sample = sample_cosine_hemisphere(bounce_sample.random.xy);
         ray.origin = bounce_sample.visible_position.xyz + bounce_sample.visible_normal * RAY_BIAS;
         ray.direction = normal_basis(bounce_sample.visible_normal) * rand_sample.xyz;
@@ -966,7 +961,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         if n == 0u {
             s.sample_position = info.position;
             s.sample_normal = info.normal;
-            pdf = rand_sample.w;
         }
 
         bounce_sample.sample_position = info.position;
@@ -1007,9 +1001,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     in_radiance
                 );
                 out_radiance = out_radiance / candidate.p;
-                if n > 0u {
-                    out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.0001);
-                }
+                out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.01);
 
                 // Do radiance clamping
                 let out_luminance = luminance(out_radiance);
@@ -1034,9 +1026,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         } else {
             // Only ambient radiance
             var out_radiance = input_radiance(ray, info, false, false, true).rgb;
-            if n > 0u {
-                out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.0001);
-            }
+            out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.01);
             s.radiance += vec4<f32>(color_transport * out_radiance, 0.0);
             break;
         }
@@ -1051,11 +1041,12 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         surface,
         s.radiance
     );
+    let sample_luminance = luminance(sample_radiance);
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
-    temporal_restir(&r, s, luminance(sample_radiance), pdf, frame.max_temporal_reuse_count);
+    temporal_restir(&r, s, sample_luminance, frame.max_temporal_reuse_count);
 
     var out_radiance = shading(
         view_direction,
