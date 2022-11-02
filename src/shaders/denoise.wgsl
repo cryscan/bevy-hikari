@@ -166,7 +166,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var sum_irradiance = irradiance;
     var sum_w = 1.0;
 
-    if any(irradiance != irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
+    if any(irradiance != irradiance) || any(irradiance < vec3<f32>(0.0)) || any(irradiance > vec3<f32>(F32_MAX)) {
         sum_irradiance = irradiance;
         sum_w = 0.0;
     }
@@ -186,7 +186,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let albedo = textureLoad(albedo_texture, coords, 0).rgb;
         irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
 #endif
-        if any(irradiance != irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
+        if any(irradiance != irradiance) || any(irradiance < vec3<f32>(0.0)) || any(irradiance > vec3<f32>(F32_MAX)) {
             continue;
         }
 

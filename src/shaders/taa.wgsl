@@ -42,12 +42,13 @@ fn clip_towards_aabb_center(previous_color: vec3<f32>, current_color: vec3<f32>,
 }
 
 fn sample_previous_render_texture(uv: vec2<f32>) -> vec3<f32> {
-    return textureSampleLevel(previous_render_texture, linear_sampler, uv, 0.0).rgb;
+    let c = textureSampleLevel(previous_render_texture, linear_sampler, uv, 0.0).rgb;
+    return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
     let c = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
-    return RGB_to_YCoCg(c);
+    return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
 @compute @workgroup_size(8, 8, 1)
