@@ -51,22 +51,3 @@ fn frame_jitter(index: u32) -> vec2<f32> {
     let delta = vec2<f32>(halton(2u, id), halton(3u, id));
     return delta;
 }
-
-// YUV-RGB conversion routine from Hyper3D
-fn encode_pal_yuv(rgb: vec3<f32>) -> vec3<f32> {
-    let c = pow(rgb, vec3<f32>(2.2)); // gamma correction
-    return vec3<f32>(
-        dot(c, vec3<f32>(0.299, 0.587, 0.114)),
-        dot(c, vec3<f32>(-0.14713, -0.28886, 0.436)),
-        dot(c, vec3<f32>(0.615, -0.51499, -0.10001))
-    );
-}
-
-fn decode_pal_yuv(yuv: vec3<f32>) -> vec3<f32> {
-    let c = vec3<f32>(
-        dot(yuv, vec3<f32>(1., 0., 1.13983)),
-        dot(yuv, vec3<f32>(1., -0.39465, -0.58060)),
-        dot(yuv, vec3<f32>(1., 2.03211, 0.))
-    );
-    return pow(c, vec3<f32>(1.0 / 2.2)); // gamma correction
-}
