@@ -253,8 +253,8 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
     }
 
-    let mix_rate = select(0.0, 0.8, previous_color.a > 0.0);
-    color = mix(color, previous_color, mix_rate);
+    let mixed_color = mix(color, previous_color, 0.8);
+    color = select(mixed_color, color, any(previous_color != previous_color) || previous_color.a == 0.0);
 #endif
 
     store_output(coords, color);
