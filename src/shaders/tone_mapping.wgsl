@@ -15,7 +15,7 @@ var emissive_render_texture: texture_2d<f32>;
 var indirect_render_texture: texture_2d<f32>;
 
 @group(4) @binding(0)
-var output_texture: texture_storage_2d<rgba8unorm, read_write>;
+var output_texture: texture_storage_2d<rgba16float, read_write>;
 
 // luminance coefficients from Rec. 709.
 // https://en.wikipedia.org/wiki/Rec._709
@@ -33,11 +33,6 @@ fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
     let l_new = l_old / (1.0 + l_old);
     return change_luminance(color, l_new);
 }
-
-// fn tone_mapping(in: vec4<f32>) -> vec4<f32> {
-//     // tone_mapping
-//     return vec4<f32>(reinhard_luminance(in.rgb), in.a);
-// }
 
 @compute @workgroup_size(8, 8, 1)
 fn tone_mapping(@builtin(global_invocation_id) invocation_id: vec3<u32>) {

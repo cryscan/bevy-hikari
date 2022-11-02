@@ -22,7 +22,7 @@ use bevy::{
 use serde::Serialize;
 
 pub const DENOISE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const POST_PROCESS_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
+pub const POST_PROCESS_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct PostProcessPlugin;
 impl Plugin for PostProcessPlugin {
@@ -251,17 +251,6 @@ impl FromWorld for PostProcessPipeline {
                     },
                     count: None,
                 },
-                // TAA Output
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: POST_PROCESS_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
             ],
         });
 
@@ -298,9 +287,8 @@ impl FromWorld for PostProcessPipeline {
 pub enum PostProcessEntryPoint {
     #[default]
     ToneMapping = 0,
-    Taa = 1,
-    JasmineTaa = 2,
-    Denoise = 3,
+    JasmineTaa = 1,
+    Denoise = 2,
 }
 
 bitflags::bitflags! {
@@ -368,7 +356,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                 let shader = TONE_MAPPING_SHADER_HANDLE.typed();
                 (layout, shader)
             }
-            PostProcessEntryPoint::Taa | PostProcessEntryPoint::JasmineTaa => {
+            PostProcessEntryPoint::JasmineTaa => {
                 let layout = vec![
                     self.view_layout.clone(),
                     self.deferred_layout.clone(),
@@ -402,7 +390,6 @@ pub struct PostProcessTextures {
     pub denoise_render: [CachedTexture; 6],
     pub tone_mapping_output: CachedTexture,
     pub taa_internal: [CachedTexture; 2],
-    pub taa_output: CachedTexture,
     pub nearest_sampler: Sampler,
     pub linear_sampler: Sampler,
 }
@@ -447,7 +434,6 @@ fn prepare_post_process_textures(
                 create_texture(POST_PROCESS_TEXTURE_FORMAT),
                 create_texture(POST_PROCESS_TEXTURE_FORMAT),
             ];
-            let taa_output = create_texture(POST_PROCESS_TEXTURE_FORMAT);
 
             let nearest_sampler = render_device.create_sampler(&SamplerDescriptor {
                 mag_filter: FilterMode::Nearest,
@@ -469,7 +455,6 @@ fn prepare_post_process_textures(
                 denoise_render,
                 tone_mapping_output,
                 taa_internal,
-                taa_output,
                 nearest_sampler,
                 linear_sampler,
             });
@@ -480,7 +465,6 @@ fn prepare_post_process_textures(
 pub struct CachedPostProcessPipelines {
     denoise: [CachedComputePipelineId; 4],
     tone_mapping: CachedComputePipelineId,
-    taa: CachedComputePipelineId,
     taa_jasmine: CachedComputePipelineId,
 }
 
@@ -499,16 +483,12 @@ fn queue_post_process_pipelines(
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::ToneMapping);
     let tone_mapping = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Taa);
-    let taa = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
     let taa_jasmine = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     commands.insert_resource(CachedPostProcessPipelines {
         denoise,
         tone_mapping,
-        taa,
         taa_jasmine,
     })
 }
@@ -692,12 +672,6 @@ fn queue_post_process_bind_groups(
                         &post_process.tone_mapping_output.default_view,
                     ),
                 },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(
-                        &post_process.taa_internal[current].default_view,
-                    ),
-                },
             ],
         });
         let taa_output = render_device.create_bind_group(&BindGroupDescriptor {
@@ -705,7 +679,9 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.taa_output.default_view),
+                resource: BindingResource::TextureView(
+                    &post_process.taa_internal[current].default_view,
+                ),
             }],
         });
 
@@ -821,7 +797,6 @@ impl Node for PostProcessPassNode {
 
         if let Some(taa_version) = config.temporal_anti_aliasing {
             let pipeline = match taa_version {
-                crate::TaaVersion::Cryscan => pipelines.taa,
                 crate::TaaVersion::Jasmine => pipelines.taa_jasmine,
             };
 

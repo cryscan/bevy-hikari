@@ -337,7 +337,6 @@ impl Default for HikariConfig {
 
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
 pub enum TaaVersion {
-    Cryscan,
     #[default]
     Jasmine,
 }
