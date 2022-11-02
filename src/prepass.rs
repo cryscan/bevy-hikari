@@ -300,6 +300,17 @@ pub struct PrepassTextures {
     pub previous_instance_material: Handle<Image>,
 }
 
+impl PrepassTextures {
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.position, &mut self.previous_position);
+        std::mem::swap(&mut self.normal, &mut self.previous_normal);
+        std::mem::swap(
+            &mut self.instance_material,
+            &mut self.previous_instance_material,
+        );
+    }
+}
+
 impl ExtractComponent for PrepassTextures {
     type Query = &'static Self;
     type Filter = ();
@@ -403,19 +414,7 @@ fn prepass_textures_system(
         }
     }
 
-    for mut textures in &mut queries.p1() {
-        let position = textures.position.clone();
-        let normal = textures.normal.clone();
-        let instance_material = textures.instance_material.clone();
-
-        textures.position = textures.previous_position.clone();
-        textures.normal = textures.previous_normal.clone();
-        textures.instance_material = textures.previous_instance_material.clone();
-
-        textures.previous_position = position;
-        textures.previous_normal = normal;
-        textures.previous_instance_material = instance_material;
-    }
+    queries.p1().for_each_mut(|mut textures| textures.swap());
 }
 
 #[derive(Component, Deref, DerefMut)]
