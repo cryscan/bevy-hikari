@@ -100,15 +100,15 @@ fn load_cache_variance(coords: vec2<i32>, size: vec2<i32>) -> f32 {
         let offset = vec2<i32>(x, y);
         let sample_coords = coords + offset;
         if any(sample_coords < vec2<i32>(0)) || any(sample_coords >= size) {
-                continue;
+            continue;
         }
 
         let variance = textureLoad(variance_texture, sample_coords, 0).x;
         if variance > F32_MAX {
-                continue;
+            continue;
         }
 
-        sum_variance += frame.kernel[y + 1][x + 1] * variance;
+        sum_variance += frame.kernel[y + 1][x + 1] * max(variance, 0.0);
     }
     sum_variance = max(sum_variance, 0.0);
     textureStore(internal_variance, coords, vec4<f32>(sum_variance));
@@ -166,7 +166,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var sum_irradiance = irradiance;
     var sum_w = 1.0;
 
-    if any(irradiance != irradiance) || any(irradiance < vec3<f32>(0.0)) || any(irradiance > vec3<f32>(F32_MAX)) {
+    if any(irradiance != irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
         sum_irradiance = irradiance;
         sum_w = 0.0;
     }
@@ -186,7 +186,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let albedo = textureLoad(albedo_texture, coords, 0).rgb;
         irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
 #endif
-        if any(irradiance != irradiance) || any(irradiance < vec3<f32>(0.0)) || any(irradiance > vec3<f32>(F32_MAX)) {
+        if any(irradiance != irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
             continue;
         }
 
@@ -246,7 +246,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             continue;
         }
 
-        let dist = distance(previous_position_depth.xyz, position_depth.xyz);
+        let dist = distance(previous_position_depth.xyz, position_depth.xyz) / frame.kernel[y + 1][x + 1];
         if dist < min_distance {
             min_distance = dist;
             previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, sample_uv, 0.0);
