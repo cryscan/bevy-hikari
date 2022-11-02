@@ -41,9 +41,13 @@ fn clip_towards_aabb_center(previous_color: vec3<f32>, current_color: vec3<f32>,
     return select(previous_color, p_clip + v_clip / ma_unit, ma_unit > 1.0);
 }
 
+fn sample_previous_render_texture(uv: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(previous_render_texture, linear_sampler, uv, 0.0).rgb;
+}
+
 fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
     let c = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
-    return RGB_to_YCoCg(select(c, vec3<f32>(0.0), c != c));
+    return RGB_to_YCoCg(c);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -75,11 +79,11 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let texel_position_3 = (texel_position_1 + 2.0) * texel_size;
     let texel_position_12 = (texel_position_1 + offset12) * texel_size;
     var previous_color = vec3<f32>(0.0);
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_12.x, texel_position_0.y), 0.0).rgb * w12.x * w0.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_0.x, texel_position_12.y), 0.0).rgb * w0.x * w12.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_12.x, texel_position_12.y), 0.0).rgb * w12.x * w12.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_3.x, texel_position_12.y), 0.0).rgb * w3.x * w12.y;
-    previous_color += textureSampleLevel(previous_render_texture, linear_sampler, vec2<f32>(texel_position_12.x, texel_position_3.y), 0.0).rgb * w12.x * w3.y;
+    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_0.y)) * w12.x * w0.y;
+    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_0.x, texel_position_12.y)) * w0.x * w12.y;
+    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_12.y)) * w12.x * w12.y;
+    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
+    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
 
     // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
     let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
