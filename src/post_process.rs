@@ -35,7 +35,8 @@ pub struct FSRConstantsUniform {
     pub input_viewport_in_pixels: Vec2,
     pub input_size_in_pixels: Vec2,
     pub output_size_in_pixels: Vec2,
-    pub sharpness: u32,
+    pub sharpness: f32,
+    pub hdr: u32,
 }
 
 #[derive(Default)]
@@ -567,7 +568,8 @@ fn prepare_post_process_uniforms(
                 x: size.x as f32,
                 y: size.y as f32,
             },
-            sharpness: 0,
+            sharpness: 0.25, // TODO might be a setting later
+            hdr: 0,          // TODO might be a setting later
         };
 
         let mut fsr_constants_uniform_buffer = FSRConstantsUniformBuffer {
