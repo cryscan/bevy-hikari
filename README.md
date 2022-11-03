@@ -25,6 +25,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] ReSTIR: Spatial sample reuse
 - [x] Spatiotemporal filtering
 - [x] Temporal anti-aliasing
+- [x] Spatial up-scaling (FSR 1.0)
 - [ ] Temporal up-scaling
 - [ ] Skinned animation
 - [ ] Hardware ray tracing (upstream related)
@@ -62,6 +63,8 @@ pub struct HikariConfig {
     pub denoise: bool,
     /// Which TAA implementation to use.
     pub temporal_anti_aliasing: Option<TaaVersion>,
+    /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
+    pub upscale_ratio: f32,
 }
 ```
 
