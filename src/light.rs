@@ -304,11 +304,15 @@ fn prepare_light_pass_textures(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
+            let scale = 1.0 / config.upscale_ratio.max(1.0);
+            let size = UVec2::new(
+                (size.x as f32 * scale).ceil() as u32,
+                (size.y as f32 * scale).ceil() as u32,
+            );
             let mut create_texture = |texture_format| {
-                let scale = 1.0 / config.upscale_ratio.max(1.0);
                 let extent = Extent3d {
-                    width: (size.x as f32 * scale).ceil() as u32,
-                    height: (size.y as f32 * scale).ceil() as u32,
+                    width: size.x,
+                    height: size.y,
                     depth_or_array_layers: 1,
                 };
                 texture_cache.get(
@@ -576,6 +580,13 @@ impl Node for LightPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
         let config = world.resource::<HikariConfig>();
 
+        let size = camera.physical_target_size.unwrap();
+        let scale = 1.0 / config.upscale_ratio.max(1.0);
+        let scaled_size = UVec2::new(
+            (size.x as f32 * scale).ceil() as u32,
+            (size.y as f32 * scale).ceil() as u32,
+        );
+
         let mut pass = render_context
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
@@ -600,8 +611,7 @@ impl Node for LightPassNode {
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
             pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
@@ -611,8 +621,7 @@ impl Node for LightPassNode {
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_emissive) {
             pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
@@ -622,8 +631,7 @@ impl Node for LightPassNode {
             {
                 pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
         }
@@ -635,8 +643,7 @@ impl Node for LightPassNode {
         {
             pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
@@ -646,8 +653,7 @@ impl Node for LightPassNode {
             {
                 pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
         }

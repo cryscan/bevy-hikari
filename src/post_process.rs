@@ -1049,6 +1049,13 @@ impl Node for PostProcessPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
         let config = world.resource::<HikariConfig>();
 
+        let size = camera.physical_target_size.unwrap();
+        let scale = 1.0 / config.upscale_ratio.max(1.0);
+        let scaled_size = UVec2::new(
+            (size.x as f32 * scale).ceil() as u32,
+            (size.y as f32 * scale).ceil() as u32,
+        );
+
         let mut pass = render_context
             .command_encoder
             .begin_compute_pass(&ComputePassDescriptor::default());
@@ -1078,8 +1085,7 @@ impl Node for PostProcessPassNode {
                 {
                     pass.set_pipeline(pipeline);
 
-                    let size = camera.physical_target_size.unwrap();
-                    let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                     pass.dispatch_workgroups(count.x, count.y, 1);
                 }
             }
@@ -1091,8 +1097,7 @@ impl Node for PostProcessPassNode {
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.tone_mapping) {
             pass.set_pipeline(pipeline);
 
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
@@ -1107,8 +1112,7 @@ impl Node for PostProcessPassNode {
             if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline) {
                 pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
         }
@@ -1121,12 +1125,12 @@ impl Node for PostProcessPassNode {
             if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.upscale) {
                 pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let our_w = size.x * 2;
-                let our_h = size.y * 2;
-                let size_x = (our_w + 15) / 16;
-                let size_y = (our_h + 15) / 16;
-                pass.dispatch_workgroups(size_x, size_y, 1);
+                let count = (size * 2 + 15) / 16;
+                // let our_w = size.x * 2;
+                // let our_h = size.y * 2;
+                // let size_x = (our_w + 15) / 16;
+                // let size_y = (our_h + 15) / 16;
+                pass.dispatch_workgroups(count.x, count.y, 1);
             }
 
             pass.set_bind_group(1, &post_process_bind_group.upscale_sharpen, &[]);
@@ -1135,12 +1139,12 @@ impl Node for PostProcessPassNode {
             if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.upscale_sharpen) {
                 pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let our_w = size.x * 2;
-                let our_h = size.y * 2;
-                let size_x = (our_w + 15) / 16;
-                let size_y = (our_h + 15) / 16;
-                pass.dispatch_workgroups(size_x, size_y, 1);
+                let count = (size * 2 + 15) / 16;
+                // let our_w = size.x * 2;
+                // let our_h = size.y * 2;
+                // let size_x = (our_w + 15) / 16;
+                // let size_y = (our_h + 15) / 16;
+                pass.dispatch_workgroups(count.x, count.y, 1);
             }
         }
 
