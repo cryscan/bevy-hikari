@@ -214,11 +214,17 @@ impl<const I: usize> EntityRenderCommand for SetOverlayBindGroup<I> {
         (config, query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        if let Ok(bind_group) = query.get_inner(view) {
-            let bind_group = match config.temporal_anti_aliasing {
-                Some(_) => &bind_group.taa_output,
-                None => &bind_group.tone_mapping_output,
-            };
+        if let Ok(bind_group_in) = query.get_inner(view) {
+            let bind_group: &BindGroup;
+
+            if config.upscale_ratio != 1.0 {
+                bind_group = &bind_group_in.upscale_sharpen_output;
+            } else if config.temporal_anti_aliasing.is_some() {
+                bind_group = &bind_group_in.taa_output;
+            } else {
+                bind_group = &bind_group_in.tone_mapping_output;
+            }
+
             pass.set_bind_group(0, bind_group, &[]);
             RenderCommandResult::Success
         } else {

@@ -298,14 +298,15 @@ fn prepare_light_pass_textures(
     mut texture_cache: ResMut<TextureCache>,
     mut reservoir_cache: ResMut<ReservoirCache>,
     cameras: Query<(Entity, &ExtractedCamera)>,
+    config: Res<HikariConfig>,
 ) {
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
             let mut create_texture = |texture_format| {
                 let extent = Extent3d {
-                    width: size.x,
-                    height: size.y,
+                    width: (size.x as f32 / config.upscale_ratio) as u32,
+                    height: (size.y as f32 / config.upscale_ratio) as u32,
                     depth_or_array_layers: 1,
                 };
                 texture_cache.get(
