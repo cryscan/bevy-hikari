@@ -168,13 +168,13 @@ impl FromWorld for PostProcessPipeline {
             entries: &[
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
                 BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: ShaderStages::COMPUTE,
+                    visibility: ShaderStages::all(),
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
@@ -552,8 +552,9 @@ fn prepare_post_process_uniforms(
 ) {
     for (entity, camera) in &cameras {
         let size = camera.physical_target_size.unwrap();
-        let before_upscale_size_x = size.x as f32 / config.upscale_ratio;
-        let before_upscale_size_y = size.y as f32 / config.upscale_ratio;
+        let scale = 1.0 / config.upscale_ratio.max(1.0);
+        let before_upscale_size_x = size.x as f32 * scale;
+        let before_upscale_size_y = size.y as f32 * scale;
 
         let fsr_constants_uniform = FSRConstantsUniform {
             input_viewport_in_pixels: Vec2 {
@@ -611,14 +612,11 @@ fn prepare_post_process_textures(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let mut create_texture = |texture_format, size_muliply: f32| {
-                let tex_size = UVec2::new(
-                    (size.x as f32 * size_muliply) as u32,
-                    (size.y as f32 * size_muliply) as u32,
-                );
+            let mut create_texture = |texture_format, upscale_ratio: f32| {
+                let scale = 1.0 / upscale_ratio.max(1.0);
                 let extent = Extent3d {
-                    width: (tex_size.x as f32 / config.upscale_ratio) as u32,
-                    height: (tex_size.y as f32 / config.upscale_ratio) as u32,
+                    width: (size.x as f32 * scale).ceil() as u32,
+                    height: (size.y as f32 * scale).ceil() as u32,
                     depth_or_array_layers: 1,
                 };
                 texture_cache.get(
@@ -635,20 +633,23 @@ fn prepare_post_process_textures(
                 )
             };
 
-            let denoise_internal = [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, 1.0));
-            let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, 1.0);
-            let denoise_render = [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, 1.0));
+            let upscale_ratio = config.upscale_ratio;
 
-            let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0);
+            let denoise_internal =
+                [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, upscale_ratio));
+            let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, upscale_ratio);
+            let denoise_render =
+                [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, upscale_ratio));
+
+            let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, upscale_ratio);
 
             let taa_internal = [
-                create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0),
-                create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0),
+                create_texture(POST_PROCESS_TEXTURE_FORMAT, upscale_ratio),
+                create_texture(POST_PROCESS_TEXTURE_FORMAT, upscale_ratio),
             ];
 
-            let upscale_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, config.upscale_ratio);
-            let upscale_sharpen_output =
-                create_texture(POST_PROCESS_TEXTURE_FORMAT, config.upscale_ratio);
+            let upscale_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0);
+            let upscale_sharpen_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0);
 
             let nearest_sampler = render_device.create_sampler(&SamplerDescriptor {
                 mag_filter: FilterMode::Nearest,
@@ -736,6 +737,7 @@ pub struct PostProcessBindGroup {
     pub upscale_sharpen_output: BindGroup,
 }
 
+#[allow(clippy::type_complexity)]
 fn queue_post_process_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,

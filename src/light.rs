@@ -290,6 +290,7 @@ pub struct LightPassTextures {
     pub render: [CachedTexture; 3],
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_light_pass_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
@@ -304,9 +305,10 @@ fn prepare_light_pass_textures(
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
             let mut create_texture = |texture_format| {
+                let scale = 1.0 / config.upscale_ratio.max(1.0);
                 let extent = Extent3d {
-                    width: (size.x as f32 / config.upscale_ratio) as u32,
-                    height: (size.y as f32 / config.upscale_ratio) as u32,
+                    width: (size.x as f32 * scale).ceil() as u32,
+                    height: (size.y as f32 * scale).ceil() as u32,
                     depth_or_array_layers: 1,
                 };
                 texture_cache.get(

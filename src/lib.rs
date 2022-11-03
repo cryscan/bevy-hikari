@@ -85,9 +85,9 @@ pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
 pub const QUAD_MESH_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 pub const FSR1_EASU_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10969344919103020616); // TODO what are tehse numbers?
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11823787237582686663);
 pub const FSR1_RCAS_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10969344919103020617); // TODO what are tehse numbers?
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 17003547378277520107);
 
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
@@ -187,7 +187,6 @@ impl Plugin for HikariPlugin {
             FSR1_EASU_HANDLE,
             Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_easu.spv").as_ref()),
         );
-        let mut assets = app.world.resource_mut::<Assets<_>>();
         assets.set_untracked(
             FSR1_RCAS_HANDLE,
             Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_rcas.spv").as_ref()),

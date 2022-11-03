@@ -1,12 +1,11 @@
 use crate::{
-    post_process::{PostProcessBindGroup, PostProcessPipeline},
-    prepass::PrepassBindGroup,
-    HikariConfig, OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
+    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariConfig,
+    OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
     ecs::system::{
-        lifetimeless::{Read, SQuery, SRes},
+        lifetimeless::{Read, SQuery},
         SystemParamItem,
     },
     pbr::{DrawMesh, MeshPipelineKey},
@@ -22,7 +21,7 @@ use bevy::{
             SetItemPipeline, TrackedRenderPass,
         },
         render_resource::*,
-        renderer::RenderContext,
+        renderer::{RenderContext, RenderDevice},
         texture::BevyDefault,
         view::{ExtractedView, ViewTarget},
         Extract, RenderApp, RenderStage,
@@ -42,7 +41,8 @@ impl Plugin for OverlayPlugin {
                 .init_resource::<SpecializedMeshPipelines<OverlayPipeline>>()
                 .add_render_command::<Overlay, DrawOverlay>()
                 .add_system_to_stage(RenderStage::Extract, extract_overlay_camera_phases)
-                .add_system_to_stage(RenderStage::Queue, queue_overlay_mesh);
+                .add_system_to_stage(RenderStage::Queue, queue_overlay_meshes)
+                .add_system_to_stage(RenderStage::Queue, queue_overlay_bind_groups);
         }
     }
 }
@@ -58,10 +58,29 @@ pub struct OverlayPipeline {
 
 impl FromWorld for OverlayPipeline {
     fn from_world(world: &mut World) -> Self {
-        let input_layout = world
-            .resource::<PostProcessPipeline>()
-            .output_layout
-            .clone();
+        let render_device = world.resource::<RenderDevice>();
+        let input_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         Self { input_layout }
     }
 }
@@ -130,7 +149,7 @@ fn extract_overlay_camera_phases(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn queue_overlay_mesh(
+fn queue_overlay_meshes(
     mut commands: Commands,
     msaa: Res<Msaa>,
     draw_functions: Res<DrawFunctions<Overlay>>,
@@ -164,6 +183,46 @@ fn queue_overlay_mesh(
                 draw_function,
             });
         }
+    }
+}
+
+#[derive(Component)]
+pub struct OverlayBindGroup(pub BindGroup);
+
+fn queue_overlay_bind_groups(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    config: Res<HikariConfig>,
+    pipeline: Res<OverlayPipeline>,
+    query: Query<(Entity, &PostProcessTextures), With<ExtractedCamera>>,
+) {
+    for (entity, post_process) in &query {
+        let current = post_process.head;
+
+        let input_texture = match (
+            config.upscale_ratio == 1.0,
+            config.temporal_anti_aliasing.is_some(),
+        ) {
+            (false, _) => &post_process.upscale_sharpen_output.default_view,
+            (true, true) => &post_process.taa_internal[current].default_view,
+            (true, false) => &post_process.tone_mapping_output.default_view,
+        };
+
+        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.input_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(input_texture),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&post_process.linear_sampler),
+                },
+            ],
+        });
+        commands.entity(entity).insert(OverlayBindGroup(bind_group));
     }
 }
 
@@ -206,26 +265,16 @@ type DrawOverlay = (SetItemPipeline, SetOverlayBindGroup<0>, DrawMesh);
 
 pub struct SetOverlayBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetOverlayBindGroup<I> {
-    type Param = (SRes<HikariConfig>, SQuery<Read<PostProcessBindGroup>>);
+    type Param = SQuery<Read<OverlayBindGroup>>;
 
     fn render<'w>(
         view: Entity,
         _item: Entity,
-        (config, query): SystemParamItem<'w, '_, Self::Param>,
+        query: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        if let Ok(bind_group_in) = query.get_inner(view) {
-            let bind_group: &BindGroup;
-
-            if config.upscale_ratio != 1.0 {
-                bind_group = &bind_group_in.upscale_sharpen_output;
-            } else if config.temporal_anti_aliasing.is_some() {
-                bind_group = &bind_group_in.taa_output;
-            } else {
-                bind_group = &bind_group_in.tone_mapping_output;
-            }
-
-            pass.set_bind_group(0, bind_group, &[]);
+        if let Ok(bind_group) = query.get_inner(view) {
+            pass.set_bind_group(0, &bind_group.0, &[]);
             RenderCommandResult::Success
         } else {
             RenderCommandResult::Failure
