@@ -33,7 +33,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var projection = view.projection;
     
 #ifdef TEMPORAL_ANTI_ALIASING
-    let jitter = 2.0 * (frame_jitter(frame.number) - 0.5) / vec2<f32>(view.width, view.height);
+    let scale = max(frame.upscale_ratio, 1.0);
+    let jitter = 2.0 * scale * (frame_jitter(frame.number) - 0.5) / vec2<f32>(view.width, view.height);
     if projection[3].w != 1.0 {
         // Perspective
         projection[2][0] += jitter.x;

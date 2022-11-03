@@ -83,6 +83,7 @@ pub struct FrameUniform {
     pub max_spatial_reuse_count: u32,
     pub solar_angle: f32,
     pub max_indirect_luminance: f32,
+    pub upscale_ratio: f32,
 }
 
 #[derive(Default)]
@@ -125,6 +126,7 @@ fn prepare_frame_uniform(
         indirect_bounces,
         max_indirect_luminance,
         temporal_reuse,
+        upscale_ratio,
         ..
     } = config.into_inner().clone();
 
@@ -151,6 +153,7 @@ fn prepare_frame_uniform(
         solar_angle,
         max_indirect_luminance,
         suppress_temporal_reuse,
+        upscale_ratio,
     });
     uniform.buffer.write_buffer(&render_device, &render_queue);
     counter.0 += 1;
