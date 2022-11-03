@@ -55,9 +55,9 @@ layout(set=1,binding=0) uniform const_buffer
 	layout(set=0,binding=1) uniform sampler InputSampler;
 	#if SAMPLE_EASU
 		#define FSR_EASU_H 1
-		AH4 FsrEasuRH(AF2 p) { AH4 res = AH4(textureGather(sampler2D(InputTexture,InputSampler), p, 0)); return res; }
-		AH4 FsrEasuGH(AF2 p) { AH4 res = AH4(textureGather(sampler2D(InputTexture,InputSampler), p, 1)); return res; }
-		AH4 FsrEasuBH(AF2 p) { AH4 res = AH4(textureGather(sampler2D(InputTexture,InputSampler), p, 2)); return res; }	
+		AH4 FsrEasuRH(AF2 p) { AH4 res = AH4(fakeTextureGather(sampler2D(InputTexture,InputSampler), p, 0)); return res; }
+		AH4 FsrEasuGH(AF2 p) { AH4 res = AH4(fakeTextureGather(sampler2D(InputTexture,InputSampler), p, 1)); return res; }
+		AH4 FsrEasuBH(AF2 p) { AH4 res = AH4(fakeTextureGather(sampler2D(InputTexture,InputSampler), p, 2)); return res; }	
 	#endif
 	#if SAMPLE_RCAS
 		#define FSR_RCAS_H
@@ -104,7 +104,6 @@ void CurrFilter(AU2 pos, AU4 Const0, AU4 Const1, AU4 Const2, AU4 Const3)
 		imageStore(OutputTexture, ASU2(pos), AH4(c, 1));
 	#endif
 #endif
-	//imageStore(OutputTexture, ASU2(pos), vec4(0.0, 0.0, 0.0, 1.0));
 }
 
 layout(local_size_x=64) in;
@@ -113,7 +112,7 @@ void main()
 	AU4 const0, const1, const2, const3;
 
 	#if SAMPLE_EASU
-		// TODO: move this to cpu, as this stuff doesn't change often
+		// TODO: move this later to cpu, as this stuff doesn't change often
 		FsrEasuCon(
 			const0, const1, const2, const3,
 			input_viewport_in_pixels.x, input_viewport_in_pixels.y,
