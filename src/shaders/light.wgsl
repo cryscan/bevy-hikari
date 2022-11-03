@@ -879,7 +879,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let validation_radiance = input_radiance(ray, info, true, false, false);
 #endif
 
-        let luminance_ratio = luminance(validation_radiance.rgb) / luminance(r.s.radiance.rgb);
+        let luminance_ratio = luminance(validation_radiance.rgb) / max(luminance(r.s.radiance.rgb), 0.0001);
         if luminance_ratio > 1.25 || luminance_ratio < 0.8 {
             let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
             set_reservoir(&r, s, w_new);
