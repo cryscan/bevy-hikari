@@ -1,0 +1,2 @@
+%VULKAN_SDK%\Bin\glslangValidator.exe --target-env vulkan1.2 -S comp -o fsr_pass_easu.spv -V fsr_pass_easu.glsl
+%VULKAN_SDK%\Bin\glslangValidator.exe --target-env vulkan1.2 -S comp -o fsr_pass_rcas.spv -V fsr_pass_rcas.glsl
