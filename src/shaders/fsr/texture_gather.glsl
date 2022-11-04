@@ -6,5 +6,5 @@ AF4 fakeTextureGather(texture2D tex, sampler smp, vec2 p, int comp) {
 	vec4 sp2 = texture(sampler2D(tex, smp), p + ps); // bottom-right
 	ps *= -1.0;
 	vec4 sp4 = texture(sampler2D(tex, smp), p + ps); // top-left
-	return AF4(sp1[comp], sp2[comp], sp3[comp], sp4[comp]);
+	return AF4(sp4[comp], sp3[comp], sp2[comp], sp1[comp]);
 }
