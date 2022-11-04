@@ -1,7 +1,9 @@
 #import bevy_hikari::utils
 
 @group(0) @binding(0)
-var input_texture: texture_storage_2d<rgba16float, read_write>;
+var input_texture: texture_2d<f32>;
+@group(0) @binding(1)
+var linear_sampler: sampler;
 
 // Source: Advanced VR Rendering, GDC 2015, Alex Vlachos, Valve, Slide 49
 // https://media.steampowered.com/apps/valve/2015/Alex_Vlachos_Advanced_VR_Rendering_GDC2015.pdf
@@ -31,8 +33,9 @@ struct FragmentOutput {
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
+    let uv = clip_to_uv(vec4<f32>(in.position, 1.0));
 
-    out.color = textureLoad(input_texture, vec2<i32>(in.clip_position.xy));
+    out.color = textureSample(input_texture, linear_sampler, uv);
     out.color += vec4<f32>(screen_space_dither(in.clip_position.xy), 0.0);
     return out;
 }

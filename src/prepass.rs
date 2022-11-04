@@ -352,12 +352,14 @@ fn prepass_textures_system(
         Query<(Entity, &Camera), Changed<Camera>>,
         Query<&mut PrepassTextures>,
     )>,
+    config: Res<HikariConfig>,
 ) {
     for (entity, camera) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
+            let scale = 1.0 / config.upscale_ratio();
             let size = Extent3d {
-                width: size.x,
-                height: size.y,
+                width: (size.x as f32 * scale).ceil() as u32,
+                height: (size.y as f32 * scale).ceil() as u32,
                 depth_or_array_layers: 1,
             };
             let texture_usage = TextureUsages::COPY_DST
