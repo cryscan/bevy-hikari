@@ -569,8 +569,8 @@ fn prepare_post_process_uniforms(
                 x: size.x as f32,
                 y: size.y as f32,
             },
-            sharpness: 0.25, // TODO might be a setting later
-            hdr: 0,          // TODO might be a setting later
+            sharpness: config.upscale_sharpness,
+            hdr: 0, // Usless for now
         };
 
         let mut fsr_constants_uniform_buffer = FSRConstantsUniformBuffer {

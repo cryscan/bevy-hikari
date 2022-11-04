@@ -329,6 +329,8 @@ pub struct HikariConfig {
     pub temporal_anti_aliasing: Option<TaaVersion>,
     /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
     pub upscale_ratio: f32,
+    /// From 0.0 - 2.0 where 0.0 means max sharpness (has effect only with upscale_ratio > 1.0)
+    pub upscale_sharpness: f32,
 }
 
 impl Default for HikariConfig {
@@ -347,6 +349,7 @@ impl Default for HikariConfig {
             denoise: true,
             temporal_anti_aliasing: Some(TaaVersion::default()),
             upscale_ratio: 1.0,
+            upscale_sharpness: 0.25,
         }
     }
 }
