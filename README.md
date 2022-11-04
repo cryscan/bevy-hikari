@@ -63,8 +63,8 @@ pub struct HikariConfig {
     pub denoise: bool,
     /// Which TAA implementation to use.
     pub temporal_anti_aliasing: Option<TaaVersion>,
-    /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
-    pub upscale_ratio: f32,
+    /// Which upscaling implementation to use.
+    pub upscale: Option<UpscaleVersion>,
 }
 ```
 
