@@ -1,1 +1,1 @@
-pub use crate::{HikariConfig, HikariPlugin, TaaVersion};
+pub use crate::{HikariConfig, HikariPlugin, TaaVersion, UpscaleVersion};

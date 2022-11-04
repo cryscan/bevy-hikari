@@ -327,10 +327,8 @@ pub struct HikariConfig {
     pub denoise: bool,
     /// Which TAA implementation to use.
     pub temporal_anti_aliasing: Option<TaaVersion>,
-    /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
-    pub upscale_ratio: f32,
-    /// From 0.0 - 2.0 where 0.0 means max sharpness (has effect only with upscale_ratio > 1.0)
-    pub upscale_sharpness: f32,
+    /// Which upscaling implementation to use.
+    pub upscale: Option<UpscaleVersion>,
 }
 
 impl Default for HikariConfig {
@@ -348,8 +346,23 @@ impl Default for HikariConfig {
             spatial_reuse: true,
             denoise: true,
             temporal_anti_aliasing: Some(TaaVersion::default()),
-            upscale_ratio: 1.0,
-            upscale_sharpness: 0.25,
+            upscale: Some(UpscaleVersion::default()),
+        }
+    }
+}
+
+impl HikariConfig {
+    pub fn upscale_ratio(&self) -> f32 {
+        match self.upscale {
+            Some(UpscaleVersion::Fsr1 { ratio, .. }) => ratio.clamp(1.0, 2.0),
+            None => 1.0,
+        }
+    }
+
+    pub fn upscale_sharpness(&self) -> f32 {
+        match self.upscale {
+            Some(UpscaleVersion::Fsr1 { sharpness, .. }) => sharpness,
+            None => 0.0,
         }
     }
 }
@@ -358,6 +371,25 @@ impl Default for HikariConfig {
 pub enum TaaVersion {
     #[default]
     Jasmine,
+}
+
+#[derive(Debug, Clone, Copy, Reflect)]
+pub enum UpscaleVersion {
+    Fsr1 {
+        /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
+        ratio: f32,
+        /// From 0.0 - 2.0 where 0.0 means max sharpness (has effect only with upscale_ratio > 1.0)
+        sharpness: f32,
+    },
+}
+
+impl Default for UpscaleVersion {
+    fn default() -> Self {
+        Self::Fsr1 {
+            ratio: 1.0,
+            sharpness: 0.25,
+        }
+    }
 }
 
 #[derive(Clone, Deref, ExtractResource)]

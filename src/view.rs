@@ -117,6 +117,7 @@ fn prepare_frame_uniform(
     //     }
     // }
 
+    let upscale_ratio = config.upscale_ratio();
     let HikariConfig {
         direct_validate_interval,
         emissive_validate_interval,
@@ -126,7 +127,6 @@ fn prepare_frame_uniform(
         indirect_bounces,
         max_indirect_luminance,
         temporal_reuse,
-        upscale_ratio,
         ..
     } = config.into_inner().clone();
 

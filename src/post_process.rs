@@ -552,7 +552,7 @@ fn prepare_post_process_uniforms(
 ) {
     for (entity, camera) in &cameras {
         let size = camera.physical_target_size.unwrap();
-        let scale = 1.0 / config.upscale_ratio.max(1.0);
+        let scale = 1.0 / config.upscale_ratio();
         let before_upscale_size_x = size.x as f32 * scale;
         let before_upscale_size_y = size.y as f32 * scale;
 
@@ -569,8 +569,8 @@ fn prepare_post_process_uniforms(
                 x: size.x as f32,
                 y: size.y as f32,
             },
-            sharpness: config.upscale_sharpness,
-            hdr: 0, // Usless for now
+            sharpness: config.upscale_sharpness(),
+            hdr: 0, // Useless for now
         };
 
         let mut fsr_constants_uniform_buffer = FSRConstantsUniformBuffer {
@@ -633,7 +633,7 @@ fn prepare_post_process_textures(
                 )
             };
 
-            let upscale_ratio = config.upscale_ratio;
+            let upscale_ratio = config.upscale_ratio();
 
             let denoise_internal =
                 [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, upscale_ratio));
@@ -1050,7 +1050,7 @@ impl Node for PostProcessPassNode {
         let config = world.resource::<HikariConfig>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = 1.0 / config.upscale_ratio.max(1.0);
+        let scale = 1.0 / config.upscale_ratio();
         let scaled_size = UVec2::new(
             (size.x as f32 * scale).ceil() as u32,
             (size.y as f32 * scale).ceil() as u32,
@@ -1117,7 +1117,7 @@ impl Node for PostProcessPassNode {
             }
         }
 
-        if config.upscale_ratio != 1.0 {
+        if config.upscale_ratio() > 1.0 {
             pass.set_bind_group(0, &post_process_bind_group.sampler, &[]);
             pass.set_bind_group(1, &post_process_bind_group.upscale, &[]);
             pass.set_bind_group(2, &post_process_bind_group.upscale_output, &[]);
@@ -1126,10 +1126,6 @@ impl Node for PostProcessPassNode {
                 pass.set_pipeline(pipeline);
 
                 let count = (size * 2 + 15) / 16;
-                // let our_w = size.x * 2;
-                // let our_h = size.y * 2;
-                // let size_x = (our_w + 15) / 16;
-                // let size_y = (our_h + 15) / 16;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
 
@@ -1140,10 +1136,6 @@ impl Node for PostProcessPassNode {
                 pass.set_pipeline(pipeline);
 
                 let count = (size * 2 + 15) / 16;
-                // let our_w = size.x * 2;
-                // let our_h = size.y * 2;
-                // let size_x = (our_w + 15) / 16;
-                // let size_y = (our_h + 15) / 16;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
         }

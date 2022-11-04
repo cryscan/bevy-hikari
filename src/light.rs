@@ -304,7 +304,7 @@ fn prepare_light_pass_textures(
     for (entity, camera) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let scale = 1.0 / config.upscale_ratio.max(1.0);
+            let scale = 1.0 / config.upscale_ratio();
             let size = UVec2::new(
                 (size.x as f32 * scale).ceil() as u32,
                 (size.y as f32 * scale).ceil() as u32,
@@ -581,7 +581,7 @@ impl Node for LightPassNode {
         let config = world.resource::<HikariConfig>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = 1.0 / config.upscale_ratio.max(1.0);
+        let scale = 1.0 / config.upscale_ratio();
         let scaled_size = UVec2::new(
             (size.x as f32 * scale).ceil() as u32,
             (size.y as f32 * scale).ceil() as u32,

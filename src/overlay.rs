@@ -200,7 +200,7 @@ fn queue_overlay_bind_groups(
         let current = post_process.head;
 
         let input_texture = match (
-            config.upscale_ratio == 1.0,
+            config.upscale_ratio() == 1.0,
             config.temporal_anti_aliasing.is_some(),
         ) {
             (false, _) => &post_process.upscale_sharpen_output.default_view,
