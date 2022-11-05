@@ -365,7 +365,9 @@ impl ExtractComponent for HikariConfig {
 impl HikariConfig {
     pub fn upscale_ratio(&self) -> f32 {
         match self.upscale {
-            Some(UpscaleVersion::Fsr1 { ratio, .. }) => ratio.clamp(1.0, 2.0),
+            Some(UpscaleVersion::Fsr1 { ratio, .. }) | Some(UpscaleVersion::SmaaTu4x { ratio }) => {
+                ratio.clamp(1.0, 2.0)
+            }
             None => 1.0,
         }
     }
@@ -373,7 +375,7 @@ impl HikariConfig {
     pub fn upscale_sharpness(&self) -> f32 {
         match self.upscale {
             Some(UpscaleVersion::Fsr1 { sharpness, .. }) => sharpness,
-            None => 0.0,
+            _ => 0.0,
         }
     }
 }
@@ -404,6 +406,9 @@ pub enum UpscaleVersion {
         ratio: f32,
         /// From 0.0 - 2.0 where 0.0 means max sharpness (has effect only with upscale_ratio > 1.0)
         sharpness: f32,
+    },
+    SmaaTu4x {
+        ratio: f32,
     },
 }
 

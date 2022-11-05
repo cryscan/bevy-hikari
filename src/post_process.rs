@@ -2,8 +2,8 @@ use crate::{
     light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
-    HikariConfig, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE, FSR1_RCAS_HANDLE, TAA_SHADER_HANDLE,
-    TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
+    HikariConfig, UpscaleVersion, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE, FSR1_RCAS_HANDLE,
+    TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
     ecs::query::QueryItem,
@@ -19,7 +19,7 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
-        texture::{CachedTexture, FallbackImage, TextureCache},
+        texture::{FallbackImage, TextureCache},
         view::ViewUniformOffset,
         RenderApp, RenderStage,
     },
@@ -572,64 +572,48 @@ fn compute_fsr_constants(
 #[derive(Component)]
 pub struct PostProcessTextures {
     pub head: usize,
-    pub denoise_internal: [CachedTexture; 3],
-    pub denoise_internal_variance: CachedTexture,
-    pub denoise_render: [CachedTexture; 6],
-    pub tone_mapping_output: CachedTexture,
-    pub taa_internal: [CachedTexture; 2],
     pub nearest_sampler: Sampler,
     pub linear_sampler: Sampler,
-    pub upscale_output: CachedTexture,
-    pub upscale_sharpen_output: CachedTexture,
+    pub denoise_internal: [TextureView; 3],
+    pub denoise_internal_variance: TextureView,
+    pub denoise_render: [TextureView; 6],
+    pub tone_mapping_output: TextureView,
+    pub taa_internal: [TextureView; 2],
+    pub upscale_output: TextureView,
+    pub upscale_sharpen_output: TextureView,
 }
 
 fn prepare_post_process_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     mut texture_cache: ResMut<TextureCache>,
+    fallback: Res<FallbackImage>,
     cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariConfig)>,
 ) {
     for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let mut create_texture = |texture_format, upscale_ratio: f32| {
-                let scale = 1.0 / upscale_ratio.max(1.0);
+            let mut create_texture = |texture_format, scale: f32| {
                 let extent = Extent3d {
                     width: (size.x as f32 * scale).ceil() as u32,
                     height: (size.y as f32 * scale).ceil() as u32,
                     depth_or_array_layers: 1,
                 };
-                texture_cache.get(
-                    &render_device,
-                    TextureDescriptor {
-                        label: None,
-                        size: extent,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: texture_format,
-                        usage: texture_usage,
-                    },
-                )
+                texture_cache
+                    .get(
+                        &render_device,
+                        TextureDescriptor {
+                            label: None,
+                            size: extent,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format: texture_format,
+                            usage: texture_usage,
+                        },
+                    )
+                    .default_view
             };
-
-            let upscale_ratio = config.upscale_ratio();
-
-            let denoise_internal =
-                [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, upscale_ratio));
-            let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, upscale_ratio);
-            let denoise_render =
-                [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, upscale_ratio));
-
-            let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, upscale_ratio);
-
-            let taa_internal = [
-                create_texture(POST_PROCESS_TEXTURE_FORMAT, upscale_ratio),
-                create_texture(POST_PROCESS_TEXTURE_FORMAT, upscale_ratio),
-            ];
-
-            let upscale_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0);
-            let upscale_sharpen_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0);
 
             let nearest_sampler = render_device.create_sampler(&SamplerDescriptor {
                 mag_filter: FilterMode::Nearest,
@@ -644,15 +628,40 @@ fn prepare_post_process_textures(
                 ..Default::default()
             });
 
+            let scale = 1.0 / config.upscale_ratio();
+
+            let denoise_internal = [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
+            let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
+            let denoise_render = [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
+
+            let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, scale);
+
+            let taa_internal = match config.temporal_anti_aliasing {
+                Some(_) => [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale)),
+                None => [(); 2].map(|_| fallback.texture_view.clone()),
+            };
+
+            let (upscale_output, upscale_sharpen_output) = match config.upscale {
+                Some(UpscaleVersion::Fsr1 { .. }) => (
+                    create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0),
+                    create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0),
+                ),
+                Some(UpscaleVersion::SmaaTu4x { .. }) => (
+                    create_texture(POST_PROCESS_TEXTURE_FORMAT, 2.0 * scale),
+                    fallback.texture_view.clone(),
+                ),
+                None => (fallback.texture_view.clone(), fallback.texture_view.clone()),
+            };
+
             commands.entity(entity).insert(PostProcessTextures {
                 head: counter.0 % 2,
+                nearest_sampler,
+                linear_sampler,
                 denoise_internal,
                 denoise_internal_variance,
                 denoise_render,
                 tone_mapping_output,
                 taa_internal,
-                nearest_sampler,
-                linear_sampler,
                 upscale_output,
                 upscale_sharpen_output,
             });
@@ -777,27 +786,19 @@ fn queue_post_process_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(
-                        &post_process.denoise_internal[0].default_view,
-                    ),
+                    resource: BindingResource::TextureView(&post_process.denoise_internal[0]),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(
-                        &post_process.denoise_internal[1].default_view,
-                    ),
+                    resource: BindingResource::TextureView(&post_process.denoise_internal[1]),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(
-                        &post_process.denoise_internal[2].default_view,
-                    ),
+                    resource: BindingResource::TextureView(&post_process.denoise_internal[2]),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::TextureView(
-                        &post_process.denoise_internal_variance.default_view,
-                    ),
+                    resource: BindingResource::TextureView(&post_process.denoise_internal_variance),
                 },
             ],
         });
@@ -808,26 +809,26 @@ fn queue_post_process_bind_groups(
                 entries: &[
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo.default_view),
+                        resource: BindingResource::TextureView(&light.albedo),
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureView(&light.variance[id].default_view),
+                        resource: BindingResource::TextureView(&light.variance[id]),
                     },
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &post_process.denoise_render[previous + 2 * id].default_view,
+                            &post_process.denoise_render[previous + 2 * id],
                         ),
                     },
                     BindGroupEntry {
                         binding: 3,
-                        resource: BindingResource::TextureView(&light.render[id].default_view),
+                        resource: BindingResource::TextureView(&light.render[id]),
                     },
                     BindGroupEntry {
                         binding: 4,
                         resource: BindingResource::TextureView(
-                            &post_process.denoise_render[current + 2 * id].default_view,
+                            &post_process.denoise_render[current + 2 * id],
                         ),
                     },
                 ],
@@ -835,15 +836,11 @@ fn queue_post_process_bind_groups(
         });
 
         let (direct_render, emissive_render, indirect_render) = match config.denoise {
-            false => (
-                &light.render[0].default_view,
-                &light.render[1].default_view,
-                &light.render[2].default_view,
-            ),
+            false => (&light.render[0], &light.render[1], &light.render[2]),
             true => (
-                &post_process.denoise_render[current].default_view,
-                &post_process.denoise_render[current + 2].default_view,
-                &post_process.denoise_render[current + 4].default_view,
+                &post_process.denoise_render[current],
+                &post_process.denoise_render[current + 2],
+                &post_process.denoise_render[current + 4],
             ),
         };
         let tone_mapping = render_device.create_bind_group(&BindGroupDescriptor {
@@ -869,9 +866,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(
-                    &post_process.tone_mapping_output.default_view,
-                ),
+                resource: BindingResource::TextureView(&post_process.tone_mapping_output),
             }],
         });
 
@@ -881,15 +876,11 @@ fn queue_post_process_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(
-                        &post_process.taa_internal[previous].default_view,
-                    ),
+                    resource: BindingResource::TextureView(&post_process.taa_internal[previous]),
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(
-                        &post_process.tone_mapping_output.default_view,
-                    ),
+                    resource: BindingResource::TextureView(&post_process.tone_mapping_output),
                 },
             ],
         });
@@ -898,15 +889,13 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(
-                    &post_process.taa_internal[current].default_view,
-                ),
+                resource: BindingResource::TextureView(&post_process.taa_internal[current]),
             }],
         });
 
         let upscale_input_texture = match config.temporal_anti_aliasing {
-            Some(_) => &post_process.taa_internal[current].default_view,
-            None => &post_process.tone_mapping_output.default_view,
+            Some(_) => &post_process.taa_internal[current],
+            None => &post_process.tone_mapping_output,
         };
 
         let upscale = render_device.create_bind_group(&BindGroupDescriptor {
@@ -929,7 +918,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.upscale_output.default_view),
+                resource: BindingResource::TextureView(&post_process.upscale_output),
             }],
         });
 
@@ -943,9 +932,7 @@ fn queue_post_process_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(
-                        &post_process.upscale_output.default_view,
-                    ),
+                    resource: BindingResource::TextureView(&post_process.upscale_output),
                 },
             ],
         });
@@ -955,9 +942,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(
-                    &post_process.upscale_sharpen_output.default_view,
-                ),
+                resource: BindingResource::TextureView(&post_process.upscale_sharpen_output),
             }],
         });
 
@@ -978,6 +963,7 @@ fn queue_post_process_bind_groups(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct PostProcessPassNode {
     query: QueryState<(
         &'static ExtractedCamera,
@@ -1107,7 +1093,7 @@ impl Node for PostProcessPassNode {
             }
         }
 
-        if config.upscale_ratio() > 1.0 {
+        if matches!(config.upscale, Some(UpscaleVersion::Fsr1 { .. })) {
             pass.set_bind_group(0, &post_process_bind_group.sampler, &[]);
             pass.set_bind_group(
                 1,

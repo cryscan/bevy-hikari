@@ -17,7 +17,7 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::{CachedTexture, FallbackImage, TextureCache},
+        texture::{FallbackImage, TextureCache},
         view::ViewUniformOffset,
         RenderApp, RenderStage,
     },
@@ -287,9 +287,9 @@ fn prepare_light_pipeline(
 pub struct LightPassTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
-    pub albedo: CachedTexture,
-    pub variance: [CachedTexture; 3],
-    pub render: [CachedTexture; 3],
+    pub albedo: TextureView,
+    pub variance: [TextureView; 3],
+    pub render: [TextureView; 3],
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -315,18 +315,20 @@ fn prepare_light_pass_textures(
                     height: size.y,
                     depth_or_array_layers: 1,
                 };
-                texture_cache.get(
-                    &render_device,
-                    TextureDescriptor {
-                        label: None,
-                        size: extent,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: texture_format,
-                        usage: texture_usage,
-                    },
-                )
+                texture_cache
+                    .get(
+                        &render_device,
+                        TextureDescriptor {
+                            label: None,
+                            size: extent,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format: texture_format,
+                            usage: texture_usage,
+                        },
+                    )
+                    .default_view
             };
 
             if match reservoir_cache.get(&entity) {
@@ -463,8 +465,8 @@ fn queue_light_bind_groups(
             .bind_group;
 
             let render = [0, 1, 2].map(|id| {
-                let variance = &light.variance[id].default_view;
-                let render = &light.render[id].default_view;
+                let variance = &light.variance[id];
+                let render = &light.render[id];
 
                 render_device.create_bind_group(&BindGroupDescriptor {
                     label: None,
@@ -472,7 +474,7 @@ fn queue_light_bind_groups(
                     entries: &[
                         BindGroupEntry {
                             binding: 0,
-                            resource: BindingResource::TextureView(&light.albedo.default_view),
+                            resource: BindingResource::TextureView(&light.albedo),
                         },
                         BindGroupEntry {
                             binding: 1,
