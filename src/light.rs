@@ -4,7 +4,7 @@ use crate::{
         TextureBindGroupLayout,
     },
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
-    view::{FrameCounter, PreviousViewUniformOffset},
+    view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
@@ -12,6 +12,7 @@ use bevy::{
     prelude::*,
     render::{
         camera::ExtractedCamera,
+        extract_component::DynamicUniformIndex,
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
@@ -22,6 +23,7 @@ use bevy::{
     },
     utils::HashMap,
 };
+use itertools::multizip;
 use serde::Serialize;
 
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
@@ -295,13 +297,11 @@ fn prepare_light_pass_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    frame_counter: Res<FrameCounter>,
     mut texture_cache: ResMut<TextureCache>,
     mut reservoir_cache: ResMut<ReservoirCache>,
-    cameras: Query<(Entity, &ExtractedCamera)>,
-    config: Res<HikariConfig>,
+    cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariConfig)>,
 ) {
-    for (entity, camera) in &cameras {
+    for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
             let scale = 1.0 / config.upscale_ratio();
@@ -356,7 +356,7 @@ fn prepare_light_pass_textures(
             let render = [(); 3].map(|_| create_texture(RENDER_TEXTURE_FORMAT));
 
             commands.entity(entity).insert(LightPassTextures {
-                head: frame_counter.0 % 2,
+                head: counter.0 % 2,
                 albedo: create_texture(ALBEDO_TEXTURE_FORMAT),
                 variance,
                 render,
@@ -529,10 +529,12 @@ fn queue_light_bind_groups(
 pub struct LightPassNode {
     query: QueryState<(
         &'static ExtractedCamera,
+        &'static DynamicUniformIndex<FrameUniform>,
         &'static ViewUniformOffset,
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
         &'static LightBindGroup,
+        &'static HikariConfig,
     )>,
 }
 
@@ -562,11 +564,18 @@ impl Node for LightPassNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (camera, view_uniform, previous_view_uniform, view_lights, light_bind_group) =
-            match self.query.get_manual(world, entity) {
-                Ok(query) => query,
-                Err(_) => return Ok(()),
-            };
+        let (
+            camera,
+            frame_uniform,
+            view_uniform,
+            previous_view_uniform,
+            view_lights,
+            light_bind_group,
+            config,
+        ) = match self.query.get_manual(world, entity) {
+            Ok(query) => query,
+            Err(_) => return Ok(()),
+        };
         let view_bind_group = match world.get_resource::<PrepassBindGroup>() {
             Some(bind_group) => &bind_group.view,
             None => return Ok(()),
@@ -578,7 +587,6 @@ impl Node for LightPassNode {
 
         let pipelines = world.resource::<CachedLightPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
-        let config = world.resource::<HikariConfig>();
 
         let size = camera.physical_target_size.unwrap();
         let scale = 1.0 / config.upscale_ratio();
@@ -595,6 +603,7 @@ impl Node for LightPassNode {
             0,
             view_bind_group,
             &[
+                frame_uniform.index(),
                 view_uniform.offset,
                 previous_view_uniform.offset,
                 view_lights.offset,
@@ -605,56 +614,36 @@ impl Node for LightPassNode {
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &light_bind_group.noise, &[]);
 
-        pass.set_bind_group(5, &light_bind_group.render[0], &[]);
-        pass.set_bind_group(6, &light_bind_group.reservoir[0], &[]);
+        for (id, (render, reservoir, pipeline)) in multizip((
+            light_bind_group.render.iter(),
+            light_bind_group.reservoir.iter(),
+            [
+                &pipelines.direct_lit,
+                &pipelines.direct_emissive,
+                &pipelines.indirect_lit_ambient,
+            ],
+        ))
+        .enumerate()
+        {
+            pass.set_bind_group(5, render, &[]);
+            pass.set_bind_group(6, reservoir, &[]);
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
-            pass.set_pipeline(pipeline);
-
-            let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
-
-        pass.set_bind_group(5, &light_bind_group.render[1], &[]);
-        pass.set_bind_group(6, &light_bind_group.reservoir[1], &[]);
-
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_emissive) {
-            pass.set_pipeline(pipeline);
-
-            let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
-
-        if config.spatial_reuse {
-            if let Some(pipeline) =
-                pipeline_cache.get_compute_pipeline(pipelines.emissive_spatial_reuse)
-            {
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline) {
                 pass.set_pipeline(pipeline);
 
                 let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
-        }
 
-        pass.set_bind_group(5, &light_bind_group.render[2], &[]);
-        pass.set_bind_group(6, &light_bind_group.reservoir[2], &[]);
+            if id > 0 && config.spatial_reuse {
+                if let Some(pipeline) =
+                    pipeline_cache.get_compute_pipeline(pipelines.emissive_spatial_reuse)
+                {
+                    pass.set_pipeline(pipeline);
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.indirect_lit_ambient)
-        {
-            pass.set_pipeline(pipeline);
-
-            let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
-
-        if config.spatial_reuse {
-            if let Some(pipeline) =
-                pipeline_cache.get_compute_pipeline(pipelines.indirect_spatial_reuse)
-            {
-                pass.set_pipeline(pipeline);
-
-                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                pass.dispatch_workgroups(count.x, count.y, 1);
+                    let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    pass.dispatch_workgroups(count.x, count.y, 1);
+                }
             }
         }
 

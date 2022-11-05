@@ -192,11 +192,10 @@ pub struct OverlayBindGroup(pub BindGroup);
 fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    config: Res<HikariConfig>,
     pipeline: Res<OverlayPipeline>,
-    query: Query<(Entity, &PostProcessTextures), With<ExtractedCamera>>,
+    query: Query<(Entity, &PostProcessTextures, &HikariConfig), With<ExtractedCamera>>,
 ) {
-    for (entity, post_process) in &query {
+    for (entity, post_process, config) in &query {
         let current = post_process.head;
 
         let input_texture = match (

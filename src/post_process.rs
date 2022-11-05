@@ -1,7 +1,7 @@
 use crate::{
     light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
-    view::{FrameCounter, PreviousViewUniformOffset},
+    view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariConfig, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE, FSR1_RCAS_HANDLE, TAA_SHADER_HANDLE,
     TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
 };
@@ -10,6 +10,7 @@ use bevy::{
     prelude::*,
     render::{
         camera::ExtractedCamera,
+        extract_component::DynamicUniformIndex,
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
@@ -547,10 +548,9 @@ fn prepare_post_process_uniforms(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    cameras: Query<(Entity, &ExtractedCamera)>,
-    config: Res<HikariConfig>,
+    cameras: Query<(Entity, &ExtractedCamera, &HikariConfig)>,
 ) {
-    for (entity, camera) in &cameras {
+    for (entity, camera, config) in &cameras {
         let size = camera.physical_target_size.unwrap();
         let scale = 1.0 / config.upscale_ratio();
         let before_upscale_size_x = size.x as f32 * scale;
@@ -604,12 +604,10 @@ pub struct PostProcessTextures {
 fn prepare_post_process_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    frame_counter: Res<FrameCounter>,
     mut texture_cache: ResMut<TextureCache>,
-    cameras: Query<(Entity, &ExtractedCamera)>,
-    config: Res<HikariConfig>,
+    cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariConfig)>,
 ) {
-    for (entity, camera) in &cameras {
+    for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
             let mut create_texture = |texture_format, upscale_ratio: f32| {
@@ -665,7 +663,7 @@ fn prepare_post_process_textures(
             });
 
             commands.entity(entity).insert(PostProcessTextures {
-                head: frame_counter.0 % 2,
+                head: counter.0 % 2,
                 denoise_internal,
                 denoise_internal_variance,
                 denoise_render,
@@ -741,7 +739,6 @@ pub struct PostProcessBindGroup {
 fn queue_post_process_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    config: Res<HikariConfig>,
     pipeline: Res<PostProcessPipeline>,
     images: Res<RenderAssets<Image>>,
     fallback: Res<FallbackImage>,
@@ -752,11 +749,12 @@ fn queue_post_process_bind_groups(
             &LightPassTextures,
             &PostProcessTextures,
             &PostProcessUniforms,
+            &HikariConfig,
         ),
         With<ExtractedCamera>,
     >,
 ) {
-    for (entity, prepass, light, post_process, post_process_uniforms) in &query {
+    for (entity, prepass, light, post_process, post_process_uniforms, config) in &query {
         let current = post_process.head;
         let previous = 1 - current;
 
@@ -1002,10 +1000,12 @@ fn queue_post_process_bind_groups(
 pub struct PostProcessPassNode {
     query: QueryState<(
         &'static ExtractedCamera,
+        &'static DynamicUniformIndex<FrameUniform>,
         &'static ViewUniformOffset,
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
         &'static PostProcessBindGroup,
+        &'static HikariConfig,
     )>,
 }
 
@@ -1035,11 +1035,18 @@ impl Node for PostProcessPassNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (camera, view_uniform, previous_view_uniform, view_lights, post_process_bind_group) =
-            match self.query.get_manual(world, entity) {
-                Ok(query) => query,
-                Err(_) => return Ok(()),
-            };
+        let (
+            camera,
+            frame_uniform,
+            view_uniform,
+            previous_view_uniform,
+            view_lights,
+            post_process_bind_group,
+            config,
+        ) = match self.query.get_manual(world, entity) {
+            Ok(query) => query,
+            Err(_) => return Ok(()),
+        };
         let view_bind_group = match world.get_resource::<PrepassBindGroup>() {
             Some(bind_group) => &bind_group.view,
             None => return Ok(()),
@@ -1047,7 +1054,6 @@ impl Node for PostProcessPassNode {
 
         let pipelines = world.resource::<CachedPostProcessPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
-        let config = world.resource::<HikariConfig>();
 
         let size = camera.physical_target_size.unwrap();
         let scale = 1.0 / config.upscale_ratio();
@@ -1064,6 +1070,7 @@ impl Node for PostProcessPassNode {
             0,
             view_bind_group,
             &[
+                frame_uniform.index(),
                 view_uniform.offset,
                 previous_view_uniform.offset,
                 view_lights.offset,

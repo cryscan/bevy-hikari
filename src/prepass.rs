@@ -2,10 +2,7 @@ use crate::{
     mesh_material::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
-    view::{
-        FrameUniform, FrameUniformBuffer, PreviousViewUniform, PreviousViewUniformOffset,
-        PreviousViewUniforms,
-    },
+    view::{FrameUniform, PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
     HikariConfig, PREPASS_SHADER_HANDLE,
 };
 use bevy::{
@@ -87,7 +84,7 @@ impl FromWorld for PrepassPipeline {
                     visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: Some(FrameUniform::min_size()),
                     },
                     count: None,
@@ -349,12 +346,11 @@ fn prepass_textures_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut queries: ParamSet<(
-        Query<(Entity, &Camera), Changed<Camera>>,
+        Query<(Entity, &Camera, &HikariConfig), Changed<Camera>>,
         Query<&mut PrepassTextures>,
     )>,
-    config: Res<HikariConfig>,
 ) {
-    for (entity, camera) in &queries.p0() {
+    for (entity, camera, config) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
             let scale = 1.0 / config.upscale_ratio();
             let size = Extent3d {
@@ -451,17 +447,21 @@ fn queue_prepass_depth_texture(
 
 #[allow(clippy::too_many_arguments)]
 fn queue_prepass_meshes(
-    config: Res<HikariConfig>,
     draw_functions: Res<DrawFunctions<Prepass>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     prepass_pipeline: Res<PrepassPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
     meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform, &DynamicInstanceIndex)>,
-    mut views: Query<(&ExtractedView, &VisibleEntities, &mut RenderPhase<Prepass>)>,
+    mut views: Query<(
+        &ExtractedView,
+        &VisibleEntities,
+        &mut RenderPhase<Prepass>,
+        &HikariConfig,
+    )>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawPrepass>().unwrap();
-    for (view, visible_entities, mut prepass_phase) in &mut views {
+    for (view, visible_entities, mut prepass_phase, config) in &mut views {
         let rangefinder = view.rangefinder3d();
 
         let add_render_phase = |(entity, mesh_handle, mesh_uniform, _): (
@@ -516,7 +516,7 @@ fn queue_prepass_bind_group(
     previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
     instance_render_assets: Res<InstanceRenderAssets>,
     view_uniforms: Res<ViewUniforms>,
-    frame_uniform: Res<FrameUniformBuffer>,
+    frame_uniforms: Res<ComponentUniforms<FrameUniform>>,
     light_meta: Res<LightMeta>,
     previous_view_uniforms: Res<PreviousViewUniforms>,
 ) {
@@ -531,7 +531,7 @@ fn queue_prepass_bind_group(
     ) = (
         view_uniforms.uniforms.binding(),
         previous_view_uniforms.uniforms.binding(),
-        frame_uniform.buffer.binding(),
+        frame_uniforms.uniforms().binding(),
         light_meta.view_gpu_lights.binding(),
         mesh_uniforms.binding(),
         previous_mesh_uniforms.binding(),
@@ -628,6 +628,7 @@ impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
     type Param = (
         SRes<PrepassBindGroup>,
         SQuery<(
+            Read<DynamicUniformIndex<FrameUniform>>,
             Read<ViewUniformOffset>,
             Read<PreviousViewUniformOffset>,
             Read<ViewLightsUniformOffset>,
@@ -640,11 +641,14 @@ impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
         (bind_group, view_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        if let Ok((view_uniform, previous_view_uniform, view_lights)) = view_query.get_inner(view) {
+        if let Ok((frame_uniform, view_uniform, previous_view_uniform, view_lights)) =
+            view_query.get_inner(view)
+        {
             pass.set_bind_group(
                 I,
                 &bind_group.into_inner().view,
                 &[
+                    frame_uniform.index(),
                     view_uniform.offset,
                     previous_view_uniform.offset,
                     view_lights.offset,

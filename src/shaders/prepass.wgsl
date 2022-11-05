@@ -31,16 +31,27 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let vertex_position = vec4<f32>(vertex.position, 1.0);
 
     var projection = view.projection;
-    
+    var jitter = vec2<f32>(0.0);
+    let pixel_size = frame.upscale_ratio / vec2<f32>(view.width, view.height);
+
+#ifdef SMAA_TU_4X
+    // +-+-+
+    // |0| |
+    // | |1|
+    // +-+-+
+    jitter = (frame_jitter(frame.number) - 0.5) * pixel_size;
+    jitter += select(1.0, -1.0, frame.number % 2u == 0u) * pixel_size;
+#else
 #ifdef TEMPORAL_ANTI_ALIASING
-    let scale = max(frame.upscale_ratio, 1.0);
-    let jitter = 2.0 * scale * (frame_jitter(frame.number) - 0.5) / vec2<f32>(view.width, view.height);
+    jitter = 2.0 * (frame_jitter(frame.number) - 0.5) * pixel_size;
+#endif  // TEMPORAL_ANTI_ALIASING
+#endif  // SMAA_TU_4X
+
     if projection[3].w != 1.0 {
         // Perspective
         projection[2][0] += jitter.x;
         projection[2][1] -= jitter.y;
     }
-#endif
 
     var out: VertexOutput;
     out.world_position = mesh_position_local_to_world(model, vertex_position);
@@ -49,12 +60,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = projection * view.inverse_view * out.world_position;
     out.uv = vertex.uv;
 
-#ifdef TEMPORAL_ANTI_ALIASING
     if projection[3].w == 1.0 {
         // Orthogonal
         out.clip_position += vec4<f32>(jitter, 0.0, 0.0);
     }
-#endif
 
     return out;
 }
