@@ -24,7 +24,7 @@ use bevy::{
         RenderApp,
     },
 };
-use std::{f32::consts::PI, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[macro_use]
 extern crate num_derive;
@@ -328,27 +328,27 @@ pub struct HikariConfig {
     /// Whether to do noise filtering.
     pub denoise: bool,
     /// Which TAA implementation to use.
-    pub temporal_anti_aliasing: Option<TaaVersion>,
+    pub temporal_anti_aliasing: Option<TemporalAntiAliasing>,
     /// Which upscaling implementation to use.
-    pub upscale: Option<UpscaleVersion>,
+    pub upscale: Option<Upscale>,
 }
 
 impl Default for HikariConfig {
     fn default() -> Self {
         Self {
-            direct_validate_interval: 5,
-            emissive_validate_interval: 7,
+            direct_validate_interval: 3,
+            emissive_validate_interval: 5,
             max_temporal_reuse_count: 50,
             max_spatial_reuse_count: 800,
-            solar_angle: PI / 36.0,
+            solar_angle: 0.046,
             clear_color: Color::rgb(0.4, 0.4, 0.4),
             indirect_bounces: 1,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
             denoise: true,
-            temporal_anti_aliasing: Some(TaaVersion::default()),
-            upscale: Some(UpscaleVersion::default()),
+            temporal_anti_aliasing: Some(TemporalAntiAliasing::default()),
+            upscale: Some(Upscale::default()),
         }
     }
 }
@@ -358,14 +358,19 @@ impl ExtractComponent for HikariConfig {
     type Filter = ();
 
     fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        item.clone()
+        let mut config = item.clone();
+        if matches!(item.upscale, Some(Upscale::SmaaTu4x { .. })) {
+            // TAA and SMAA are incompatible, though SMAA are treated as an upscaling pass.
+            config.temporal_anti_aliasing = None;
+        }
+        config
     }
 }
 
 impl HikariConfig {
     pub fn upscale_ratio(&self) -> f32 {
         match self.upscale {
-            Some(UpscaleVersion::Fsr1 { ratio, .. }) | Some(UpscaleVersion::SmaaTu4x { ratio }) => {
+            Some(Upscale::Fsr1 { ratio, .. }) | Some(Upscale::SmaaTu4x { ratio }) => {
                 ratio.clamp(1.0, 2.0)
             }
             None => 1.0,
@@ -374,7 +379,7 @@ impl HikariConfig {
 
     pub fn upscale_sharpness(&self) -> f32 {
         match self.upscale {
-            Some(UpscaleVersion::Fsr1 { sharpness, .. }) => sharpness,
+            Some(Upscale::Fsr1 { sharpness, .. }) => sharpness,
             _ => 0.0,
         }
     }
@@ -393,26 +398,31 @@ fn hikari_config_system(
     }
 }
 
+/// Temporal Anti-Aliasing Method to use.
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
-pub enum TaaVersion {
+pub enum TemporalAntiAliasing {
     #[default]
     Jasmine,
 }
 
+/// Upscale method to use.
 #[derive(Debug, Clone, Copy, Reflect)]
-pub enum UpscaleVersion {
+pub enum Upscale {
+    /// [AMD FidelityFX™ Super Resolution](https://gpuopen.com/fidelityfx-superresolution/).
     Fsr1 {
-        /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
+        /// Renders the main pass and post process on a low resolution texture.
         ratio: f32,
-        /// From 0.0 - 2.0 where 0.0 means max sharpness (has effect only with upscale_ratio > 1.0)
+        /// From 0.0 - 2.0 where 0.0 means max sharpness.
         sharpness: f32,
     },
+    /// [Filmic SMAA TU4x](https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf).
     SmaaTu4x {
+        /// Renders the main pass and post process on a low resolution texture.
         ratio: f32,
     },
 }
 
-impl Default for UpscaleVersion {
+impl Default for Upscale {
     fn default() -> Self {
         Self::Fsr1 {
             ratio: 1.0,

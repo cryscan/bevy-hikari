@@ -1,5 +1,5 @@
 use crate::{
-    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariConfig, UpscaleVersion,
+    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariConfig, Upscale,
     OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
@@ -198,13 +198,11 @@ fn queue_overlay_bind_groups(
     for (entity, post_process, config) in &query {
         let current = post_process.head;
 
-        let input_texture = match (
-            matches!(config.upscale, Some(UpscaleVersion::Fsr1 { .. })),
-            config.temporal_anti_aliasing.is_some(),
-        ) {
-            (true, _) => &post_process.upscale_sharpen_output,
-            (false, true) => &post_process.taa_internal[current],
-            (false, false) => &post_process.tone_mapping_output,
+        let input_texture = match (config.upscale, config.temporal_anti_aliasing) {
+            (Some(Upscale::Fsr1 { .. }), _) => &post_process.upscale_output[1],
+            (Some(Upscale::SmaaTu4x { .. }), _) => &post_process.upscale_output[current],
+            (None, Some(_)) => &post_process.taa_output[current],
+            (None, None) => &post_process.tone_mapping_output,
         };
 
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
