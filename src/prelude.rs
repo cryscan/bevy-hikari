@@ -1,1 +1,1 @@
-pub use crate::{HikariConfig, HikariPlugin, TaaVersion, UpscaleVersion};
+pub use crate::{HikariConfig, HikariPlugin, TemporalAntiAliasing, Upscale};

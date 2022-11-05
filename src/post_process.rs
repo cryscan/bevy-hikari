@@ -2,7 +2,7 @@ use crate::{
     light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
-    HikariConfig, UpscaleVersion, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE, FSR1_RCAS_HANDLE,
+    HikariConfig, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE, FSR1_RCAS_HANDLE,
     TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
@@ -578,9 +578,8 @@ pub struct PostProcessTextures {
     pub denoise_internal_variance: TextureView,
     pub denoise_render: [TextureView; 6],
     pub tone_mapping_output: TextureView,
-    pub taa_internal: [TextureView; 2],
-    pub upscale_output: TextureView,
-    pub upscale_sharpen_output: TextureView,
+    pub taa_output: [TextureView; 2],
+    pub upscale_output: [TextureView; 2],
 }
 
 fn prepare_post_process_textures(
@@ -636,21 +635,19 @@ fn prepare_post_process_textures(
 
             let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, scale);
 
-            let taa_internal = match config.temporal_anti_aliasing {
+            let taa_output = match config.temporal_anti_aliasing {
                 Some(_) => [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale)),
                 None => [(); 2].map(|_| fallback.texture_view.clone()),
             };
 
-            let (upscale_output, upscale_sharpen_output) = match config.upscale {
-                Some(UpscaleVersion::Fsr1 { .. }) => (
-                    create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0),
-                    create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0),
-                ),
-                Some(UpscaleVersion::SmaaTu4x { .. }) => (
-                    create_texture(POST_PROCESS_TEXTURE_FORMAT, 2.0 * scale),
-                    fallback.texture_view.clone(),
-                ),
-                None => (fallback.texture_view.clone(), fallback.texture_view.clone()),
+            let upscale_output = match config.upscale {
+                Some(Upscale::Fsr1 { .. }) => {
+                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0))
+                }
+                Some(Upscale::SmaaTu4x { .. }) => {
+                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, 2.0 * scale))
+                }
+                _ => [(); 2].map(|_| fallback.texture_view.clone()),
             };
 
             commands.entity(entity).insert(PostProcessTextures {
@@ -661,9 +658,8 @@ fn prepare_post_process_textures(
                 denoise_internal_variance,
                 denoise_render,
                 tone_mapping_output,
-                taa_internal,
+                taa_output,
                 upscale_output,
-                upscale_sharpen_output,
             });
         }
     }
@@ -876,7 +872,7 @@ fn queue_post_process_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&post_process.taa_internal[previous]),
+                    resource: BindingResource::TextureView(&post_process.taa_output[previous]),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -889,12 +885,12 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.taa_internal[current]),
+                resource: BindingResource::TextureView(&post_process.taa_output[current]),
             }],
         });
 
         let upscale_input_texture = match config.temporal_anti_aliasing {
-            Some(_) => &post_process.taa_internal[current],
+            Some(_) => &post_process.taa_output[current],
             None => &post_process.tone_mapping_output,
         };
 
@@ -918,7 +914,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.upscale_output),
+                resource: BindingResource::TextureView(&post_process.upscale_output[0]),
             }],
         });
 
@@ -932,7 +928,7 @@ fn queue_post_process_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&post_process.upscale_output),
+                    resource: BindingResource::TextureView(&post_process.upscale_output[0]),
                 },
             ],
         });
@@ -942,7 +938,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.upscale_sharpen_output),
+                resource: BindingResource::TextureView(&post_process.upscale_output[1]),
             }],
         });
 
@@ -1079,7 +1075,7 @@ impl Node for PostProcessPassNode {
 
         if let Some(taa_version) = config.temporal_anti_aliasing {
             let pipeline = match taa_version {
-                crate::TaaVersion::Jasmine => pipelines.taa_jasmine,
+                crate::TemporalAntiAliasing::Jasmine => pipelines.taa_jasmine,
             };
 
             pass.set_bind_group(3, &post_process_bind_group.taa, &[]);
@@ -1093,7 +1089,7 @@ impl Node for PostProcessPassNode {
             }
         }
 
-        if matches!(config.upscale, Some(UpscaleVersion::Fsr1 { .. })) {
+        if matches!(config.upscale, Some(Upscale::Fsr1 { .. })) {
             pass.set_bind_group(0, &post_process_bind_group.sampler, &[]);
             pass.set_bind_group(
                 1,

@@ -328,9 +328,9 @@ pub struct HikariConfig {
     /// Whether to do noise filtering.
     pub denoise: bool,
     /// Which TAA implementation to use.
-    pub temporal_anti_aliasing: Option<TaaVersion>,
+    pub temporal_anti_aliasing: Option<TemporalAntiAliasing>,
     /// Which upscaling implementation to use.
-    pub upscale: Option<UpscaleVersion>,
+    pub upscale: Option<Upscale>,
 }
 
 impl Default for HikariConfig {
@@ -347,8 +347,8 @@ impl Default for HikariConfig {
             temporal_reuse: true,
             spatial_reuse: true,
             denoise: true,
-            temporal_anti_aliasing: Some(TaaVersion::default()),
-            upscale: Some(UpscaleVersion::default()),
+            temporal_anti_aliasing: Some(TemporalAntiAliasing::default()),
+            upscale: Some(Upscale::default()),
         }
     }
 }
@@ -358,14 +358,19 @@ impl ExtractComponent for HikariConfig {
     type Filter = ();
 
     fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        item.clone()
+        let mut config = item.clone();
+        if matches!(item.upscale, Some(Upscale::SmaaTu4x { .. })) {
+            // TAA and SMAA are incompatible, though SMAA are treated as an upscaling pass.
+            config.temporal_anti_aliasing = None;
+        }
+        config
     }
 }
 
 impl HikariConfig {
     pub fn upscale_ratio(&self) -> f32 {
         match self.upscale {
-            Some(UpscaleVersion::Fsr1 { ratio, .. }) | Some(UpscaleVersion::SmaaTu4x { ratio }) => {
+            Some(Upscale::Fsr1 { ratio, .. }) | Some(Upscale::SmaaTu4x { ratio }) => {
                 ratio.clamp(1.0, 2.0)
             }
             None => 1.0,
@@ -374,7 +379,7 @@ impl HikariConfig {
 
     pub fn upscale_sharpness(&self) -> f32 {
         match self.upscale {
-            Some(UpscaleVersion::Fsr1 { sharpness, .. }) => sharpness,
+            Some(Upscale::Fsr1 { sharpness, .. }) => sharpness,
             _ => 0.0,
         }
     }
@@ -394,13 +399,13 @@ fn hikari_config_system(
 }
 
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
-pub enum TaaVersion {
+pub enum TemporalAntiAliasing {
     #[default]
     Jasmine,
 }
 
 #[derive(Debug, Clone, Copy, Reflect)]
-pub enum UpscaleVersion {
+pub enum Upscale {
     Fsr1 {
         /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
         ratio: f32,
@@ -412,7 +417,7 @@ pub enum UpscaleVersion {
     },
 }
 
-impl Default for UpscaleVersion {
+impl Default for Upscale {
     fn default() -> Self {
         Self::Fsr1 {
             ratio: 1.0,

@@ -3,7 +3,7 @@ use crate::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
     view::{FrameUniform, PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
-    HikariConfig, PREPASS_SHADER_HANDLE,
+    HikariConfig, Upscale, PREPASS_SHADER_HANDLE,
 };
 use bevy::{
     ecs::{
@@ -169,6 +169,7 @@ impl FromWorld for PrepassPipeline {
 pub struct PrepassPipelineKey {
     pub mesh_pipeline_key: MeshPipelineKey,
     pub temporal_anti_aliasing: bool,
+    pub smaa_tu_4x: bool,
 }
 
 impl SpecializedMeshPipeline for PrepassPipeline {
@@ -190,6 +191,9 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         let mut shader_defs = vec![];
         if key.temporal_anti_aliasing {
             shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
+        }
+        if key.smaa_tu_4x {
+            shader_defs.push("SMAA_TU_4X".into());
         }
 
         Ok(RenderPipelineDescriptor {
@@ -475,6 +479,7 @@ fn queue_prepass_meshes(
                 let key = PrepassPipelineKey {
                     mesh_pipeline_key: key,
                     temporal_anti_aliasing: config.temporal_anti_aliasing.is_some(),
+                    smaa_tu_4x: matches!(config.upscale, Some(Upscale::SmaaTu4x { .. })),
                 };
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);

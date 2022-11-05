@@ -528,6 +528,7 @@ fn queue_light_bind_groups(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct LightPassNode {
     query: QueryState<(
         &'static ExtractedCamera,
