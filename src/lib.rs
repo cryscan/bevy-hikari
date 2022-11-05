@@ -398,21 +398,26 @@ fn hikari_config_system(
     }
 }
 
+/// Temporal Anti-Aliasing Method to use.
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
 pub enum TemporalAntiAliasing {
     #[default]
     Jasmine,
 }
 
+/// Upscale method to use.
 #[derive(Debug, Clone, Copy, Reflect)]
 pub enum Upscale {
+    /// [AMD FidelityFX™ Super Resolution](https://gpuopen.com/fidelityfx-superresolution/).
     Fsr1 {
-        /// Renders the main pass and post process on a low resolution texture if greater then 1.0.
+        /// Renders the main pass and post process on a low resolution texture.
         ratio: f32,
-        /// From 0.0 - 2.0 where 0.0 means max sharpness (has effect only with upscale_ratio > 1.0)
+        /// From 0.0 - 2.0 where 0.0 means max sharpness.
         sharpness: f32,
     },
+    /// [Filmic SMAA TU4x](https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf).
     SmaaTu4x {
+        /// Renders the main pass and post process on a low resolution texture.
         ratio: f32,
     },
 }
