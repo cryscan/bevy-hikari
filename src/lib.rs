@@ -24,7 +24,7 @@ use bevy::{
         RenderApp,
     },
 };
-use std::{f32::consts::PI, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[macro_use]
 extern crate num_derive;
@@ -340,7 +340,7 @@ impl Default for HikariConfig {
             emissive_validate_interval: 7,
             max_temporal_reuse_count: 50,
             max_spatial_reuse_count: 800,
-            solar_angle: PI / 36.0,
+            solar_angle: 0.046,
             clear_color: Color::rgb(0.4, 0.4, 0.4),
             indirect_bounces: 1,
             max_indirect_luminance: 10.0,

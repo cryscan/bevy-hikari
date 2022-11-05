@@ -51,7 +51,7 @@ fn depth_weight(d0: f32, d1: f32, gradient: vec2<f32>, offset: vec2<i32>) -> f32
 
 // Luminance-weighting function (4.4.3)
 fn luminance_weight(l0: f32, l1: f32, variance: f32) -> f32 {
-    let strictness = 64.0;
+    let strictness = 16.0;
     let eps = 0.001;
     return exp((-abs(l0 - l1)) / (strictness * sqrt(variance) + eps));
 }
