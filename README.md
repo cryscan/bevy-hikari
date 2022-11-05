@@ -35,7 +35,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 2. Setup the scene with a directional light
 3. Set your camera's `camera_render_graph` to `CameraRenderGraph::new(bevy_hikari::graph::NAME)`
 
-One can also configure the renderer by inserting the `HikariConfig` resource.
+One can also configure the renderer by inserting the `HikariConfig` component to camera.
 Its definition is:
 ```rust
 pub struct HikariConfig {

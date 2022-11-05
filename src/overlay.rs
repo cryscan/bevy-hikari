@@ -1,5 +1,5 @@
 use crate::{
-    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariConfig,
+    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariConfig, UpscaleVersion,
     OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
@@ -192,20 +192,19 @@ pub struct OverlayBindGroup(pub BindGroup);
 fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    config: Res<HikariConfig>,
     pipeline: Res<OverlayPipeline>,
-    query: Query<(Entity, &PostProcessTextures), With<ExtractedCamera>>,
+    query: Query<(Entity, &PostProcessTextures, &HikariConfig), With<ExtractedCamera>>,
 ) {
-    for (entity, post_process) in &query {
+    for (entity, post_process, config) in &query {
         let current = post_process.head;
 
         let input_texture = match (
-            config.upscale_ratio() == 1.0,
+            matches!(config.upscale, Some(UpscaleVersion::Fsr1 { .. })),
             config.temporal_anti_aliasing.is_some(),
         ) {
-            (false, _) => &post_process.upscale_sharpen_output.default_view,
-            (true, true) => &post_process.taa_internal[current].default_view,
-            (true, false) => &post_process.tone_mapping_output.default_view,
+            (true, _) => &post_process.upscale_sharpen_output,
+            (false, true) => &post_process.taa_internal[current],
+            (false, false) => &post_process.tone_mapping_output,
         };
 
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {

@@ -5,7 +5,6 @@ use super::{
 use crate::{
     mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
     transform::GlobalTransformQueue,
-    HikariConfig,
 };
 use bevy::{
     ecs::query::QueryItem,
@@ -224,7 +223,6 @@ fn prepare_instances(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    config: Res<HikariConfig>,
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut extracted_instances: ResMut<ExtractedInstances>,
     mut instances: Local<Instances>,
@@ -341,7 +339,7 @@ fn prepare_instances(
             if let Some(material) = materials.get(material) {
                 // Add it to the light source list if it's emissive.
                 let emissive = material.0.emissive;
-                if emissive.w * emissive.xyz().length() > config.emissive_threshold {
+                if emissive.w * emissive.xyz().length() > 0.0 {
                     let position = 0.5 * (instance.max + instance.min);
                     let radius = 0.5 * (instance.max - instance.min).length();
                     emissives.insert(

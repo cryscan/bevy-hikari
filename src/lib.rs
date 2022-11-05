@@ -10,9 +10,11 @@ use crate::{
 use bevy::{
     asset::load_internal_asset,
     core_pipeline::core_3d::MainPass3dNode,
+    ecs::query::QueryItem,
     prelude::*,
     reflect::TypeUuid,
     render::{
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_asset::RenderAssets,
         render_graph::{RenderGraph, SlotInfo, SlotType},
@@ -225,9 +227,8 @@ impl Plugin for HikariPlugin {
         };
 
         app.register_type::<HikariConfig>()
-            .init_resource::<HikariConfig>()
-            .add_plugin(ExtractResourcePlugin::<HikariConfig>::default())
             .add_plugin(ExtractResourcePlugin::<NoiseTextures>::default())
+            .add_plugin(ExtractComponentPlugin::<HikariConfig>::default())
             .add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshMaterialPlugin)
@@ -235,7 +236,8 @@ impl Plugin for HikariPlugin {
             .add_plugin(LightPlugin)
             .add_plugin(PostProcessPlugin)
             .add_plugin(OverlayPlugin)
-            .add_startup_system(noise_load_system);
+            .add_startup_system(noise_load_system)
+            .add_system_to_stage(CoreStage::PostUpdate, hikari_config_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
@@ -300,8 +302,8 @@ impl Plugin for HikariPlugin {
     }
 }
 
-#[derive(Debug, Clone, ExtractResource, Reflect)]
-#[reflect(Resource)]
+#[derive(Debug, Clone, Component, Reflect)]
+#[reflect(Component)]
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
     pub direct_validate_interval: usize,
@@ -313,12 +315,12 @@ pub struct HikariConfig {
     pub max_spatial_reuse_count: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
-    /// Threshold that emissive objects begin to lit others.
-    pub emissive_threshold: f32,
     /// Count of indirect bounces.
     pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
+    /// Clear color override.
+    pub clear_color: Color,
     /// Whether to do temporal sample reuse in ReSTIR.
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
@@ -339,7 +341,7 @@ impl Default for HikariConfig {
             max_temporal_reuse_count: 50,
             max_spatial_reuse_count: 800,
             solar_angle: PI / 36.0,
-            emissive_threshold: 0.00390625,
+            clear_color: Color::rgb(0.4, 0.4, 0.4),
             indirect_bounces: 1,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
@@ -351,10 +353,21 @@ impl Default for HikariConfig {
     }
 }
 
+impl ExtractComponent for HikariConfig {
+    type Query = &'static Self;
+    type Filter = ();
+
+    fn extract_component(item: QueryItem<Self::Query>) -> Self {
+        item.clone()
+    }
+}
+
 impl HikariConfig {
     pub fn upscale_ratio(&self) -> f32 {
         match self.upscale {
-            Some(UpscaleVersion::Fsr1 { ratio, .. }) => ratio.clamp(1.0, 2.0),
+            Some(UpscaleVersion::Fsr1 { ratio, .. }) | Some(UpscaleVersion::SmaaTu4x { ratio }) => {
+                ratio.clamp(1.0, 2.0)
+            }
             None => 1.0,
         }
     }
@@ -362,8 +375,21 @@ impl HikariConfig {
     pub fn upscale_sharpness(&self) -> f32 {
         match self.upscale {
             Some(UpscaleVersion::Fsr1 { sharpness, .. }) => sharpness,
-            None => 0.0,
+            _ => 0.0,
         }
+    }
+}
+
+fn hikari_config_system(
+    mut commands: Commands,
+    clear_color: Res<ClearColor>,
+    query: Query<Entity, (With<Camera>, Without<HikariConfig>)>,
+) {
+    for entity in &query {
+        commands.entity(entity).insert(HikariConfig {
+            clear_color: clear_color.0,
+            ..Default::default()
+        });
     }
 }
 
@@ -380,6 +406,9 @@ pub enum UpscaleVersion {
         ratio: f32,
         /// From 0.0 - 2.0 where 0.0 means max sharpness (has effect only with upscale_ratio > 1.0)
         sharpness: f32,
+    },
+    SmaaTu4x {
+        ratio: f32,
     },
 }
 
