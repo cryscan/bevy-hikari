@@ -341,7 +341,7 @@ impl Default for HikariConfig {
             max_temporal_reuse_count: 50,
             max_spatial_reuse_count: 800,
             solar_angle: PI / 36.0,
-            clear_color: Color::BLACK,
+            clear_color: Color::rgb(0.4, 0.4, 0.4),
             indirect_bounces: 1,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,

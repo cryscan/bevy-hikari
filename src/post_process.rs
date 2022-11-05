@@ -6,15 +6,19 @@ use crate::{
     TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
+    ecs::query::QueryItem,
     pbr::ViewLightsUniformOffset,
     prelude::*,
     render::{
         camera::ExtractedCamera,
-        extract_component::DynamicUniformIndex,
+        extract_component::{
+            ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
+            UniformComponentPlugin,
+        },
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
-        renderer::{RenderContext, RenderDevice, RenderQueue},
+        renderer::{RenderContext, RenderDevice},
         texture::{CachedTexture, FallbackImage, TextureCache},
         view::ViewUniformOffset,
         RenderApp, RenderStage,
@@ -25,119 +29,16 @@ use serde::Serialize;
 pub const DENOISE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const POST_PROCESS_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
-#[derive(Debug, Default, Clone, Copy, ShaderType)]
-pub struct FSRConstantsUniform {
-    // NOTE: do not remove this yet
-    //pub const_0: UVec4,
-    //pub const_1: UVec4,
-    //pub const_2: UVec4,
-    //pub const_3: UVec4,
-    //pub sample: UVec4,
-    pub input_viewport_in_pixels: Vec2,
-    pub input_size_in_pixels: Vec2,
-    pub output_size_in_pixels: Vec2,
-    pub sharpness: f32,
-    pub hdr: u32,
-}
-
-#[derive(Default)]
-pub struct FSRConstantsUniformBuffer {
-    pub buffer: UniformBuffer<FSRConstantsUniform>,
-}
-
-// NOTE! Don't delete, might be used soon, instead of calulating this on GPU
-/*fn get_fsr_constants(ratio: f32, hdr_rcas: bool, camera: &ExtractedCamera) -> FSRConstantsUniform {
-    let mut fsr_constant = FSRConstantsUniform::default();
-    let size = camera.physical_target_size.unwrap();
-    let size_x = size.x as f32;
-    let size_y = size.x as f32;
-    compute_fsr_constants(
-        &mut fsr_constant.const_0,
-        &mut fsr_constant.const_1,
-        &mut fsr_constant.const_2,
-        &mut fsr_constant.const_3,
-        size_x,
-        size_y,
-        size_x,
-        size_y,
-        size_x * ratio,
-        size_y * ratio,
-    );
-
-    fsr_constant.sample.x = if hdr_rcas { 1 } else { 0 };
-    fsr_constant
-}
-
-pub union U32F32Union {
-    pub u: u32,
-    pub f: f32,
-}
-
-fn f32_u32(a: f32) -> u32 {
-    let uf = U32F32Union { f: a };
-    unsafe { uf.u }
-}
-
-fn compute_fsr_constants(
-    con0: &mut UVec4,
-    con1: &mut UVec4,
-    con2: &mut UVec4,
-    con3: &mut UVec4,
-    // This the rendered image resolution being upscaled
-    input_viewport_in_pixels_x: f32,
-    input_viewport_in_pixels_y: f32,
-    // This is the resolution of the resource containing the input image (useful for dynamic resolution)
-    input_size_in_pixels_x: f32,
-    input_size_in_pixels_y: f32,
-    // This is the display resolution which the input image gets upscaled to
-    output_size_in_pixels_x: f32,
-    output_size_in_pixels_y: f32,
-) {
-    // Output integer position to a pixel position in viewport.
-    con0[0] = f32_u32(input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x));
-    con0[1] = f32_u32(input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y));
-    con0[2] = f32_u32(0.5 * input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x) - 0.5);
-    con0[3] = f32_u32(0.5 * input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y) - 0.5);
-
-    // Viewport pixel position to normalized image space.
-    // This is used to get upper-left of 'F' tap.
-    con1[0] = (1.0 / input_size_in_pixels_x) as u32;
-    con1[1] = (1.0 / input_size_in_pixels_y) as u32;
-    // Centers of gather4, first offset from upper-left of 'F'.
-    //      +---+---+
-    //      |   |   |
-    //      +--(0)--+
-    //      | b | c |
-    //  +---F---+---+---+
-    //  | e | f | g | h |
-    //  +--(1)--+--(2)--+
-    //  | i | j | k | l |
-    //  +---+---+---+---+
-    //      | n | o |
-    //      +--(3)--+
-    //      |   |   |
-    //      +---+---+
-    con1[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
-    con1[3] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_y));
-    // These are from (0) instead of 'F'.
-    con2[0] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_x));
-    con2[1] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
-    con2[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
-    con2[3] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
-    con3[0] = f32_u32(0.0 * (1.0 / input_size_in_pixels_x));
-    con3[1] = f32_u32(4.0 * (1.0 / input_size_in_pixels_y));
-    con3[2] = 0;
-    con3[3] = 0;
-}*/
-
 pub struct PostProcessPlugin;
 impl Plugin for PostProcessPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugin(ExtractComponentPlugin::<FsrConstantsUniform>::default())
+            .add_plugin(UniformComponentPlugin::<FsrConstantsUniform>::default());
+
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<PostProcessPipeline>()
                 .init_resource::<SpecializedComputePipelines<PostProcessPipeline>>()
-                .add_system_to_stage(RenderStage::Prepare, prepare_post_process_uniforms)
                 .add_system_to_stage(RenderStage::Prepare, prepare_post_process_textures)
                 .add_system_to_stage(RenderStage::Queue, queue_post_process_pipelines)
                 .add_system_to_stage(RenderStage::Queue, queue_post_process_bind_groups);
@@ -370,8 +271,8 @@ impl FromWorld for PostProcessPipeline {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(FSRConstantsUniform::min_size()),
+                        has_dynamic_offset: true,
+                        min_binding_size: Some(FsrConstantsUniform::min_size()),
                     },
                     count: None,
                 },
@@ -539,24 +440,32 @@ impl SpecializedComputePipeline for PostProcessPipeline {
     }
 }
 
-#[derive(Component)]
-pub struct PostProcessUniforms {
-    pub fsr_constants_uniform_buffer: FSRConstantsUniformBuffer,
+#[derive(Debug, Default, Clone, Copy, Component, ShaderType)]
+pub struct FsrConstantsUniform {
+    // NOTE: do not remove this yet
+    //pub const_0: UVec4,
+    //pub const_1: UVec4,
+    //pub const_2: UVec4,
+    //pub const_3: UVec4,
+    //pub sample: UVec4,
+    pub input_viewport_in_pixels: Vec2,
+    pub input_size_in_pixels: Vec2,
+    pub output_size_in_pixels: Vec2,
+    pub sharpness: f32,
+    pub hdr: u32,
 }
 
-fn prepare_post_process_uniforms(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    cameras: Query<(Entity, &ExtractedCamera, &HikariConfig)>,
-) {
-    for (entity, camera, config) in &cameras {
-        let size = camera.physical_target_size.unwrap();
+impl ExtractComponent for FsrConstantsUniform {
+    type Query = (&'static Camera, &'static HikariConfig);
+    type Filter = ();
+
+    fn extract_component((camera, config): QueryItem<Self::Query>) -> Self {
+        let size = camera.physical_target_size().unwrap_or_default();
         let scale = 1.0 / config.upscale_ratio();
         let before_upscale_size_x = size.x as f32 * scale;
         let before_upscale_size_y = size.y as f32 * scale;
 
-        let fsr_constants_uniform = FSRConstantsUniform {
+        Self {
             input_viewport_in_pixels: Vec2 {
                 x: before_upscale_size_x,
                 y: before_upscale_size_y,
@@ -571,21 +480,94 @@ fn prepare_post_process_uniforms(
             },
             sharpness: config.upscale_sharpness(),
             hdr: 0, // Useless for now
-        };
-
-        let mut fsr_constants_uniform_buffer = FSRConstantsUniformBuffer {
-            buffer: UniformBuffer::from(fsr_constants_uniform),
-        };
-
-        fsr_constants_uniform_buffer
-            .buffer
-            .write_buffer(&render_device, &render_queue);
-
-        commands.entity(entity).insert(PostProcessUniforms {
-            fsr_constants_uniform_buffer,
-        });
+        }
     }
 }
+
+// NOTE! Don't delete, might be used soon, instead of calulating this on GPU
+/*fn get_fsr_constants(ratio: f32, hdr_rcas: bool, camera: &ExtractedCamera) -> FSRConstantsUniform {
+    let mut fsr_constant = FSRConstantsUniform::default();
+    let size = camera.physical_target_size.unwrap();
+    let size_x = size.x as f32;
+    let size_y = size.x as f32;
+    compute_fsr_constants(
+        &mut fsr_constant.const_0,
+        &mut fsr_constant.const_1,
+        &mut fsr_constant.const_2,
+        &mut fsr_constant.const_3,
+        size_x,
+        size_y,
+        size_x,
+        size_y,
+        size_x * ratio,
+        size_y * ratio,
+    );
+
+    fsr_constant.sample.x = if hdr_rcas { 1 } else { 0 };
+    fsr_constant
+}
+
+pub union U32F32Union {
+    pub u: u32,
+    pub f: f32,
+}
+
+fn f32_u32(a: f32) -> u32 {
+    let uf = U32F32Union { f: a };
+    unsafe { uf.u }
+}
+
+fn compute_fsr_constants(
+    con0: &mut UVec4,
+    con1: &mut UVec4,
+    con2: &mut UVec4,
+    con3: &mut UVec4,
+    // This the rendered image resolution being upscaled
+    input_viewport_in_pixels_x: f32,
+    input_viewport_in_pixels_y: f32,
+    // This is the resolution of the resource containing the input image (useful for dynamic resolution)
+    input_size_in_pixels_x: f32,
+    input_size_in_pixels_y: f32,
+    // This is the display resolution which the input image gets upscaled to
+    output_size_in_pixels_x: f32,
+    output_size_in_pixels_y: f32,
+) {
+    // Output integer position to a pixel position in viewport.
+    con0[0] = f32_u32(input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x));
+    con0[1] = f32_u32(input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y));
+    con0[2] = f32_u32(0.5 * input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x) - 0.5);
+    con0[3] = f32_u32(0.5 * input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y) - 0.5);
+
+    // Viewport pixel position to normalized image space.
+    // This is used to get upper-left of 'F' tap.
+    con1[0] = (1.0 / input_size_in_pixels_x) as u32;
+    con1[1] = (1.0 / input_size_in_pixels_y) as u32;
+    // Centers of gather4, first offset from upper-left of 'F'.
+    //      +---+---+
+    //      |   |   |
+    //      +--(0)--+
+    //      | b | c |
+    //  +---F---+---+---+
+    //  | e | f | g | h |
+    //  +--(1)--+--(2)--+
+    //  | i | j | k | l |
+    //  +---+---+---+---+
+    //      | n | o |
+    //      +--(3)--+
+    //      |   |   |
+    //      +---+---+
+    con1[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
+    con1[3] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_y));
+    // These are from (0) instead of 'F'.
+    con2[0] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_x));
+    con2[1] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
+    con2[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
+    con2[3] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
+    con3[0] = f32_u32(0.0 * (1.0 / input_size_in_pixels_x));
+    con3[1] = f32_u32(4.0 * (1.0 / input_size_in_pixels_y));
+    con3[2] = 0;
+    con3[3] = 0;
+}*/
 
 #[derive(Component)]
 pub struct PostProcessTextures {
@@ -742,19 +724,24 @@ fn queue_post_process_bind_groups(
     pipeline: Res<PostProcessPipeline>,
     images: Res<RenderAssets<Image>>,
     fallback: Res<FallbackImage>,
+    fsr_constants_uniforms: Res<ComponentUniforms<FsrConstantsUniform>>,
     query: Query<
         (
             Entity,
             &PrepassTextures,
             &LightPassTextures,
             &PostProcessTextures,
-            &PostProcessUniforms,
             &HikariConfig,
         ),
         With<ExtractedCamera>,
     >,
 ) {
-    for (entity, prepass, light, post_process, post_process_uniforms, config) in &query {
+    let fsr_constants_binding = match fsr_constants_uniforms.binding() {
+        Some(binding) => binding,
+        None => return,
+    };
+
+    for (entity, prepass, light, post_process, config) in &query {
         let current = post_process.head;
         let previous = 1 - current;
 
@@ -917,12 +904,6 @@ fn queue_post_process_bind_groups(
             }],
         });
 
-        let fsr_constants_binding = post_process_uniforms
-            .fsr_constants_uniform_buffer
-            .buffer
-            .binding()
-            .unwrap();
-
         let upscale_input_texture = match config.temporal_anti_aliasing {
             Some(_) => &post_process.taa_internal[current].default_view,
             None => &post_process.tone_mapping_output.default_view,
@@ -958,7 +939,7 @@ fn queue_post_process_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: fsr_constants_binding,
+                    resource: fsr_constants_binding.clone(),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -1005,6 +986,7 @@ pub struct PostProcessPassNode {
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
         &'static PostProcessBindGroup,
+        &'static DynamicUniformIndex<FsrConstantsUniform>,
         &'static HikariConfig,
     )>,
 }
@@ -1042,6 +1024,7 @@ impl Node for PostProcessPassNode {
             previous_view_uniform,
             view_lights,
             post_process_bind_group,
+            fsr_constants_uniform,
             config,
         ) = match self.query.get_manual(world, entity) {
             Ok(query) => query,
@@ -1126,7 +1109,11 @@ impl Node for PostProcessPassNode {
 
         if config.upscale_ratio() > 1.0 {
             pass.set_bind_group(0, &post_process_bind_group.sampler, &[]);
-            pass.set_bind_group(1, &post_process_bind_group.upscale, &[]);
+            pass.set_bind_group(
+                1,
+                &post_process_bind_group.upscale,
+                &[fsr_constants_uniform.index()],
+            );
             pass.set_bind_group(2, &post_process_bind_group.upscale_output, &[]);
 
             if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.upscale) {
@@ -1136,7 +1123,11 @@ impl Node for PostProcessPassNode {
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
 
-            pass.set_bind_group(1, &post_process_bind_group.upscale_sharpen, &[]);
+            pass.set_bind_group(
+                1,
+                &post_process_bind_group.upscale_sharpen,
+                &[fsr_constants_uniform.index()],
+            );
             pass.set_bind_group(2, &post_process_bind_group.upscale_sharpen_output, &[]);
 
             if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.upscale_sharpen) {

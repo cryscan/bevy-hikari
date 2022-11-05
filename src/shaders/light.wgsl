@@ -59,7 +59,7 @@ let SPATIAL_REUSE_RANGE: f32 = 20.0;
 #endif
 let SPATIAL_REUSE_TAPS: u32 = 4u;
 
-let SPATIAL_VARIANCE_SAMPLE_THRESHOLD: u32 = 10u;
+let SPATIAL_VARIANCE_SAMPLE_THRESHOLD: u32 = 16u;
 
 struct Ray {
     origin: vec3<f32>,
