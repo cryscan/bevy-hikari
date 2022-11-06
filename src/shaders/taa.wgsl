@@ -100,9 +100,9 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
     let mean = moment_1 / 9.0;
     let variance = sqrt((moment_2 / 9.0) - (mean * mean));
-    let previous_color = RGB_to_YCoCg(previous_color);
-    let previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
-    let previous_color = YCoCg_to_RGB(previous_color);
+    previous_color = RGB_to_YCoCg(previous_color);
+    previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
+    previous_color = YCoCg_to_RGB(previous_color);
 
     // Blend current and past sample
     let output = mix(previous_color, current_color, 0.1);
