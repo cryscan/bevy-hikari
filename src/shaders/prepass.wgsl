@@ -34,17 +34,15 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var jitter = vec2<f32>(0.0);
     let pixel_size = frame.upscale_ratio / vec2<f32>(view.width, view.height);
 
-#ifdef SMAA_TU_4X
+#ifdef TEMPORAL_ANTI_ALIASING
+    jitter = 2.0 * (frame_jitter(frame.number) - 0.5) * pixel_size;
+#endif  // TEMPORAL_ANTI_ALIASING
+#ifdef SMAA_TU4X
     // +-+-+
     // |0| |
     // | |1|
     // +-+-+
-    jitter = (frame_jitter(frame.number) - 0.5) * pixel_size;
-    jitter += select(1.0, -1.0, frame.number % 2u == 0u) * pixel_size;
-#else
-#ifdef TEMPORAL_ANTI_ALIASING
-    jitter = 2.0 * (frame_jitter(frame.number) - 0.5) * pixel_size;
-#endif  // TEMPORAL_ANTI_ALIASING
+    jitter = 0.5 * jitter + select(0.5, -0.5, frame.number % 2u == 0u) * pixel_size;
 #endif  // SMAA_TU_4X
 
     if projection[3].w != 1.0 {

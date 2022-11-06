@@ -2,8 +2,9 @@ use crate::{
     light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
-    HikariConfig, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE, FSR1_RCAS_HANDLE,
-    TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
+    HikariConfig, TemporalAntiAliasing, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_SHADER_HANDLE,
+    FSR1_RCAS_SHADER_HANDLE, SMAA_SHADER_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE,
+    WORKGROUP_SIZE,
 };
 use bevy::{
     ecs::query::QueryItem,
@@ -26,8 +27,7 @@ use bevy::{
 };
 use serde::Serialize;
 
-pub const DENOISE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const POST_PROCESS_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const HDR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct PostProcessPlugin;
 impl Plugin for PostProcessPlugin {
@@ -53,6 +53,7 @@ pub struct PostProcessPipeline {
     pub denoise_internal_layout: BindGroupLayout,
     pub denoise_render_layout: BindGroupLayout,
     pub tone_mapping_layout: BindGroupLayout,
+    pub smaa_layout: BindGroupLayout,
     pub taa_layout: BindGroupLayout,
     pub upscale_layout: BindGroupLayout,
     pub output_layout: BindGroupLayout,
@@ -93,7 +94,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -104,7 +105,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -115,7 +116,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -187,7 +188,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -234,6 +235,45 @@ impl FromWorld for PostProcessPipeline {
                     },
                 ],
             });
+
+        let smaa_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                // Previous Render
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Current Render
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Upscale
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
 
         let taa_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -296,7 +336,7 @@ impl FromWorld for PostProcessPipeline {
                 visibility: ShaderStages::all(),
                 ty: BindingType::StorageTexture {
                     access: StorageTextureAccess::ReadWrite,
-                    format: POST_PROCESS_TEXTURE_FORMAT,
+                    format: HDR_TEXTURE_FORMAT,
                     view_dimension: TextureViewDimension::D2,
                 },
                 count: None,
@@ -310,6 +350,7 @@ impl FromWorld for PostProcessPipeline {
             denoise_internal_layout,
             denoise_render_layout,
             tone_mapping_layout,
+            smaa_layout,
             taa_layout,
             upscale_layout,
             output_layout,
@@ -322,11 +363,13 @@ impl FromWorld for PostProcessPipeline {
 #[serde(rename_all = "snake_case")]
 pub enum PostProcessEntryPoint {
     #[default]
-    ToneMapping = 0,
-    JasmineTaa = 1,
-    Denoise = 2,
-    Upscale = 4,
-    UpscaleSharpen = 5,
+    Denoise = 0,
+    ToneMapping = 1,
+    JasmineTaa = 2,
+    SmaaTu4x = 3,
+    SmaaTu4xExtrapolate = 4,
+    Upscale = 5,
+    UpscaleSharpen = 6,
 }
 
 bitflags::bitflags! {
@@ -338,7 +381,7 @@ bitflags::bitflags! {
 }
 
 impl PostProcessPipelineKey {
-    const ENTRY_POINT_MASK_BITS: u32 = 7u32;
+    const ENTRY_POINT_MASK_BITS: u32 = 0xF;
     const DENOISE_LEVEL_MASK_BITS: u32 = 0b11;
     const DENOISE_LEVEL_SHIFT_BITS: u32 = 32 - 2;
 
@@ -408,6 +451,28 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                 let shader = TAA_SHADER_HANDLE.typed();
                 (layout, shader)
             }
+            PostProcessEntryPoint::SmaaTu4x => {
+                let layout = vec![
+                    self.view_layout.clone(),
+                    self.deferred_layout.clone(),
+                    self.sampler_layout.clone(),
+                    self.smaa_layout.clone(),
+                    self.output_layout.clone(),
+                ];
+                let shader = SMAA_SHADER_HANDLE.typed();
+                (layout, shader)
+            }
+            PostProcessEntryPoint::SmaaTu4xExtrapolate => {
+                let layout = vec![
+                    self.view_layout.clone(),
+                    self.deferred_layout.clone(),
+                    self.sampler_layout.clone(),
+                    self.smaa_layout.clone(),
+                    self.output_layout.clone(),
+                ];
+                let shader = SMAA_SHADER_HANDLE.typed();
+                (layout, shader)
+            }
             PostProcessEntryPoint::Upscale => {
                 let layout = vec![
                     self.sampler_layout.clone(),
@@ -415,7 +480,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.output_layout.clone(),
                 ];
                 entry_point = "main".into();
-                let shader = FSR1_EASU_HANDLE.typed();
+                let shader = FSR1_EASU_SHADER_HANDLE.typed();
                 (layout, shader)
             }
             PostProcessEntryPoint::UpscaleSharpen => {
@@ -425,7 +490,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.output_layout.clone(),
                 ];
                 entry_point = "main".into();
-                let shader = FSR1_RCAS_HANDLE.typed();
+                let shader = FSR1_RCAS_SHADER_HANDLE.typed();
                 (layout, shader)
             }
         };
@@ -461,25 +526,14 @@ impl ExtractComponent for FsrConstantsUniform {
 
     fn extract_component((camera, config): QueryItem<Self::Query>) -> Self {
         let size = camera.physical_target_size().unwrap_or_default();
-        let scale = 1.0 / config.upscale_ratio();
-        let before_upscale_size_x = size.x as f32 * scale;
-        let before_upscale_size_y = size.y as f32 * scale;
-
+        let scale = config.upscale_ratio().recip();
+        let scaled_size = (scale * size.as_vec2()).ceil();
         Self {
-            input_viewport_in_pixels: Vec2 {
-                x: before_upscale_size_x,
-                y: before_upscale_size_y,
-            },
-            input_size_in_pixels: Vec2 {
-                x: before_upscale_size_x,
-                y: before_upscale_size_y,
-            },
-            output_size_in_pixels: Vec2 {
-                x: size.x as f32,
-                y: size.y as f32,
-            },
+            input_viewport_in_pixels: scaled_size,
+            input_size_in_pixels: scaled_size,
+            output_size_in_pixels: size.as_vec2(),
             sharpness: config.upscale_sharpness(),
-            hdr: 0, // Useless for now
+            hdr: 0,
         }
     }
 }
@@ -577,7 +631,7 @@ pub struct PostProcessTextures {
     pub denoise_internal: [TextureView; 3],
     pub denoise_internal_variance: TextureView,
     pub denoise_render: [TextureView; 6],
-    pub tone_mapping_output: TextureView,
+    pub tone_mapping_output: [TextureView; 2],
     pub taa_output: [TextureView; 2],
     pub upscale_output: [TextureView; 2],
 }
@@ -586,12 +640,30 @@ fn prepare_post_process_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     mut texture_cache: ResMut<TextureCache>,
-    fallback: Res<FallbackImage>,
     cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariConfig)>,
 ) {
+    let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
+    let fallback = texture_cache
+        .get(
+            &render_device,
+            TextureDescriptor {
+                label: None,
+                size: Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: HDR_TEXTURE_FORMAT,
+                usage: texture_usage,
+            },
+        )
+        .default_view;
+
     for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
-            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
             let mut create_texture = |texture_format, scale: f32| {
                 let extent = Extent3d {
                     width: (size.x as f32 * scale).ceil() as u32,
@@ -614,6 +686,18 @@ fn prepare_post_process_textures(
                     .default_view
             };
 
+            macro_rules! create_texture_array {
+                [$texture_format:ident, $scale:ident; $count:literal] => {
+                    [(); $count].map(|_| create_texture($texture_format, $scale))
+                };
+                [$texture_format:ident, $scale:literal; $count:literal] => {
+                    [(); $count].map(|_| create_texture($texture_format, $scale))
+                };
+                [$texture:ident; $count:literal] => {
+                    [(); $count].map(|_| $texture.clone())
+                };
+            }
+
             let nearest_sampler = render_device.create_sampler(&SamplerDescriptor {
                 mag_filter: FilterMode::Nearest,
                 min_filter: FilterMode::Nearest,
@@ -627,27 +711,26 @@ fn prepare_post_process_textures(
                 ..Default::default()
             });
 
-            let scale = 1.0 / config.upscale_ratio();
+            let mut scale = config.upscale_ratio().recip();
 
-            let denoise_internal = [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
-            let denoise_render = [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
+            let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
+            let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 6];
 
-            let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, scale);
-
-            let taa_output = match config.temporal_anti_aliasing {
-                Some(_) => [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale)),
-                None => [(); 2].map(|_| fallback.texture_view.clone()),
-            };
+            let tone_mapping_output = create_texture_array![HDR_TEXTURE_FORMAT, scale; 2];
 
             let upscale_output = match config.upscale {
-                Some(Upscale::Fsr1 { .. }) => {
-                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0))
-                }
                 Some(Upscale::SmaaTu4x { .. }) => {
-                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, 2.0 * scale))
+                    scale *= 2.0;
+                    create_texture_array![HDR_TEXTURE_FORMAT, scale; 2]
                 }
-                _ => [(); 2].map(|_| fallback.texture_view.clone()),
+                Some(Upscale::Fsr1 { .. }) => create_texture_array![HDR_TEXTURE_FORMAT, 1.0; 2],
+                None => create_texture_array![fallback; 2],
+            };
+
+            let taa_output = match config.temporal_anti_aliasing {
+                Some(_) => create_texture_array![HDR_TEXTURE_FORMAT, scale; 2],
+                None => create_texture_array![fallback; 2],
             };
 
             commands.entity(entity).insert(PostProcessTextures {
@@ -669,6 +752,8 @@ pub struct CachedPostProcessPipelines {
     denoise: [CachedComputePipelineId; 4],
     tone_mapping: CachedComputePipelineId,
     taa_jasmine: CachedComputePipelineId,
+    smaa_tu4x: CachedComputePipelineId,
+    smaa_tu4x_extrapolate: CachedComputePipelineId,
     upscale: CachedComputePipelineId,
     upscale_sharpen: CachedComputePipelineId,
 }
@@ -691,6 +776,12 @@ fn queue_post_process_pipelines(
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
     let taa_jasmine = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
+    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::SmaaTu4x);
+    let smaa_tu4x = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+
+    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::SmaaTu4xExtrapolate);
+    let smaa_tu4x_extrapolate = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Upscale);
     let upscale = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
@@ -701,6 +792,8 @@ fn queue_post_process_pipelines(
         denoise,
         tone_mapping,
         taa_jasmine,
+        smaa_tu4x,
+        smaa_tu4x_extrapolate,
         upscale,
         upscale_sharpen,
     })
@@ -714,6 +807,8 @@ pub struct PostProcessBindGroup {
     pub denoise_render: [BindGroup; 3],
     pub tone_mapping: BindGroup,
     pub tone_mapping_output: BindGroup,
+    pub smaa: BindGroup,
+    pub smaa_extrapolate: BindGroup,
     pub taa: BindGroup,
     pub taa_output: BindGroup,
     pub upscale: BindGroup,
@@ -862,10 +957,59 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.tone_mapping_output),
+                resource: BindingResource::TextureView(&post_process.tone_mapping_output[current]),
             }],
         });
 
+        let smaa = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.smaa_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[previous],
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[current],
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&post_process.upscale_output[1]),
+                },
+            ],
+        });
+        let smaa_extrapolate = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.smaa_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[previous],
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[current],
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&post_process.upscale_output[0]),
+                },
+            ],
+        });
+
+        let taa_input_texture = match config.upscale {
+            Some(Upscale::SmaaTu4x { .. }) => &post_process.upscale_output[1],
+            _ => &post_process.tone_mapping_output[current],
+        };
         let taa = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.taa_layout,
@@ -876,7 +1020,7 @@ fn queue_post_process_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&post_process.tone_mapping_output),
+                    resource: BindingResource::TextureView(taa_input_texture),
                 },
             ],
         });
@@ -891,7 +1035,7 @@ fn queue_post_process_bind_groups(
 
         let upscale_input_texture = match config.temporal_anti_aliasing {
             Some(_) => &post_process.taa_output[current],
-            None => &post_process.tone_mapping_output,
+            None => &post_process.tone_mapping_output[current],
         };
 
         let upscale = render_device.create_bind_group(&BindGroupDescriptor {
@@ -908,7 +1052,6 @@ fn queue_post_process_bind_groups(
                 },
             ],
         });
-
         let upscale_output = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.output_layout,
@@ -932,7 +1075,6 @@ fn queue_post_process_bind_groups(
                 },
             ],
         });
-
         let upscale_sharpen_output = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.output_layout,
@@ -949,6 +1091,8 @@ fn queue_post_process_bind_groups(
             denoise_render,
             tone_mapping,
             tone_mapping_output,
+            smaa,
+            smaa_extrapolate,
             taa,
             taa_output,
             upscale,
@@ -1021,11 +1165,8 @@ impl Node for PostProcessPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = 1.0 / config.upscale_ratio();
-        let scaled_size = UVec2::new(
-            (size.x as f32 * scale).ceil() as u32,
-            (size.y as f32 * scale).ceil() as u32,
-        );
+        let scale = config.upscale_ratio().recip();
+        let mut scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
             .command_encoder
@@ -1073,9 +1214,36 @@ impl Node for PostProcessPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
+        if matches!(config.upscale, Some(Upscale::SmaaTu4x { .. })) {
+            pass.set_bind_group(3, &post_process_bind_group.smaa, &[]);
+            pass.set_bind_group(4, &post_process_bind_group.upscale_output, &[]);
+
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.smaa_tu4x) {
+                pass.set_pipeline(pipeline);
+
+                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
+            }
+
+            pass.set_bind_group(3, &post_process_bind_group.smaa_extrapolate, &[]);
+            pass.set_bind_group(4, &post_process_bind_group.upscale_sharpen_output, &[]);
+
+            if let Some(pipeline) =
+                pipeline_cache.get_compute_pipeline(pipelines.smaa_tu4x_extrapolate)
+            {
+                pass.set_pipeline(pipeline);
+
+                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
+            }
+
+            // The in-out size after the upscale pass is 4x larger.
+            scaled_size *= 2;
+        }
+
         if let Some(taa_version) = config.temporal_anti_aliasing {
             let pipeline = match taa_version {
-                crate::TemporalAntiAliasing::Jasmine => pipelines.taa_jasmine,
+                TemporalAntiAliasing::Jasmine => pipelines.taa_jasmine,
             };
 
             pass.set_bind_group(3, &post_process_bind_group.taa, &[]);

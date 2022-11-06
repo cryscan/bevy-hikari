@@ -82,14 +82,16 @@ pub const TONE_MAPPING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 3567017338952956671);
 pub const TAA_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1780446804546284);
+pub const SMAA_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 3793959332758430953);
+pub const FSR1_EASU_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11823787237582686663);
+pub const FSR1_RCAS_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 17003547378277520107);
 pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10969344919103020615);
 pub const QUAD_MESH_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
-pub const FSR1_EASU_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11823787237582686663);
-pub const FSR1_RCAS_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 17003547378277520107);
 
 pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
@@ -180,17 +182,24 @@ impl Plugin for HikariPlugin {
         );
         load_internal_asset!(
             app,
+            SMAA_SHADER_HANDLE,
+            "shaders/smaa.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
             OVERLAY_SHADER_HANDLE,
             "shaders/overlay.wgsl",
             Shader::from_wgsl
         );
+
         let mut assets = app.world.resource_mut::<Assets<_>>();
         assets.set_untracked(
-            FSR1_EASU_HANDLE,
+            FSR1_EASU_SHADER_HANDLE,
             Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_easu.spv").as_ref()),
         );
         assets.set_untracked(
-            FSR1_RCAS_HANDLE,
+            FSR1_RCAS_SHADER_HANDLE,
             Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_rcas.spv").as_ref()),
         );
 
@@ -348,7 +357,7 @@ impl Default for HikariConfig {
             spatial_reuse: true,
             denoise: true,
             temporal_anti_aliasing: Some(TemporalAntiAliasing::default()),
-            upscale: Some(Upscale::default()),
+            upscale: None,
         }
     }
 }
@@ -358,12 +367,7 @@ impl ExtractComponent for HikariConfig {
     type Filter = ();
 
     fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        let mut config = item.clone();
-        if matches!(item.upscale, Some(Upscale::SmaaTu4x { .. })) {
-            // TAA and SMAA are incompatible, though SMAA are treated as an upscaling pass.
-            config.temporal_anti_aliasing = None;
-        }
-        config
+        item.clone()
     }
 }
 
