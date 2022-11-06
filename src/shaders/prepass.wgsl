@@ -42,7 +42,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // |0| |
     // | |1|
     // +-+-+
-    jitter = 0.5 * jitter + select(0.5, -0.5, frame.number % 2u == 0u) * pixel_size;
+    jitter = select(0.5, -0.5, frame.number % 2u == 0u) * pixel_size;
 #endif  // SMAA_TU_4X
 
     if projection[3].w != 1.0 {
