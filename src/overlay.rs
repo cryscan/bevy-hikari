@@ -200,7 +200,7 @@ fn queue_overlay_bind_groups(
 
         let input_texture = match (config.upscale, config.temporal_anti_aliasing) {
             (Some(Upscale::Fsr1 { .. }), _) => &post_process.upscale_output[1],
-            (Some(Upscale::SmaaTu4x { .. }), None) => &post_process.upscale_output[current],
+            (Some(Upscale::SmaaTu4x { .. }), None) => &post_process.upscale_output[1],
             (Some(Upscale::SmaaTu4x { .. }), Some(_)) => &post_process.taa_output[current],
             (None, Some(_)) => &post_process.taa_output[current],
             (None, None) => &post_process.tone_mapping_output[current],
