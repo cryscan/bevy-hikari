@@ -26,8 +26,7 @@ use bevy::{
 };
 use serde::Serialize;
 
-pub const DENOISE_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const POST_PROCESS_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const HDR_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct PostProcessPlugin;
 impl Plugin for PostProcessPlugin {
@@ -93,7 +92,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -104,7 +103,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -115,7 +114,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -187,7 +186,7 @@ impl FromWorld for PostProcessPipeline {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
-                            format: DENOISE_TEXTURE_FORMAT,
+                            format: HDR_TEXTURE_FORMAT,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -296,7 +295,7 @@ impl FromWorld for PostProcessPipeline {
                 visibility: ShaderStages::all(),
                 ty: BindingType::StorageTexture {
                     access: StorageTextureAccess::ReadWrite,
-                    format: POST_PROCESS_TEXTURE_FORMAT,
+                    format: HDR_TEXTURE_FORMAT,
                     view_dimension: TextureViewDimension::D2,
                 },
                 count: None,
@@ -602,7 +601,7 @@ fn prepare_post_process_textures(
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
-                format: POST_PROCESS_TEXTURE_FORMAT,
+                format: HDR_TEXTURE_FORMAT,
                 usage: texture_usage,
             },
         )
@@ -632,6 +631,18 @@ fn prepare_post_process_textures(
                     .default_view
             };
 
+            macro_rules! create_texture_array {
+                [$texture_format:ident, $scale:ident; $count:literal] => {
+                    [(); $count].map(|_| create_texture($texture_format, $scale))
+                };
+                [$texture_format:ident, $scale:literal; $count:literal] => {
+                    [(); $count].map(|_| create_texture($texture_format, $scale))
+                };
+                [$texture:ident; $count:literal] => {
+                    [(); $count].map(|_| $texture.clone())
+                };
+            }
+
             let nearest_sampler = render_device.create_sampler(&SamplerDescriptor {
                 mag_filter: FilterMode::Nearest,
                 min_filter: FilterMode::Nearest,
@@ -647,27 +658,24 @@ fn prepare_post_process_textures(
 
             let mut scale = config.upscale_ratio().recip();
 
-            let denoise_internal = [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
-            let denoise_render = [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
+            let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
+            let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 6];
 
-            let tone_mapping_output =
-                [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale));
+            let tone_mapping_output = create_texture_array![HDR_TEXTURE_FORMAT, scale; 2];
 
             let upscale_output = match config.upscale {
-                Some(Upscale::Fsr1 { .. }) => {
-                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0))
-                }
                 Some(Upscale::SmaaTu4x { .. }) => {
                     scale *= 2.0;
-                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale))
+                    create_texture_array![HDR_TEXTURE_FORMAT, scale; 2]
                 }
-                None => [(); 2].map(|_| fallback.clone()),
+                Some(Upscale::Fsr1 { .. }) => create_texture_array![HDR_TEXTURE_FORMAT, 1.0; 2],
+                None => create_texture_array![fallback; 2],
             };
 
             let taa_output = match config.temporal_anti_aliasing {
-                Some(_) => [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale)),
-                None => [(); 2].map(|_| fallback.clone()),
+                Some(_) => create_texture_array![HDR_TEXTURE_FORMAT, scale; 2],
+                None => create_texture_array![fallback; 2],
             };
 
             commands.entity(entity).insert(PostProcessTextures {
@@ -734,6 +742,8 @@ pub struct PostProcessBindGroup {
     pub denoise_render: [BindGroup; 3],
     pub tone_mapping: BindGroup,
     pub tone_mapping_output: BindGroup,
+    pub smaa: BindGroup,
+    pub smaa_output: BindGroup,
     pub taa: BindGroup,
     pub taa_output: BindGroup,
     pub upscale: BindGroup,
@@ -886,6 +896,37 @@ fn queue_post_process_bind_groups(
             }],
         });
 
+        let smaa = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.taa_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[previous],
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[current],
+                    ),
+                },
+            ],
+        });
+        let smaa_output = render_device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.output_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&post_process.upscale_output[current]),
+            }],
+        });
+
+        let taa_input_texture = match config.upscale {
+            Some(Upscale::SmaaTu4x { .. }) => &post_process.upscale_output[current],
+            _ => &post_process.tone_mapping_output[current],
+        };
         let taa = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.taa_layout,
@@ -896,9 +937,7 @@ fn queue_post_process_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(
-                        &post_process.tone_mapping_output[current],
-                    ),
+                    resource: BindingResource::TextureView(taa_input_texture),
                 },
             ],
         });
@@ -930,7 +969,6 @@ fn queue_post_process_bind_groups(
                 },
             ],
         });
-
         let upscale_output = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.output_layout,
@@ -954,7 +992,6 @@ fn queue_post_process_bind_groups(
                 },
             ],
         });
-
         let upscale_sharpen_output = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.output_layout,
@@ -971,6 +1008,8 @@ fn queue_post_process_bind_groups(
             denoise_render,
             tone_mapping,
             tone_mapping_output,
+            smaa,
+            smaa_output,
             taa,
             taa_output,
             upscale,
