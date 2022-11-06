@@ -304,11 +304,8 @@ fn prepare_light_pass_textures(
     for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let scale = 1.0 / config.upscale_ratio();
-            let size = UVec2::new(
-                (size.x as f32 * scale).ceil() as u32,
-                (size.y as f32 * scale).ceil() as u32,
-            );
+            let scale = config.upscale_ratio().recip();
+            let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let mut create_texture = |texture_format| {
                 let extent = Extent3d {
                     width: size.x,
@@ -354,8 +351,14 @@ fn prepare_light_pass_textures(
                 reservoir_cache.insert(entity, reservoirs);
             }
 
-            let variance = [(); 3].map(|_| create_texture(VARIANCE_TEXTURE_FORMAT));
-            let render = [(); 3].map(|_| create_texture(RENDER_TEXTURE_FORMAT));
+            macro_rules! create_texture_array {
+                [$texture_format:ident; $count:literal] => {
+                    [(); $count].map(|_| create_texture($texture_format))
+                };
+            }
+
+            let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT; 3];
+            let render = create_texture_array![RENDER_TEXTURE_FORMAT; 3];
 
             commands.entity(entity).insert(LightPassTextures {
                 head: counter.0 % 2,
@@ -592,11 +595,8 @@ impl Node for LightPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = 1.0 / config.upscale_ratio();
-        let scaled_size = UVec2::new(
-            (size.x as f32 * scale).ceil() as u32,
-            (size.y as f32 * scale).ceil() as u32,
-        );
+        let scale = config.upscale_ratio().recip();
+        let scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
             .command_encoder

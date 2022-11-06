@@ -169,7 +169,7 @@ impl FromWorld for PrepassPipeline {
 pub struct PrepassPipelineKey {
     pub mesh_pipeline_key: MeshPipelineKey,
     pub temporal_anti_aliasing: bool,
-    pub smaa_tu_4x: bool,
+    pub smaa_tu4x: bool,
 }
 
 impl SpecializedMeshPipeline for PrepassPipeline {
@@ -192,8 +192,8 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         if key.temporal_anti_aliasing {
             shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
         }
-        if key.smaa_tu_4x {
-            shader_defs.push("SMAA_TU_4X".into());
+        if key.smaa_tu4x {
+            shader_defs.push("SMAA_TU4X".into());
         }
 
         Ok(RenderPipelineDescriptor {
@@ -356,10 +356,11 @@ fn prepass_textures_system(
 ) {
     for (entity, camera, config) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
-            let scale = 1.0 / config.upscale_ratio();
+            let scale = config.upscale_ratio().recip();
+            let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let size = Extent3d {
-                width: (size.x as f32 * scale).ceil() as u32,
-                height: (size.y as f32 * scale).ceil() as u32,
+                width: size.x,
+                height: size.y,
                 depth_or_array_layers: 1,
             };
             let texture_usage = TextureUsages::COPY_DST
@@ -479,7 +480,7 @@ fn queue_prepass_meshes(
                 let key = PrepassPipelineKey {
                     mesh_pipeline_key: key,
                     temporal_anti_aliasing: config.temporal_anti_aliasing.is_some(),
-                    smaa_tu_4x: matches!(config.upscale, Some(Upscale::SmaaTu4x { .. })),
+                    smaa_tu4x: matches!(config.upscale, Some(Upscale::SmaaTu4x { .. })),
                 };
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);

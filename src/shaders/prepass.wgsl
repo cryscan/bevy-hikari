@@ -37,7 +37,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 #ifdef TEMPORAL_ANTI_ALIASING
     jitter = 2.0 * (frame_jitter(frame.number) - 0.5) * pixel_size;
 #endif  // TEMPORAL_ANTI_ALIASING
-#ifdef SMAA_TU_4X
+#ifdef SMAA_TU4X
     // +-+-+
     // |0| |
     // | |1|

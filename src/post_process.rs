@@ -2,8 +2,9 @@ use crate::{
     light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
-    HikariConfig, TemporalAntiAliasing, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE,
-    FSR1_RCAS_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
+    HikariConfig, TemporalAntiAliasing, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_SHADER_HANDLE,
+    FSR1_RCAS_SHADER_HANDLE, SMAA_SHADER_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE,
+    WORKGROUP_SIZE,
 };
 use bevy::{
     ecs::query::QueryItem,
@@ -323,7 +324,8 @@ pub enum PostProcessEntryPoint {
     #[default]
     ToneMapping = 0,
     JasmineTaa = 1,
-    Denoise = 2,
+    SmaaTu4x = 2,
+    Denoise = 3,
     Upscale = 4,
     UpscaleSharpen = 5,
 }
@@ -407,6 +409,17 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                 let shader = TAA_SHADER_HANDLE.typed();
                 (layout, shader)
             }
+            PostProcessEntryPoint::SmaaTu4x => {
+                let layout = vec![
+                    self.view_layout.clone(),
+                    self.deferred_layout.clone(),
+                    self.sampler_layout.clone(),
+                    self.taa_layout.clone(),
+                    self.output_layout.clone(),
+                ];
+                let shader = SMAA_SHADER_HANDLE.typed();
+                (layout, shader)
+            }
             PostProcessEntryPoint::Upscale => {
                 let layout = vec![
                     self.sampler_layout.clone(),
@@ -414,7 +427,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.output_layout.clone(),
                 ];
                 entry_point = "main".into();
-                let shader = FSR1_EASU_HANDLE.typed();
+                let shader = FSR1_EASU_SHADER_HANDLE.typed();
                 (layout, shader)
             }
             PostProcessEntryPoint::UpscaleSharpen => {
@@ -424,7 +437,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.output_layout.clone(),
                 ];
                 entry_point = "main".into();
-                let shader = FSR1_RCAS_HANDLE.typed();
+                let shader = FSR1_RCAS_SHADER_HANDLE.typed();
                 (layout, shader)
             }
         };
@@ -460,25 +473,14 @@ impl ExtractComponent for FsrConstantsUniform {
 
     fn extract_component((camera, config): QueryItem<Self::Query>) -> Self {
         let size = camera.physical_target_size().unwrap_or_default();
-        let scale = 1.0 / config.upscale_ratio();
-        let before_upscale_size_x = size.x as f32 * scale;
-        let before_upscale_size_y = size.y as f32 * scale;
-
+        let scale = config.upscale_ratio().recip();
+        let scaled_size = (scale * size.as_vec2()).ceil();
         Self {
-            input_viewport_in_pixels: Vec2 {
-                x: before_upscale_size_x,
-                y: before_upscale_size_y,
-            },
-            input_size_in_pixels: Vec2 {
-                x: before_upscale_size_x,
-                y: before_upscale_size_y,
-            },
-            output_size_in_pixels: Vec2 {
-                x: size.x as f32,
-                y: size.y as f32,
-            },
+            input_viewport_in_pixels: scaled_size,
+            input_size_in_pixels: scaled_size,
+            output_size_in_pixels: size.as_vec2(),
             sharpness: config.upscale_sharpness(),
-            hdr: 0, // Useless for now
+            hdr: 0,
         }
     }
 }
@@ -697,6 +699,7 @@ pub struct CachedPostProcessPipelines {
     denoise: [CachedComputePipelineId; 4],
     tone_mapping: CachedComputePipelineId,
     taa_jasmine: CachedComputePipelineId,
+    smaa_tu4x: CachedComputePipelineId,
     upscale: CachedComputePipelineId,
     upscale_sharpen: CachedComputePipelineId,
 }
@@ -719,6 +722,9 @@ fn queue_post_process_pipelines(
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
     let taa_jasmine = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
+    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::SmaaTu4x);
+    let smaa_tu4x = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Upscale);
     let upscale = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
@@ -729,6 +735,7 @@ fn queue_post_process_pipelines(
         denoise,
         tone_mapping,
         taa_jasmine,
+        smaa_tu4x,
         upscale,
         upscale_sharpen,
     })
@@ -1082,11 +1089,8 @@ impl Node for PostProcessPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = 1.0 / config.upscale_ratio();
-        let scaled_size = UVec2::new(
-            (size.x as f32 * scale).ceil() as u32,
-            (size.y as f32 * scale).ceil() as u32,
-        );
+        let scale = config.upscale_ratio().recip();
+        let mut scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
             .command_encoder
@@ -1132,6 +1136,21 @@ impl Node for PostProcessPassNode {
 
             let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             pass.dispatch_workgroups(count.x, count.y, 1);
+        }
+
+        if matches!(config.upscale, Some(Upscale::SmaaTu4x { .. })) {
+            pass.set_bind_group(3, &post_process_bind_group.smaa, &[]);
+            pass.set_bind_group(4, &post_process_bind_group.smaa_output, &[]);
+
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.smaa_tu4x) {
+                pass.set_pipeline(pipeline);
+
+                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                pass.dispatch_workgroups(count.x, count.y, 1);
+            }
+
+            // The in-out size after the upscale pass is 4x larger.
+            scaled_size *= 2;
         }
 
         if let Some(taa_version) = config.temporal_anti_aliasing {
