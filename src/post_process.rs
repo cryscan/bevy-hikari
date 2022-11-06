@@ -2,8 +2,8 @@ use crate::{
     light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
-    HikariConfig, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE, FSR1_RCAS_HANDLE,
-    TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
+    HikariConfig, TemporalAntiAliasing, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_HANDLE,
+    FSR1_RCAS_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
     ecs::query::QueryItem,
@@ -577,7 +577,7 @@ pub struct PostProcessTextures {
     pub denoise_internal: [TextureView; 3],
     pub denoise_internal_variance: TextureView,
     pub denoise_render: [TextureView; 6],
-    pub tone_mapping_output: TextureView,
+    pub tone_mapping_output: [TextureView; 2],
     pub taa_output: [TextureView; 2],
     pub upscale_output: [TextureView; 2],
 }
@@ -586,12 +586,30 @@ fn prepare_post_process_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     mut texture_cache: ResMut<TextureCache>,
-    fallback: Res<FallbackImage>,
     cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariConfig)>,
 ) {
+    let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
+    let fallback = texture_cache
+        .get(
+            &render_device,
+            TextureDescriptor {
+                label: None,
+                size: Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: POST_PROCESS_TEXTURE_FORMAT,
+                usage: texture_usage,
+            },
+        )
+        .default_view;
+
     for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
-            let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
             let mut create_texture = |texture_format, scale: f32| {
                 let extent = Extent3d {
                     width: (size.x as f32 * scale).ceil() as u32,
@@ -627,27 +645,29 @@ fn prepare_post_process_textures(
                 ..Default::default()
             });
 
-            let scale = 1.0 / config.upscale_ratio();
+            let mut scale = config.upscale_ratio().recip();
 
             let denoise_internal = [(); 3].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
             let denoise_render = [(); 6].map(|_| create_texture(DENOISE_TEXTURE_FORMAT, scale));
 
-            let tone_mapping_output = create_texture(POST_PROCESS_TEXTURE_FORMAT, scale);
-
-            let taa_output = match config.temporal_anti_aliasing {
-                Some(_) => [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale)),
-                None => [(); 2].map(|_| fallback.texture_view.clone()),
-            };
+            let tone_mapping_output =
+                [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale));
 
             let upscale_output = match config.upscale {
                 Some(Upscale::Fsr1 { .. }) => {
                     [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, 1.0))
                 }
                 Some(Upscale::SmaaTu4x { .. }) => {
-                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, 2.0 * scale))
+                    scale *= 2.0;
+                    [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale))
                 }
-                _ => [(); 2].map(|_| fallback.texture_view.clone()),
+                None => [(); 2].map(|_| fallback.clone()),
+            };
+
+            let taa_output = match config.temporal_anti_aliasing {
+                Some(_) => [(); 2].map(|_| create_texture(POST_PROCESS_TEXTURE_FORMAT, scale)),
+                None => [(); 2].map(|_| fallback.clone()),
             };
 
             commands.entity(entity).insert(PostProcessTextures {
@@ -862,7 +882,7 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.tone_mapping_output),
+                resource: BindingResource::TextureView(&post_process.tone_mapping_output[current]),
             }],
         });
 
@@ -876,7 +896,9 @@ fn queue_post_process_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&post_process.tone_mapping_output),
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[current],
+                    ),
                 },
             ],
         });
@@ -891,7 +913,7 @@ fn queue_post_process_bind_groups(
 
         let upscale_input_texture = match config.temporal_anti_aliasing {
             Some(_) => &post_process.taa_output[current],
-            None => &post_process.tone_mapping_output,
+            None => &post_process.tone_mapping_output[current],
         };
 
         let upscale = render_device.create_bind_group(&BindGroupDescriptor {
@@ -1075,7 +1097,7 @@ impl Node for PostProcessPassNode {
 
         if let Some(taa_version) = config.temporal_anti_aliasing {
             let pipeline = match taa_version {
-                crate::TemporalAntiAliasing::Jasmine => pipelines.taa_jasmine,
+                TemporalAntiAliasing::Jasmine => pipelines.taa_jasmine,
             };
 
             pass.set_bind_group(3, &post_process_bind_group.taa, &[]);

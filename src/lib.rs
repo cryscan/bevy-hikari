@@ -348,7 +348,7 @@ impl Default for HikariConfig {
             spatial_reuse: true,
             denoise: true,
             temporal_anti_aliasing: Some(TemporalAntiAliasing::default()),
-            upscale: Some(Upscale::default()),
+            upscale: None,
         }
     }
 }
@@ -358,12 +358,7 @@ impl ExtractComponent for HikariConfig {
     type Filter = ();
 
     fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        let mut config = item.clone();
-        if matches!(item.upscale, Some(Upscale::SmaaTu4x { .. })) {
-            // TAA and SMAA are incompatible, though SMAA are treated as an upscaling pass.
-            config.temporal_anti_aliasing = None;
-        }
-        config
+        item.clone()
     }
 }
 

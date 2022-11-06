@@ -202,7 +202,7 @@ fn queue_overlay_bind_groups(
             (Some(Upscale::Fsr1 { .. }), _) => &post_process.upscale_output[1],
             (Some(Upscale::SmaaTu4x { .. }), _) => &post_process.upscale_output[current],
             (None, Some(_)) => &post_process.taa_output[current],
-            (None, None) => &post_process.tone_mapping_output,
+            (None, None) => &post_process.tone_mapping_output[current],
         };
 
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
