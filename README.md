@@ -26,7 +26,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] Spatiotemporal filtering
 - [x] Temporal anti-aliasing
 - [x] Spatial up-scaling (FSR 1.0)
-- [ ] Temporal up-scaling
+- [x] Temporal up-scaling (SMAA TU4X)
 - [ ] Skinned animation
 - [ ] Hardware ray tracing (upstream related)
 
@@ -49,12 +49,12 @@ pub struct HikariConfig {
     pub max_spatial_reuse_count: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
-    /// Threshold that emissive objects begin to lit others.
-    pub emissive_threshold: f32,
     /// Count of indirect bounces.
     pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
+    /// Clear color override.
+    pub clear_color: Color,
     /// Whether to do temporal sample reuse in ReSTIR.
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
@@ -62,9 +62,9 @@ pub struct HikariConfig {
     /// Whether to do noise filtering.
     pub denoise: bool,
     /// Which TAA implementation to use.
-    pub temporal_anti_aliasing: Option<TaaVersion>,
+    pub temporal_anti_aliasing: Option<TemporalAntiAliasing>,
     /// Which upscaling implementation to use.
-    pub upscale: Option<UpscaleVersion>,
+    pub upscale: Option<Upscale>,
 }
 ```
 
