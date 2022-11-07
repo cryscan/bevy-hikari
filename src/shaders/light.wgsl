@@ -666,8 +666,10 @@ fn check_previous_reservoir(
 
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
+    
+    let pos_miss = length((*r).s.visible_position.xyz - s.visible_position.xyz) > 1.0;
 
-    if depth_miss || instance_miss || normal_miss {
+    if (depth_miss || pos_miss) || instance_miss || normal_miss {
         (*r) = empty_reservoir();
     }
 }
