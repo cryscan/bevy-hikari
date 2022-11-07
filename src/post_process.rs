@@ -160,7 +160,7 @@ impl FromWorld for PostProcessPipeline {
                         },
                         count: None,
                     },
-                    // Previous Render
+                    // Previous Radiance
                     BindGroupLayoutEntry {
                         binding: 2,
                         visibility: ShaderStages::COMPUTE,
@@ -182,9 +182,20 @@ impl FromWorld for PostProcessPipeline {
                         },
                         count: None,
                     },
-                    // Output
+                    // Radiance Output
                     BindGroupLayoutEntry {
                         binding: 4,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::ReadWrite,
+                            format: HDR_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    // Output
+                    BindGroupLayoutEntry {
+                        binding: 5,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
@@ -630,7 +641,7 @@ pub struct PostProcessTextures {
     pub linear_sampler: Sampler,
     pub denoise_internal: [TextureView; 3],
     pub denoise_internal_variance: TextureView,
-    pub denoise_render: [TextureView; 6],
+    pub denoise_render: [TextureView; 9],
     pub tone_mapping_output: [TextureView; 2],
     pub taa_output: [TextureView; 2],
     pub upscale_output: [TextureView; 2],
@@ -715,7 +726,7 @@ fn prepare_post_process_textures(
 
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
             let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
-            let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 6];
+            let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 9];
 
             let tone_mapping_output = create_texture_array![HDR_TEXTURE_FORMAT, scale; 2];
 
@@ -909,7 +920,7 @@ fn queue_post_process_bind_groups(
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &post_process.denoise_render[previous + 2 * id],
+                            &post_process.denoise_render[previous + 3 * id],
                         ),
                     },
                     BindGroupEntry {
@@ -919,7 +930,13 @@ fn queue_post_process_bind_groups(
                     BindGroupEntry {
                         binding: 4,
                         resource: BindingResource::TextureView(
-                            &post_process.denoise_render[current + 2 * id],
+                            &post_process.denoise_render[current + 3 * id],
+                        ),
+                    },
+                    BindGroupEntry {
+                        binding: 5,
+                        resource: BindingResource::TextureView(
+                            &post_process.denoise_render[2 + 3 * id],
                         ),
                     },
                 ],
@@ -929,9 +946,9 @@ fn queue_post_process_bind_groups(
         let (direct_render, emissive_render, indirect_render) = match config.denoise {
             false => (&light.render[0], &light.render[1], &light.render[2]),
             true => (
-                &post_process.denoise_render[current],
-                &post_process.denoise_render[current + 2],
-                &post_process.denoise_render[current + 4],
+                &post_process.denoise_render[2],
+                &post_process.denoise_render[5],
+                &post_process.denoise_render[8],
             ),
         };
         let tone_mapping = render_device.create_bind_group(&BindGroupDescriptor {

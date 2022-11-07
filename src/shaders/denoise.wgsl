@@ -21,10 +21,12 @@ var albedo_texture: texture_2d<f32>;
 @group(4) @binding(1)
 var variance_texture: texture_2d<f32>;
 @group(4) @binding(2)
-var previous_render_texture: texture_2d<f32>;
+var previous_radiance_texture: texture_2d<f32>;
 @group(4) @binding(3)
 var render_texture: texture_2d<f32>;
 @group(4) @binding(4)
+var radiance_texture: texture_storage_2d<rgba16float, read_write>;
+@group(4) @binding(5)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
 
 let F32_EPSILON: f32 = 1.1920929E-7;
@@ -143,12 +145,12 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
 
-    let position_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0);
+    let depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     let depth_gradient = textureSampleLevel(depth_gradient_texture, nearest_sampler, uv, 0.0).xy;
     let normal = normalize(textureSampleLevel(normal_texture, nearest_sampler, uv, 0.0).xyz);
     let instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
 
-    if position_depth.w < F32_EPSILON {
+    if depth < F32_EPSILON {
         store_output(coords, vec4<f32>(0.0));
         return;
     }
@@ -197,7 +199,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let sample_luminance = luminance(irradiance);
 
         let w_normal = normal_weight(normal, sample_normal);
-        let w_depth = depth_weight(position_depth.w, sample_depth, depth_gradient, offset);
+        let w_depth = depth_weight(depth, sample_depth, depth_gradient, offset);
         let w_instance = instance_weight(instance, sample_instance);
         let w_luminance = luminance_weight(lum, sample_luminance, variance);
 
@@ -210,22 +212,12 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var color = vec4<f32>(irradiance, 1.0);
 
 #ifdef DENOISE_LEVEL_3
-    let albedo = textureLoad(albedo_texture, coords, 0);
-    color *= albedo;
-
     let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).xy;
     let previous_uv = uv - velocity;
-    // var previous_color = textureSampleLevel(previous_render_texture, linear_sampler, previous_uv, 0.0);
     var previous_color = color;
 
-    var min_distance = F32_MAX;
-    for (var i = 0; i < 9; i += 1) {
-        let x = i % 3 - 1;
-        let y = i / 3 - 1;
-
-        let offset = vec2<i32>(x, y);
-        let uv_offset = vec2<f32>(offset) / vec2<f32>(deferred_size);
-        let sample_uv = previous_uv + uv_offset;
+    for (var i = 0; i < 1; i += 1) {
+        let sample_uv = previous_uv;
 
         let sample_coords = vec2<i32>(sample_uv * vec2<f32>(deferred_size));
         let previous_instance = textureLoad(previous_instance_material_texture, sample_coords, 0).x;
@@ -233,11 +225,11 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             continue;
         }
 
-        let previous_position_depth = textureSampleLevel(previous_position_texture, nearest_sampler, sample_uv, 0.0);
-        if previous_position_depth.w == 0.0 {
+        let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, sample_uv, 0.0).w;
+        if previous_depth == 0.0 {
             continue;
         }
-        let depth_ratio = position_depth.w / previous_position_depth.w;
+        let depth_ratio = depth / previous_depth;
         if depth_ratio < 0.9 || depth_ratio > 1.1 {
             continue;
         }
@@ -246,16 +238,16 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         if dot(normal, previous_normal) < 0.866 {
             continue;
         }
-
-        let dist = distance(previous_position_depth.xyz, position_depth.xyz) / frame.kernel[y + 1][x + 1];
-        if dist < min_distance {
-            min_distance = dist;
-            previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, sample_uv, 0.0);
-        }
+        
+        previous_color = textureSampleLevel(previous_radiance_texture, nearest_sampler, sample_uv, 0.0);
     }
 
     let mixed_color = mix(color, previous_color, 0.8);
     color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
+    textureStore(radiance_texture, coords, color);
+
+    let albedo = textureLoad(albedo_texture, coords, 0);
+    color *= albedo;
 #endif
 
     store_output(coords, color);
