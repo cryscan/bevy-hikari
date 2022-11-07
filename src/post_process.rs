@@ -2,7 +2,7 @@ use crate::{
     light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
-    HikariConfig, TemporalAntiAliasing, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_SHADER_HANDLE,
+    HikariConfig, Taa, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_SHADER_HANDLE,
     FSR1_RCAS_SHADER_HANDLE, SMAA_SHADER_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE,
     WORKGROUP_SIZE,
 };
@@ -537,13 +537,13 @@ impl ExtractComponent for FsrConstantsUniform {
 
     fn extract_component((camera, config): QueryItem<Self::Query>) -> Self {
         let size = camera.physical_target_size().unwrap_or_default();
-        let scale = config.upscale_ratio().recip();
+        let scale = config.upscale.ratio().recip();
         let scaled_size = (scale * size.as_vec2()).ceil();
         Self {
             input_viewport_in_pixels: scaled_size,
             input_size_in_pixels: scaled_size,
             output_size_in_pixels: size.as_vec2(),
-            sharpness: config.upscale_sharpness(),
+            sharpness: config.upscale.sharpness(),
             hdr: 0,
         }
     }
@@ -722,7 +722,7 @@ fn prepare_post_process_textures(
                 ..Default::default()
             });
 
-            let mut scale = config.upscale_ratio().recip();
+            let mut scale = config.upscale.ratio().recip();
 
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
             let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
@@ -731,17 +731,19 @@ fn prepare_post_process_textures(
             let tone_mapping_output = create_texture_array![HDR_TEXTURE_FORMAT, scale; 2];
 
             let upscale_output = match config.upscale {
-                Some(Upscale::SmaaTu4x { .. }) => {
+                Upscale::SmaaTu4x { .. } => {
                     scale *= 2.0;
                     create_texture_array![HDR_TEXTURE_FORMAT, scale; 2]
                 }
-                Some(Upscale::Fsr1 { .. }) => create_texture_array![HDR_TEXTURE_FORMAT, 1.0; 2],
-                None => create_texture_array![fallback; 2],
+                Upscale::Fsr1 { .. } => create_texture_array![HDR_TEXTURE_FORMAT, 1.0; 2],
+                Upscale::None => create_texture_array![fallback; 2],
             };
 
-            let taa_output = match config.temporal_anti_aliasing {
-                Some(_) => create_texture_array![HDR_TEXTURE_FORMAT, scale; 2],
-                None => create_texture_array![fallback; 2],
+            let taa_output = match config.taa {
+                Taa::Jasmine => {
+                    create_texture_array![HDR_TEXTURE_FORMAT, scale; 2]
+                }
+                Taa::None => create_texture_array![fallback; 2],
             };
 
             commands.entity(entity).insert(PostProcessTextures {
@@ -1024,7 +1026,7 @@ fn queue_post_process_bind_groups(
         });
 
         let taa_input_texture = match config.upscale {
-            Some(Upscale::SmaaTu4x { .. }) => &post_process.upscale_output[1],
+            Upscale::SmaaTu4x { .. } => &post_process.upscale_output[1],
             _ => &post_process.tone_mapping_output[current],
         };
         let taa = render_device.create_bind_group(&BindGroupDescriptor {
@@ -1050,9 +1052,9 @@ fn queue_post_process_bind_groups(
             }],
         });
 
-        let upscale_input_texture = match config.temporal_anti_aliasing {
-            Some(_) => &post_process.taa_output[current],
-            None => &post_process.tone_mapping_output[current],
+        let upscale_input_texture = match config.taa {
+            Taa::Jasmine => &post_process.taa_output[current],
+            Taa::None => &post_process.tone_mapping_output[current],
         };
 
         let upscale = render_device.create_bind_group(&BindGroupDescriptor {
@@ -1182,7 +1184,7 @@ impl Node for PostProcessPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = config.upscale_ratio().recip();
+        let scale = config.upscale.ratio().recip();
         let mut scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
@@ -1231,7 +1233,7 @@ impl Node for PostProcessPassNode {
             pass.dispatch_workgroups(count.x, count.y, 1);
         }
 
-        if matches!(config.upscale, Some(Upscale::SmaaTu4x { .. })) {
+        if matches!(config.upscale, Upscale::SmaaTu4x { .. }) {
             pass.set_bind_group(3, &post_process_bind_group.smaa, &[]);
             pass.set_bind_group(4, &post_process_bind_group.upscale_output, &[]);
 
@@ -1258,10 +1260,8 @@ impl Node for PostProcessPassNode {
             scaled_size *= 2;
         }
 
-        if let Some(taa_version) = config.temporal_anti_aliasing {
-            let pipeline = match taa_version {
-                TemporalAntiAliasing::Jasmine => pipelines.taa_jasmine,
-            };
+        if matches!(config.taa, Taa::Jasmine) {
+            let pipeline = pipelines.taa_jasmine;
 
             pass.set_bind_group(3, &post_process_bind_group.taa, &[]);
             pass.set_bind_group(4, &post_process_bind_group.taa_output, &[]);
@@ -1274,7 +1274,7 @@ impl Node for PostProcessPassNode {
             }
         }
 
-        if matches!(config.upscale, Some(Upscale::Fsr1 { .. })) {
+        if matches!(config.upscale, Upscale::Fsr1 { .. }) {
             pass.set_bind_group(0, &post_process_bind_group.sampler, &[]);
             pass.set_bind_group(
                 1,

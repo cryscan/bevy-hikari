@@ -236,6 +236,8 @@ impl Plugin for HikariPlugin {
         };
 
         app.register_type::<HikariConfig>()
+            .register_type::<Taa>()
+            .register_type::<Upscale>()
             .add_plugin(ExtractResourcePlugin::<NoiseTextures>::default())
             .add_plugin(ExtractComponentPlugin::<HikariConfig>::default())
             .add_plugin(TransformPlugin)
@@ -337,9 +339,9 @@ pub struct HikariConfig {
     /// Whether to do noise filtering.
     pub denoise: bool,
     /// Which TAA implementation to use.
-    pub temporal_anti_aliasing: Option<TemporalAntiAliasing>,
+    pub taa: Taa,
     /// Which upscaling implementation to use.
-    pub upscale: Option<Upscale>,
+    pub upscale: Upscale,
 }
 
 impl Default for HikariConfig {
@@ -356,8 +358,8 @@ impl Default for HikariConfig {
             temporal_reuse: true,
             spatial_reuse: true,
             denoise: true,
-            temporal_anti_aliasing: Some(TemporalAntiAliasing::default()),
-            upscale: Some(Upscale::default()),
+            taa: Taa::default(),
+            upscale: Upscale::default(),
         }
     }
 }
@@ -368,24 +370,6 @@ impl ExtractComponent for HikariConfig {
 
     fn extract_component(item: QueryItem<Self::Query>) -> Self {
         item.clone()
-    }
-}
-
-impl HikariConfig {
-    pub fn upscale_ratio(&self) -> f32 {
-        match self.upscale {
-            Some(Upscale::Fsr1 { ratio, .. }) | Some(Upscale::SmaaTu4x { ratio }) => {
-                ratio.clamp(1.0, 2.0)
-            }
-            None => 1.0,
-        }
-    }
-
-    pub fn upscale_sharpness(&self) -> f32 {
-        match self.upscale {
-            Some(Upscale::Fsr1 { sharpness, .. }) => sharpness,
-            _ => 0.0,
-        }
     }
 }
 
@@ -404,9 +388,10 @@ fn hikari_config_system(
 
 /// Temporal Anti-Aliasing Method to use.
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
-pub enum TemporalAntiAliasing {
+pub enum Taa {
     #[default]
     Jasmine,
+    None,
 }
 
 /// Upscale method to use.
@@ -424,11 +409,28 @@ pub enum Upscale {
         /// Renders the main pass and post process on a low resolution texture.
         ratio: f32,
     },
+    None,
 }
 
 impl Default for Upscale {
     fn default() -> Self {
         Self::SmaaTu4x { ratio: 1.0 }
+    }
+}
+
+impl Upscale {
+    pub fn ratio(&self) -> f32 {
+        match self {
+            Upscale::Fsr1 { ratio, .. } | Upscale::SmaaTu4x { ratio } => ratio.clamp(1.0, 2.0),
+            Upscale::None => 1.0,
+        }
+    }
+
+    pub fn sharpness(&self) -> f32 {
+        match self {
+            Upscale::Fsr1 { sharpness, .. } => *sharpness,
+            _ => 0.0,
+        }
     }
 }
 

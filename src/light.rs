@@ -304,7 +304,7 @@ fn prepare_light_pass_textures(
     for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let scale = config.upscale_ratio().recip();
+            let scale = config.upscale.ratio().recip();
             let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let mut create_texture = |texture_format| {
                 let extent = Extent3d {
@@ -595,7 +595,7 @@ impl Node for LightPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = config.upscale_ratio().recip();
+        let scale = config.upscale.ratio().recip();
         let scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
