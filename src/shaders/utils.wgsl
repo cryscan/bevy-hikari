@@ -1,5 +1,17 @@
 #define_import_path bevy_hikari::utils
 
+fn is_nan(val: f32) -> bool {
+    return !(val < 0.0 || 0.0 < val || val == 0.0);
+}
+
+fn any_is_nan_vec3(val: vec3<f32>) -> bool {
+    return is_nan(val.x) || is_nan(val.y) || is_nan(val.z);
+}
+
+fn any_is_nan_vec4(val: vec4<f32>) -> bool {
+    return is_nan(val.x) || is_nan(val.y) || is_nan(val.z) || is_nan(val.w);
+}
+
 fn hash(value: u32) -> u32 {
     var state = value;
     state = state ^ 2747636419u;
