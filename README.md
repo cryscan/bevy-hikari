@@ -62,9 +62,9 @@ pub struct HikariConfig {
     /// Whether to do noise filtering.
     pub denoise: bool,
     /// Which TAA implementation to use.
-    pub temporal_anti_aliasing: Option<TemporalAntiAliasing>,
+    pub taa: Taa,
     /// Which upscaling implementation to use.
-    pub upscale: Option<Upscale>,
+    pub upscale: Upscale,
 }
 ```
 
