@@ -357,7 +357,7 @@ impl Default for HikariConfig {
             spatial_reuse: true,
             denoise: true,
             temporal_anti_aliasing: Some(TemporalAntiAliasing::default()),
-            upscale: None,
+            upscale: Some(Upscale::default()),
         }
     }
 }
@@ -428,10 +428,7 @@ pub enum Upscale {
 
 impl Default for Upscale {
     fn default() -> Self {
-        Self::Fsr1 {
-            ratio: 1.0,
-            sharpness: 0.25,
-        }
+        Self::SmaaTu4x { ratio: 1.0 }
     }
 }
 
