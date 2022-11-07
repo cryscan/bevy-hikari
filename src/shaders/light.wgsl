@@ -845,14 +845,14 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             s.sample_normal = -ray.direction;
         }
 
-        let sample_radiance = shading(
-            view_direction,
-            s.visible_normal,
-            normalize(s.sample_position.xyz - s.visible_position.xyz),
-            surface,
-            s.radiance
-        );
-        let sample_luminance = select(luminance(sample_radiance) / candidate.p, 0.0, candidate.p < 0.0001);
+        // let sample_radiance = shading(
+        //     view_direction,
+        //     s.visible_normal,
+        //     normalize(s.sample_position.xyz - s.visible_position.xyz),
+        //     surface,
+        //     s.radiance
+        // );
+        let sample_luminance = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
         temporal_restir(&r, s, sample_luminance, frame.max_temporal_reuse_count);
     }
 
@@ -907,14 +907,15 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let luminance_ratio = luminance(validate_radiance.rgb) / max(luminance(r.s.radiance.rgb), 0.0001);
         if luminance_ratio > 1.25 || luminance_ratio < 0.8 {
             // Luminance miss, update reservoir
-            let sample_radiance = shading(
-                view_direction,
-                s.visible_normal,
-                normalize(s.sample_position.xyz - s.visible_position.xyz),
-                surface,
-                s.radiance
-            );
-            let w_new = select(luminance(sample_radiance) / candidate.p, 0.0, candidate.p < 0.0001);
+            // let sample_radiance = shading(
+            //     view_direction,
+            //     s.visible_normal,
+            //     normalize(s.sample_position.xyz - s.visible_position.xyz),
+            //     surface,
+            //     s.radiance
+            // );
+            let sample_luminance = luminance(s.radiance.rgb) / candidate.p;
+            let w_new = select(sample_luminance, 0.0, candidate.p < 0.0001);
             set_reservoir(&r, s, w_new);
         }
     }
@@ -927,7 +928,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         r.s.radiance
     );
 
-    let total_lum = r.count * luminance(out_radiance);
+    let total_lum = r.count * luminance(r.s.radiance.rgb);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
 

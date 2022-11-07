@@ -25,7 +25,7 @@ fn luminance(v: vec3<f32>) -> f32 {
 
 fn change_luminance(c_in: vec3<f32>, l_out: f32) -> vec3<f32> {
     let l_in = luminance(c_in);
-    return c_in * (l_out / l_in);
+    return c_in * (l_out / max(l_in, 0.0001));
 }
 
 fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
