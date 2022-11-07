@@ -3,7 +3,7 @@ use crate::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
     view::{FrameUniform, PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
-    HikariConfig, Upscale, PREPASS_SHADER_HANDLE,
+    HikariConfig, Taa, Upscale, PREPASS_SHADER_HANDLE,
 };
 use bevy::{
     ecs::{
@@ -356,7 +356,7 @@ fn prepass_textures_system(
 ) {
     for (entity, camera, config) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
-            let scale = config.upscale_ratio().recip();
+            let scale = config.upscale.ratio().recip();
             let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let size = Extent3d {
                 width: size.x,
@@ -479,8 +479,8 @@ fn queue_prepass_meshes(
                 let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                 let key = PrepassPipelineKey {
                     mesh_pipeline_key: key,
-                    temporal_anti_aliasing: config.temporal_anti_aliasing.is_some(),
-                    smaa_tu4x: matches!(config.upscale, Some(Upscale::SmaaTu4x { .. })),
+                    temporal_anti_aliasing: matches!(config.taa, Taa::Jasmine),
+                    smaa_tu4x: matches!(config.upscale, Upscale::SmaaTu4x { .. }),
                 };
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);

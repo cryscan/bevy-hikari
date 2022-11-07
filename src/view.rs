@@ -149,7 +149,7 @@ impl ExtractComponent for FrameUniform {
         let max_temporal_reuse_count = max_temporal_reuse_count as u32;
         let max_spatial_reuse_count = max_spatial_reuse_count as u32;
         let suppress_temporal_reuse = if temporal_reuse { 0 } else { 1 };
-        let upscale_ratio = config.upscale_ratio();
+        let upscale_ratio = config.upscale.ratio();
 
         Self {
             kernel,
