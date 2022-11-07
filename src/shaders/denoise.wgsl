@@ -167,7 +167,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var sum_irradiance = irradiance;
     var sum_w = 1.0;
 
-    if any(irradiance != irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
+    if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
         sum_irradiance = irradiance;
         sum_w = 0.0;
     }
@@ -187,7 +187,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let albedo = textureLoad(albedo_texture, coords, 0).rgb;
         irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
 #endif
-        if any(irradiance != irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
+        if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
             continue;
         }
 
@@ -255,7 +255,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     let mixed_color = mix(color, previous_color, 0.8);
-    color = select(mixed_color, color, any(previous_color != previous_color) || previous_color.a == 0.0);
+    color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
 #endif
 
     store_output(coords, color);
