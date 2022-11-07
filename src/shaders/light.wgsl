@@ -667,7 +667,7 @@ fn check_previous_reservoir(
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
 
-    if (depth_miss || instance_miss || normal_miss) {
+    if depth_miss || instance_miss || normal_miss {
         (*r) = empty_reservoir();
     }
 }
@@ -675,10 +675,10 @@ fn check_previous_reservoir(
 fn temporal_restir(
     r: ptr<function, Reservoir>,
     s: Sample,
-    luminance: f32,
+    w_new: f32,
     max_sample_count: u32
 ) {
-    update_reservoir(r, s, luminance);
+    update_reservoir(r, s, w_new);
 
     // Clamp...
     let m = f32(max_sample_count);
@@ -760,7 +760,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_reservoir(coords.x + size.x * coords.y, r);
         store_spatial_reservoir(coords.x + size.x * coords.y, r);
 
-#ifndef INCLUDE_EMISSIVE
+        #ifndef INCLUDE_EMISSIVE
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
 #endif
         textureStore(variance_texture, coords, vec4<f32>(0.0));
@@ -786,7 +786,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
-#ifndef INCLUDE_EMISSIVE
+    #ifndef INCLUDE_EMISSIVE
     textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
 #endif
 
@@ -852,8 +852,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         //     surface,
         //     s.radiance
         // );
-        let sample_luminance = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
-        temporal_restir(&r, s, sample_luminance, frame.max_temporal_reuse_count);
+        let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
+        temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
     }
 
     // Validation frame
@@ -914,8 +914,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             //     surface,
             //     s.radiance
             // );
-            let sample_luminance = luminance(s.radiance.rgb) / candidate.p;
-            let w_new = select(sample_luminance, 0.0, candidate.p < 0.0001);
+            let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
             set_reservoir(&r, s, w_new);
         }
     }
@@ -1007,6 +1006,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         if n == 0u {
             s.sample_position = info.position;
             s.sample_normal = info.normal;
+            pdf = rand_sample.w;
         }
 
         bounce_sample.sample_position = info.position;
@@ -1047,7 +1047,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                     in_radiance
                 );
                 out_radiance = out_radiance / candidate.p;
-                out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.01);
+                if n > 0u {
+                    out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.01);
+                }
 
                 // Do radiance clamping
                 let out_luminance = luminance(out_radiance);
@@ -1082,13 +1084,14 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         surface,
         s.radiance
     );
-    let sample_luminance = luminance(sample_radiance);
 
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
     check_previous_reservoir(&r, s);
-    temporal_restir(&r, s, sample_luminance, frame.max_temporal_reuse_count);
+
+    let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
+    temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
     var out_radiance = shading(
         view_direction,
