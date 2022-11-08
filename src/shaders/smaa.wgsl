@@ -125,7 +125,9 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
-    let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_uv, 0.0).w;
+    // let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_uv, 0.0).w;
+    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
+    let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
     let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
 
