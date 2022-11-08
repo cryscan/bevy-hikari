@@ -299,6 +299,8 @@ pub struct PrepassTextures {
     pub previous_normal: Handle<Image>,
     #[texture(7, visibility(all), sample_type = "u_int")]
     pub previous_instance_material: Handle<Image>,
+    #[texture(8, visibility(all))]
+    pub previous_velocity_uv: Handle<Image>,
 }
 
 impl PrepassTextures {
@@ -309,6 +311,7 @@ impl PrepassTextures {
             &mut self.instance_material,
             &mut self.previous_instance_material,
         );
+        std::mem::swap(&mut self.velocity_uv, &mut self.previous_velocity_uv);
     }
 }
 
@@ -402,6 +405,7 @@ fn prepass_textures_system(
             let previous_position = images.add(create_texture(POSITION_FORMAT));
             let previous_normal = images.add(create_texture(NORMAL_FORMAT));
             let previous_instance_material = images.add(create_texture(INSTANCE_MATERIAL_FORMAT));
+            let previous_velocity_uv = images.add(create_texture(VELOCITY_UV_FORMAT));
 
             commands.entity(entity).insert(PrepassTextures {
                 size,
@@ -413,6 +417,7 @@ fn prepass_textures_system(
                 previous_position,
                 previous_normal,
                 previous_instance_material,
+                previous_velocity_uv,
             });
         }
     }

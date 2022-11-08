@@ -16,3 +16,5 @@ var previous_position_texture: texture_2d<f32>;
 var previous_normal_texture: texture_2d<f32>;
 @group(1) @binding(7)
 var previous_instance_material_texture: texture_2d<u32>;
+@group(1) @binding(8)
+var previous_velocity_uv_texture: texture_2d<f32>;
