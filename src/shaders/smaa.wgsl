@@ -127,7 +127,12 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_uv, 0.0).w;
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
-    if depth_ratio < 0.9 || depth_ratio > 1.1 {
+    let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
+
+    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
+    let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
+
+    if depth_miss && velocity_miss {
         // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
         let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
         let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
