@@ -251,7 +251,7 @@ fn prepare_light_pipeline(
                 binding: 2,
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
+                    ty: BufferBindingType::Storage { read_only: false },
                     has_dynamic_offset: false,
                     min_binding_size: Some(GpuReservoirBuffer::min_size()),
                 },
