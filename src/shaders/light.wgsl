@@ -763,6 +763,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         set_reservoir(&r, s, 0.0);
         store_reservoir(coords.x + size.x * coords.y, r);
         store_spatial_reservoir(coords.x + size.x * coords.y, r);
+        //store_previous_spatial_reservoir(coords.x + size.x * coords.y, r);
 
         #ifndef INCLUDE_EMISSIVE
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
@@ -803,7 +804,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     if !check_previous_reservoir(&r, s) {
         let empty_spatial_r = empty_reservoir();
-        store_previous_spatial_reservoir(coords.x + size.x * coords.y, empty_spatial_r);
+        store_previous_spatial_reservoir(previous_uv, size, empty_spatial_r);
     }
 
 #ifdef INCLUDE_EMISSIVE
@@ -977,6 +978,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     if depth < F32_EPSILON {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
         store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
+        //store_previous_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
         textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
@@ -1102,7 +1104,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     if !check_previous_reservoir(&r, s) {
         let empty_spatial_r = empty_reservoir();
-        store_previous_spatial_reservoir(coords.x + reservoir_size.x * coords.y, empty_spatial_r);
+        store_previous_spatial_reservoir(previous_uv, reservoir_size, empty_spatial_r);
     }
 
     let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
