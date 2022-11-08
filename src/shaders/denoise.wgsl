@@ -237,7 +237,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         previous_color = textureSampleLevel(previous_radiance_texture, nearest_sampler, sample_uv, 0.0);
     }
 
-    let mixed_color = mix(color, previous_color, 0.8);
+    let mixed_color = mix(color, previous_color, 0.5);
     color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
     textureStore(radiance_texture, coords, color);
 
