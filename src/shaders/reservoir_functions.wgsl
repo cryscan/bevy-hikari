@@ -166,12 +166,14 @@ fn store_spatial_reservoir(index: i32, r: Reservoir) {
     spatial_reservoir_buffer.data[index] = pack_reservoir(r);
 }
 
-fn store_previous_spatial_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>, r: Reservoir) {
-    //previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);
+fn store_previous_spatial_reservoir_uv(uv: vec2<f32>, reservoir_size: vec2<i32>, r: Reservoir) {
     if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
         let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
         let index = coords.x + reservoir_size.x * coords.y;
-        //let packed = previous_spatial_reservoir_buffer.data[index];
         previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);
     }
+}
+
+fn store_previous_spatial_reservoir(index: i32, r: Reservoir) {
+    previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);
 }
