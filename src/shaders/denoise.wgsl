@@ -219,23 +219,18 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     for (var i = 0; i < 1; i += 1) {
         let sample_uv = previous_uv;
 
-        let sample_coords = vec2<i32>(sample_uv * vec2<f32>(deferred_size));
-        let previous_instance = textureLoad(previous_instance_material_texture, sample_coords, 0).x;
-        if instance != previous_instance {
-            continue;
-        }
-
-        let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, sample_uv, 0.0).w;
+        let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
+        let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
         if previous_depth == 0.0 {
             continue;
         }
         let depth_ratio = depth / previous_depth;
-        if depth_ratio < 0.9 || depth_ratio > 1.1 {
-            continue;
-        }
+        let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
 
-        let previous_normal = normalize(textureSampleLevel(previous_normal_texture, nearest_sampler, sample_uv, 0.0).xyz);
-        if dot(normal, previous_normal) < 0.866 {
+        let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
+        let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
+
+        if depth_miss && velocity_miss {
             continue;
         }
         
