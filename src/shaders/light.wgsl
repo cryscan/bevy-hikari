@@ -660,7 +660,7 @@ fn env_brdf(
 fn check_previous_reservoir(
     r: ptr<function, Reservoir>,
     s: Sample,
-) {
+) -> bool {
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
     let depth_miss = depth_ratio > 2.0 * (1.0 + s.random.x) || depth_ratio < 0.5 * s.random.y;
     let pos_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > 1.0;
@@ -670,6 +670,9 @@ fn check_previous_reservoir(
 
     if depth_miss || pos_miss || instance_miss || normal_miss {
         (*r) = empty_reservoir();
+        return false;
+    } else {
+        return true;
     }
 }
 
@@ -797,7 +800,11 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
-    check_previous_reservoir(&r, s);
+
+    if !check_previous_reservoir(&r, s) {
+        let empty_spatial_r = empty_reservoir();
+        store_previous_spatial_reservoir(coords.x + size.x * coords.y, empty_spatial_r);
+    }
 
 #ifdef INCLUDE_EMISSIVE
     let validate_interval = frame.emissive_validate_interval;
@@ -931,6 +938,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let total_lum = r.count * luminance(r.s.radiance.rgb);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
+
+    r.s.visible_position = s.visible_position;
+    r.s.visible_normal = s.visible_normal;
 
     if frame.suppress_temporal_reuse == 0u {
         store_reservoir(coords.x + size.x * coords.y, r);
@@ -1089,7 +1099,11 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
-    check_previous_reservoir(&r, s);
+
+    if !check_previous_reservoir(&r, s) {
+        let empty_spatial_r = empty_reservoir();
+        store_previous_spatial_reservoir(coords.x + reservoir_size.x * coords.y, empty_spatial_r);
+    }
 
     let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
     temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
@@ -1104,6 +1118,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let total_lum = r.count * luminance(out_radiance);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
+
+    r.s.visible_position = s.visible_position;
+    r.s.visible_normal = s.visible_normal;
 
     if frame.suppress_temporal_reuse == 0u {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
@@ -1161,6 +1178,9 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         s.radiance
     );
     merge_reservoir(&r, q, luminance(out_radiance));
+
+    r.s.visible_position = s.visible_position;
+    r.s.visible_normal = s.visible_normal;
 
     let rot = mat2x2<f32>(
         vec2<f32>(0.707106781, 0.707106781),
@@ -1249,6 +1269,8 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     );
     let total_lum = r.count * luminance(out_radiance);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
+
+    store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
     if use_spatial_variance {
         var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);

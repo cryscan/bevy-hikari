@@ -165,3 +165,7 @@ fn load_spatial_reservoir(index: i32) -> Reservoir {
 fn store_spatial_reservoir(index: i32, r: Reservoir) {
     spatial_reservoir_buffer.data[index] = pack_reservoir(r);
 }
+
+fn store_previous_spatial_reservoir(index: i32, r: Reservoir) {
+    previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);
+}
