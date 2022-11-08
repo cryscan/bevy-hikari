@@ -61,12 +61,15 @@ pub struct HikariConfig {
     pub spatial_reuse: bool,
     /// Whether to do noise filtering.
     pub denoise: bool,
-    /// Which TAA implementation to use.
+    /// Which temporal filtering implementation to use.
     pub taa: Taa,
     /// Which upscaling implementation to use.
     pub upscale: Upscale,
 }
 ```
+
+On default, the anti-aliasing/upscaling method is [Filmic SMAA TU4x](https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf).
+Check the documentation of [`Upscale`](https://docs.rs/bevy-hikari/latest/bevy_hikari/enum.Upscale.html) for details.
 
 Notes:
 - Please run with `--release` flag to avoid the texture non-uniform indexing error

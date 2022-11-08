@@ -338,7 +338,7 @@ pub struct HikariConfig {
     pub spatial_reuse: bool,
     /// Whether to do noise filtering.
     pub denoise: bool,
-    /// Which TAA implementation to use.
+    /// Which temporal filtering implementation to use.
     pub taa: Taa,
     /// Which upscaling implementation to use.
     pub upscale: Upscale,

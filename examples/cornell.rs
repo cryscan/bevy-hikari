@@ -23,7 +23,6 @@ fn main() {
         //     height: 300.,
         //     ..Default::default()
         // })
-        .insert_resource(Msaa { samples: 4 })
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins)
         .add_plugin(WorldInspectorPlugin::new())
