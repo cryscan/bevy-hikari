@@ -17,6 +17,12 @@ var upscaled_texture: texture_2d<f32>;
 @group(4) @binding(0)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
 
+// luminance coefficients from Rec. 709.
+// https://en.wikipedia.org/wiki/Rec._709
+fn luminance(v: vec3<f32>) -> f32 {
+    return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
 // The following 3 functions are from Playdead
 // https://github.com/playdeadgames/temporal/blob/master/Assets/Shaders/TemporalReprojection.shader
 fn RGB_to_YCoCg(rgb: vec3<f32>) -> vec3<f32> {
@@ -145,18 +151,42 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     textureStore(output_texture, previous_output_coords, vec4<f32>(previous_color, 1.0));
 }
 
+fn differential_blend_factor(
+    t: vec4<f32>,
+    b: vec4<f32>,
+    n: vec4<f32>,
+    e: vec4<f32>,
+    s: vec4<f32>,
+    w: vec4<f32>
+) -> vec3<f32> {
+    let dh = vec2<f32>(
+        luminance(abs(w.rgb - b.rgb)),
+        luminance(abs(t.rgb - e.rgb))
+    );
+    let dv = vec2<f32>(
+        luminance(abs(t.rgb - s.rgb)),
+        luminance(abs(n.rgb - b.rgb))
+    );
+
+    let factor_xy = vec2<f32>(
+        max(dv.x, 0.001) * max(dv.y, 0.001),
+        max(dh.x, 0.001) * max(dh.y, 0.001),
+    );
+    let factor_z = 1.0 / (factor_xy.x + factor_xy.y);
+    return vec3<f32>(factor_xy, factor_z);
+}
+
 fn differential_blend(
-    top: vec4<f32>,
-    bottom: vec4<f32>,
-    left: vec4<f32>,
-    right: vec4<f32>,
+    t: vec4<f32>,
+    b: vec4<f32>,
+    l: vec4<f32>,
+    r: vec4<f32>,
+    factor: vec3<f32>,
 ) -> vec4<f32> {
-    let dist_tb = distance(top.rgb, bottom.rgb);
-    let dist_lr = distance(left.rgb, right.rgb);
-    let blend_tb = mix(top, bottom, 0.5);
-    let blend_lr = mix(left, right, 0.5);
-    let factor = pow(2.0, -dist_tb / max(dist_lr, 0.0001));
-    return mix(blend_lr, blend_tb, factor);
+    var color = vec4<f32>(0.0);
+    color += (l + r) * factor.x;
+    color += (t + b) * factor.y;
+    return (0.5 * factor.z) * color;
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -183,8 +213,9 @@ fn smaa_tu4x_extrapolate(@builtin(global_invocation_id) invocation_id: vec3<u32>
     let s_color = textureLoad(upscaled_texture, 2 * coords + vec2<i32>(0, 2), 0);
     let w_color = textureLoad(upscaled_texture, 2 * coords + vec2<i32>(-1, 1), 0);
 
-    let x_color = differential_blend(t_color, s_color, w_color, b_color);
-    let y_color = differential_blend(n_color, b_color, t_color, e_color);
+    let factor = differential_blend_factor(t_color, b_color, n_color, e_color, s_color, w_color);
+    let x_color = differential_blend(t_color, s_color, w_color, b_color, factor);
+    let y_color = differential_blend(n_color, b_color, t_color, e_color, factor);
 
     textureStore(output_texture, 2 * coords, t_color);
     textureStore(output_texture, 2 * coords + vec2<i32>(1, 1), b_color);
