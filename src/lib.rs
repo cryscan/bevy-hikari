@@ -349,8 +349,8 @@ impl Default for HikariConfig {
         Self {
             direct_validate_interval: 3,
             emissive_validate_interval: 5,
-            max_temporal_reuse_count: 30,
-            max_spatial_reuse_count: 500,
+            max_temporal_reuse_count: 50,
+            max_spatial_reuse_count: 800,
             solar_angle: 0.046,
             clear_color: Color::rgb(0.4, 0.4, 0.4),
             indirect_bounces: 1,
