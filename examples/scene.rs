@@ -24,7 +24,6 @@ fn main() {
         //     height: 300.,
         //     ..Default::default()
         // })
-        .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
@@ -120,10 +119,6 @@ fn setup(
             Vec3::new(-50.0, 25.0, 100.0),
             Vec3::new(0., 0., 0.),
         ))
-        .insert(HikariConfig {
-            upscale: Upscale::SmaaTu4x { ratio: 2.0 },
-            ..Default::default()
-        })
         .insert(RayCastSource::<RaycastSet>::default());
 }
 
