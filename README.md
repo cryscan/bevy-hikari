@@ -152,6 +152,7 @@ You can check the video [here](https://youtu.be/p5g4twfe9yY).
 <img src="assets/screenshots/scene-1.png">
 <img src="assets/screenshots/scene-2.png">
 <img src="assets/screenshots/scene-3.png">
+<img src="assets/screenshots/dissection/render.png">
 
 <!-- <img src="assets/screenshots/dissection/final.png">
 <p float="left">
