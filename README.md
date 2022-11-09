@@ -138,16 +138,26 @@ fn setup(
 You can check the video [here](https://youtu.be/p5g4twfe9yY).
 
 ### Screenshots
-<img src="assets/screenshots/rt-gi.png" />
-<img src="assets/screenshots/rt-gi-2.png" />
+#### Simple
+<img src="assets/screenshots/simple-1.png" />
+<img src="assets/screenshots/simple-2.png" />
+
+#### Cornell (2 Indirect Bounces)
+<img src="assets/screenshots/cornell.png">
+
+#### City
 <img src="assets/screenshots/city.png">
-<img src="assets/screenshots/scene.png">
-<img src="assets/screenshots/scene-box.png">
-<img src="assets/screenshots/dissection/final.png">
+
+#### Scene
+<img src="assets/screenshots/scene-1.png">
+<img src="assets/screenshots/scene-2.png">
+<img src="assets/screenshots/scene-3.png">
+
+<!-- <img src="assets/screenshots/dissection/final.png">
 <p float="left">
     <img src="assets/screenshots/dissection/direct-shading-gamma.png" width=400>
     <img src="assets/screenshots/dissection/indirect-shading-gamma.png" width=400>
-</p>
+</p> -->
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
