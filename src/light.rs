@@ -617,7 +617,7 @@ impl Node for LightPassNode {
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &light_bind_group.noise, &[]);
 
-        for (id, (render, reservoir, pipeline)) in multizip((
+        for (render, reservoir, temporal_pipeline, spatial_pipeline) in multizip((
             light_bind_group.render.iter(),
             light_bind_group.reservoir.iter(),
             [
@@ -625,22 +625,25 @@ impl Node for LightPassNode {
                 &pipelines.direct_emissive,
                 &pipelines.indirect_lit_ambient,
             ],
-        ))
-        .enumerate()
-        {
+            [
+                None,
+                Some(&pipelines.emissive_spatial_reuse),
+                Some(&pipelines.indirect_spatial_reuse),
+            ],
+        )) {
             pass.set_bind_group(5, render, &[]);
             pass.set_bind_group(6, reservoir, &[]);
 
-            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline) {
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(*temporal_pipeline) {
                 pass.set_pipeline(pipeline);
 
                 let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
 
-            if id > 0 && config.spatial_reuse {
-                if let Some(pipeline) =
-                    pipeline_cache.get_compute_pipeline(pipelines.emissive_spatial_reuse)
+            if config.spatial_reuse {
+                if let Some(pipeline) = spatial_pipeline
+                    .and_then(|pipeline| pipeline_cache.get_compute_pipeline(*pipeline))
                 {
                     pass.set_pipeline(pipeline);
 
