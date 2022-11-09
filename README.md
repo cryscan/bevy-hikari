@@ -35,8 +35,8 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 2. Setup the scene with a directional light
 3. Set your camera's `camera_render_graph` to `CameraRenderGraph::new(bevy_hikari::graph::NAME)`
 
-One can also configure the renderer by inserting the `HikariConfig` component to camera.
-Its definition is:
+One can also configure the renderer by inserting the `HikariConfig` component to the camera entity.
+Available options are:
 ```rust
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
@@ -68,8 +68,7 @@ pub struct HikariConfig {
 }
 ```
 
-On default, the anti-aliasing/upscaling method is [Filmic SMAA TU4x](https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf).
-Check the documentation of [`Upscale`](https://docs.rs/bevy-hikari/latest/bevy_hikari/enum.Upscale.html) for details.
+If you are unsure about some terms in these options, you could check [render passes](#render-passes) for details.
 
 Notes:
 - Please run with `--release` flag to avoid the texture non-uniform indexing error
@@ -94,7 +93,6 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    _asset_server: Res<AssetServer>,
 ) {
     // Plane
     commands.spawn_bundle(PbrBundle {
@@ -154,11 +152,8 @@ You can check the video [here](https://youtu.be/p5g4twfe9yY).
 <img src="assets/screenshots/scene-3.png">
 <img src="assets/screenshots/dissection/render.png">
 
-<!-- <img src="assets/screenshots/dissection/final.png">
-<p float="left">
-    <img src="assets/screenshots/dissection/direct-shading-gamma.png" width=400>
-    <img src="assets/screenshots/dissection/indirect-shading-gamma.png" width=400>
-</p> -->
+## Render Passes
+<img src="assets/screenshots/dissection/render-graph.png">
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
@@ -169,6 +164,13 @@ Just like Bevy, all code in this repository is dual-licensed under either:
 at your option.
 
 ## Credits
-- "Fire Extinguisher" model and textures Copyright (C) 2021 by Cameron 'cron' Fraser.
-  Released under Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0) license.
+- "Fire Extinguisher" model and textures by Cameron 'cron' Fraser.
 - "WW2 City Scene" from [sketchfab](https://sketchfab.com/3d-models/ww2-cityscene-carentan-inspired-639dc3d330a940a2b9d7f40542eabdf3).
+- "Song Dynasty Architectures" by 唐晨.
+
+## References
+- ReSTIR: https://cs.dartmouth.edu/wjarosz/publications/bitterli20spatiotemporal.pdf
+- ReSTIR GI: https://d1qx31qr3h6wln.cloudfront.net/publications/ReSTIR%20GI.pdf
+- GRIS: https://d1qx31qr3h6wln.cloudfront.net/publications/sig22_GRIS.pdf
+- SVGF: https://cg.ivd.kit.edu/publications/2017/svgf/svgf_preprint.pdf
+- Filmic SMAA TU: https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf
