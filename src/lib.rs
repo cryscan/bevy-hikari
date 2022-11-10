@@ -10,9 +10,11 @@ use crate::{
 use bevy::{
     asset::load_internal_asset,
     core_pipeline::{core_3d::MainPass3dNode, upscaling::UpscalingNode},
+    ecs::query::QueryItem,
     prelude::*,
     reflect::TypeUuid,
     render::{
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_asset::RenderAssets,
         render_graph::{RenderGraph, SlotInfo, SlotType},
@@ -22,7 +24,7 @@ use bevy::{
         RenderApp,
     },
 };
-use std::{f32::consts::PI, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[macro_use]
 extern crate num_derive;
@@ -74,10 +76,18 @@ pub const PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 4693612430004931427);
 pub const LIGHT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9657319286592943583);
+pub const DENOISE_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5179661212363325472);
 pub const TONE_MAPPING_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 3567017338952956671);
 pub const TAA_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1780446804546284);
+pub const SMAA_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 3793959332758430953);
+pub const FSR1_EASU_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11823787237582686663);
+pub const FSR1_RCAS_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 17003547378277520107);
 pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10969344919103020615);
 pub const QUAD_MESH_HANDLE: HandleUntyped =
@@ -154,6 +164,12 @@ impl Plugin for HikariPlugin {
         );
         load_internal_asset!(
             app,
+            DENOISE_SHADER_HANDLE,
+            "shaders/denoise.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
             TONE_MAPPING_SHADER_HANDLE,
             "shaders/tone_mapping.wgsl",
             Shader::from_wgsl
@@ -166,9 +182,25 @@ impl Plugin for HikariPlugin {
         );
         load_internal_asset!(
             app,
+            SMAA_SHADER_HANDLE,
+            "shaders/smaa.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
             OVERLAY_SHADER_HANDLE,
             "shaders/overlay.wgsl",
             Shader::from_wgsl
+        );
+
+        let mut assets = app.world.resource_mut::<Assets<_>>();
+        assets.set_untracked(
+            FSR1_EASU_SHADER_HANDLE,
+            Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_easu.spv").as_ref()),
+        );
+        assets.set_untracked(
+            FSR1_RCAS_SHADER_HANDLE,
+            Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_rcas.spv").as_ref()),
         );
 
         let noise_load_system = move |mut commands: Commands, mut images: ResMut<Assets<Image>>| {
@@ -204,9 +236,10 @@ impl Plugin for HikariPlugin {
         };
 
         app.register_type::<HikariConfig>()
-            .init_resource::<HikariConfig>()
-            .add_plugin(ExtractResourcePlugin::<HikariConfig>::default())
+            .register_type::<Taa>()
+            .register_type::<Upscale>()
             .add_plugin(ExtractResourcePlugin::<NoiseTextures>::default())
+            .add_plugin(ExtractComponentPlugin::<HikariConfig>::default())
             .add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshMaterialPlugin)
@@ -214,7 +247,8 @@ impl Plugin for HikariPlugin {
             .add_plugin(LightPlugin)
             .add_plugin(PostProcessPlugin)
             .add_plugin(OverlayPlugin)
-            .add_startup_system(noise_load_system);
+            .add_startup_system(noise_load_system)
+            .add_system_to_stage(CoreStage::PostUpdate, hikari_config_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
@@ -300,8 +334,8 @@ impl Plugin for HikariPlugin {
     }
 }
 
-#[derive(Debug, Clone, Resource, ExtractResource, Reflect, FromReflect)]
-#[reflect(Resource)]
+#[derive(Debug, Clone, Component, Reflect)]
+#[reflect(Component)]
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
     pub direct_validate_interval: usize,
@@ -311,45 +345,114 @@ pub struct HikariConfig {
     pub max_temporal_reuse_count: usize,
     /// Spatial reservoir sample count is capped by this value.
     pub max_spatial_reuse_count: usize,
-    /// Threshold for oversampling the direct illumination if the sample count is low.
-    pub direct_oversample_threshold: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
-    /// Threshold that emissive objects begin to lit others.
-    pub emissive_threshold: f32,
+    /// Count of indirect bounces.
+    pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
+    /// Clear color override.
+    pub clear_color: Color,
     /// Whether to do temporal sample reuse in ReSTIR.
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
     pub spatial_reuse: bool,
-    /// Which TAA implementation to use.
-    pub temporal_anti_aliasing: Option<TaaVersion>,
+    /// Whether to do noise filtering.
+    pub denoise: bool,
+    /// Which temporal filtering implementation to use.
+    pub taa: Taa,
+    /// Which upscaling implementation to use.
+    pub upscale: Upscale,
 }
 
 impl Default for HikariConfig {
     fn default() -> Self {
         Self {
-            direct_validate_interval: 5,
-            emissive_validate_interval: 7,
+            direct_validate_interval: 3,
+            emissive_validate_interval: 5,
             max_temporal_reuse_count: 50,
             max_spatial_reuse_count: 800,
-            direct_oversample_threshold: 16,
-            solar_angle: PI / 36.0,
-            emissive_threshold: 0.00390625,
+            solar_angle: 0.046,
+            clear_color: Color::rgb(0.4, 0.4, 0.4),
+            indirect_bounces: 1,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
             spatial_reuse: true,
-            temporal_anti_aliasing: Some(TaaVersion::default()),
+            denoise: true,
+            taa: Taa::default(),
+            upscale: Upscale::default(),
         }
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect, FromReflect)]
-pub enum TaaVersion {
-    Cryscan,
+impl ExtractComponent for HikariConfig {
+    type Query = &'static Self;
+    type Filter = ();
+
+    fn extract_component(item: QueryItem<Self::Query>) -> Self {
+        item.clone()
+    }
+}
+
+fn hikari_config_system(
+    mut commands: Commands,
+    clear_color: Res<ClearColor>,
+    query: Query<Entity, (With<Camera>, Without<HikariConfig>)>,
+) {
+    for entity in &query {
+        commands.entity(entity).insert(HikariConfig {
+            clear_color: clear_color.0,
+            ..Default::default()
+        });
+    }
+}
+
+/// Temporal Anti-Aliasing Method to use.
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Reflect)]
+pub enum Taa {
     #[default]
     Jasmine,
+    None,
+}
+
+/// Upscale method to use.
+#[derive(Debug, Clone, Copy, Reflect)]
+pub enum Upscale {
+    /// [AMD FidelityFX™ Super Resolution](https://gpuopen.com/fidelityfx-superresolution/).
+    Fsr1 {
+        /// Renders the main pass and post process on a low resolution texture.
+        ratio: f32,
+        /// From 0.0 - 2.0 where 0.0 means max sharpness.
+        sharpness: f32,
+    },
+    /// [Filmic SMAA TU4x](https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf).
+    SmaaTu4x {
+        /// Renders the main pass and post process on a low resolution texture.
+        ratio: f32,
+    },
+    None,
+}
+
+impl Default for Upscale {
+    fn default() -> Self {
+        Self::SmaaTu4x { ratio: 1.0 }
+    }
+}
+
+impl Upscale {
+    pub fn ratio(&self) -> f32 {
+        match self {
+            Upscale::Fsr1 { ratio, .. } | Upscale::SmaaTu4x { ratio } => ratio.clamp(1.0, 2.0),
+            Upscale::None => 1.0,
+        }
+    }
+
+    pub fn sharpness(&self) -> f32 {
+        match self {
+            Upscale::Fsr1 { sharpness, .. } => *sharpness,
+            _ => 0.0,
+        }
+    }
 }
 
 #[derive(Clone, Deref, Resource, ExtractResource)]

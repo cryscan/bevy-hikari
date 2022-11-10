@@ -6,12 +6,13 @@ struct Frame {
     number: u32,
     direct_validate_interval: u32,
     emissive_validate_interval: u32,
+    indirect_bounces: u32,
     suppress_temporal_reuse: u32,
     max_temporal_reuse_count: u32,
     max_spatial_reuse_count: u32,
-    direct_oversample_threshold: u32,
     solar_angle: f32,
     max_indirect_luminance: f32,
+    upscale_ratio: f32,
 };
 
 struct PreviousView {

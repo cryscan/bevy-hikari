@@ -11,6 +11,8 @@ var<uniform> instance_index: InstanceIndex;
 
 #import bevy_pbr::mesh_functions
 
+let PI: f32 = 3.1415926;
+
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -31,29 +33,43 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let vertex_position = vec4<f32>(vertex.position, 1.0);
 
     var projection = view.projection;
-    
+    var jitter = vec2<f32>(0.0);
+    let texel_size = frame.upscale_ratio / view.viewport.zw;
+
+    var out: VertexOutput;
+    out.world_position = mesh_position_local_to_world(model, vertex_position);
+    out.previous_world_position = mesh_position_local_to_world(previous_mesh.model, vertex_position);
+
+#ifdef SMAA_TU4X
+    // +-+-+
+    // |0| |
+    // | |1|
+    // +-+-+
+
+    // From the SMAA slides: dynamic sub-pixel jittering
+    // let velocity = clip_to_uv(view.view_proj * out.world_position) - clip_to_uv(previous_view.view_proj * out.previous_world_position);
+    // let jitter_scale = 0.5 + 0.5 * cos(PI / (0.5 * pixel_size) * velocity);
+    jitter += select(0.5, -0.5, frame.number % 2u == 0u) * texel_size;
+#else  // SMAA_TU_4X
 #ifdef TEMPORAL_ANTI_ALIASING
-    let jitter = 2.0 * (frame_jitter(frame.number) - 0.5) / view.viewport.zw;
+    jitter = 2.0 * (frame_jitter(frame.number, 12u) - 0.5) * texel_size;
+#endif // TEMPORAL_ANTI_ALIASING
+#endif // SMAA_TU_4X
+
     if projection[3].w != 1.0 {
         // Perspective
         projection[2][0] += jitter.x;
         projection[2][1] -= jitter.y;
     }
-#endif
 
-    var out: VertexOutput;
-    out.world_position = mesh_position_local_to_world(model, vertex_position);
-    out.previous_world_position = mesh_position_local_to_world(previous_mesh.model, vertex_position);
     out.world_normal = mesh_normal_local_to_world(vertex.normal);
     out.clip_position = projection * view.inverse_view * out.world_position;
     out.uv = vertex.uv;
 
-#ifdef TEMPORAL_ANTI_ALIASING
     if projection[3].w == 1.0 {
         // Orthogonal
         out.clip_position += vec4<f32>(jitter, 0.0, 0.0);
     }
-#endif
 
     return out;
 }

@@ -157,6 +157,18 @@ fn load_previous_spatial_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> 
     return r;
 }
 
+fn store_previous_spatial_reservoir_uv(uv: vec2<f32>, reservoir_size: vec2<i32>, r: Reservoir) {
+    if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
+        let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
+        let index = coords.x + reservoir_size.x * coords.y;
+        previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);
+    }
+}
+
+fn store_previous_spatial_reservoir(index: i32, r: Reservoir) {
+    previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);
+}
+
 fn load_spatial_reservoir(index: i32) -> Reservoir {
     let packed = spatial_reservoir_buffer.data[index];
     return unpack_reservoir(packed);
@@ -164,14 +176,4 @@ fn load_spatial_reservoir(index: i32) -> Reservoir {
 
 fn store_spatial_reservoir(index: i32, r: Reservoir) {
     spatial_reservoir_buffer.data[index] = pack_reservoir(r);
-}
-
-fn load_direct_reservoir(index: i32) -> Reservoir {
-    let packed = direct_reservoir_cache.data[index];
-    return unpack_reservoir(packed);
-}
-
-fn load_emissive_reservoir(index: i32) -> Reservoir {
-    let packed = emissive_reservoir_cache.data[index];
-    return unpack_reservoir(packed);
 }

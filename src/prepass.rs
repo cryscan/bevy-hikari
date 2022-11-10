@@ -2,11 +2,8 @@ use crate::{
     mesh_material::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
-    view::{
-        FrameUniform, FrameUniformBuffer, PreviousViewUniform, PreviousViewUniformOffset,
-        PreviousViewUniforms,
-    },
-    HikariConfig, PREPASS_SHADER_HANDLE,
+    view::{FrameUniform, PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
+    HikariConfig, Taa, Upscale, PREPASS_SHADER_HANDLE,
 };
 use bevy::{
     ecs::{
@@ -88,7 +85,7 @@ impl FromWorld for PrepassPipeline {
                     visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
+                        has_dynamic_offset: true,
                         min_binding_size: Some(FrameUniform::min_size()),
                     },
                     count: None,
@@ -173,6 +170,7 @@ impl FromWorld for PrepassPipeline {
 pub struct PrepassPipelineKey {
     pub mesh_pipeline_key: MeshPipelineKey,
     pub temporal_anti_aliasing: bool,
+    pub smaa_tu4x: bool,
 }
 
 impl SpecializedMeshPipeline for PrepassPipeline {
@@ -194,6 +192,9 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         let mut shader_defs = vec![];
         if key.temporal_anti_aliasing {
             shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
+        }
+        if key.smaa_tu4x {
+            shader_defs.push("SMAA_TU4X".into());
         }
 
         Ok(RenderPipelineDescriptor {
@@ -293,6 +294,26 @@ pub struct PrepassTextures {
     pub instance_material: Handle<Image>,
     #[texture(4, visibility(all))]
     pub velocity_uv: Handle<Image>,
+    #[texture(5, visibility(all))]
+    pub previous_position: Handle<Image>,
+    #[texture(6, visibility(all))]
+    pub previous_normal: Handle<Image>,
+    #[texture(7, visibility(all), sample_type = "u_int")]
+    pub previous_instance_material: Handle<Image>,
+    #[texture(8, visibility(all))]
+    pub previous_velocity_uv: Handle<Image>,
+}
+
+impl PrepassTextures {
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.position, &mut self.previous_position);
+        std::mem::swap(&mut self.normal, &mut self.previous_normal);
+        std::mem::swap(
+            &mut self.instance_material,
+            &mut self.previous_instance_material,
+        );
+        std::mem::swap(&mut self.velocity_uv, &mut self.previous_velocity_uv);
+    }
 }
 
 impl ExtractComponent for PrepassTextures {
@@ -328,13 +349,19 @@ impl PrepassTextures {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn prepass_textures_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    query: Query<(Entity, &Camera), Changed<Camera>>,
+    mut queries: ParamSet<(
+        Query<(Entity, &Camera, &HikariConfig), Changed<Camera>>,
+        Query<&mut PrepassTextures>,
+    )>,
 ) {
-    for (entity, camera) in &query {
+    for (entity, camera, config) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
+            let scale = config.upscale.ratio().recip();
+            let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let size = Extent3d {
                 width: size.x,
                 height: size.y,
@@ -376,6 +403,11 @@ fn prepass_textures_system(
             let instance_material = images.add(create_texture(INSTANCE_MATERIAL_FORMAT));
             let velocity_uv = images.add(create_texture(VELOCITY_UV_FORMAT));
 
+            let previous_position = images.add(create_texture(POSITION_FORMAT));
+            let previous_normal = images.add(create_texture(NORMAL_FORMAT));
+            let previous_instance_material = images.add(create_texture(INSTANCE_MATERIAL_FORMAT));
+            let previous_velocity_uv = images.add(create_texture(VELOCITY_UV_FORMAT));
+
             commands.entity(entity).insert(PrepassTextures {
                 size,
                 position,
@@ -383,9 +415,15 @@ fn prepass_textures_system(
                 depth_gradient,
                 instance_material,
                 velocity_uv,
+                previous_position,
+                previous_normal,
+                previous_instance_material,
+                previous_velocity_uv,
             });
         }
     }
+
+    queries.p1().for_each_mut(|mut textures| textures.swap());
 }
 
 #[derive(Component, Deref, DerefMut)]
@@ -420,17 +458,21 @@ fn queue_prepass_depth_texture(
 
 #[allow(clippy::too_many_arguments)]
 fn queue_prepass_meshes(
-    config: Res<HikariConfig>,
     draw_functions: Res<DrawFunctions<Prepass>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     prepass_pipeline: Res<PrepassPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
     meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform, &DynamicInstanceIndex)>,
-    mut views: Query<(&ExtractedView, &VisibleEntities, &mut RenderPhase<Prepass>)>,
+    mut views: Query<(
+        &ExtractedView,
+        &VisibleEntities,
+        &mut RenderPhase<Prepass>,
+        &HikariConfig,
+    )>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawPrepass>().unwrap();
-    for (view, visible_entities, mut prepass_phase) in &mut views {
+    for (view, visible_entities, mut prepass_phase, config) in &mut views {
         let rangefinder = view.rangefinder3d();
 
         let add_render_phase = |(entity, mesh_handle, mesh_uniform, _): (
@@ -443,7 +485,8 @@ fn queue_prepass_meshes(
                 let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                 let key = PrepassPipelineKey {
                     mesh_pipeline_key: key,
-                    temporal_anti_aliasing: config.temporal_anti_aliasing.is_some(),
+                    temporal_anti_aliasing: matches!(config.taa, Taa::Jasmine),
+                    smaa_tu4x: matches!(config.upscale, Upscale::SmaaTu4x { .. }),
                 };
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);
@@ -486,7 +529,7 @@ fn queue_prepass_bind_group(
     previous_mesh_uniforms: Res<ComponentUniforms<PreviousMeshUniform>>,
     instance_render_assets: Res<InstanceRenderAssets>,
     view_uniforms: Res<ViewUniforms>,
-    frame_uniform: Res<FrameUniformBuffer>,
+    frame_uniforms: Res<ComponentUniforms<FrameUniform>>,
     light_meta: Res<LightMeta>,
     previous_view_uniforms: Res<PreviousViewUniforms>,
 ) {
@@ -501,7 +544,7 @@ fn queue_prepass_bind_group(
     ) = (
         view_uniforms.uniforms.binding(),
         previous_view_uniforms.uniforms.binding(),
-        frame_uniform.buffer.binding(),
+        frame_uniforms.uniforms().binding(),
         light_meta.view_gpu_lights.binding(),
         mesh_uniforms.binding(),
         previous_mesh_uniforms.binding(),
@@ -598,6 +641,7 @@ impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
     type Param = (
         SRes<PrepassBindGroup>,
         SQuery<(
+            Read<DynamicUniformIndex<FrameUniform>>,
             Read<ViewUniformOffset>,
             Read<PreviousViewUniformOffset>,
             Read<ViewLightsUniformOffset>,
@@ -610,11 +654,14 @@ impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
         (bind_group, view_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        if let Ok((view_uniform, previous_view_uniform, view_lights)) = view_query.get_inner(view) {
+        if let Ok((frame_uniform, view_uniform, previous_view_uniform, view_lights)) =
+            view_query.get_inner(view)
+        {
             pass.set_bind_group(
                 I,
                 &bind_group.into_inner().view,
                 &[
+                    frame_uniform.index(),
                     view_uniform.offset,
                     previous_view_uniform.offset,
                     view_lights.offset,

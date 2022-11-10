@@ -1,12 +1,10 @@
-use bevy::{pbr::PbrPlugin, prelude::*, render::camera::CameraRenderGraph};
+use bevy::{prelude::*, render::camera::CameraRenderGraph};
 use bevy_hikari::prelude::*;
 use std::f32::consts::PI;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugin(PbrPlugin)
-        // Add Hikari after PBR
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .run();

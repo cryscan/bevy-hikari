@@ -4,7 +4,7 @@ use crate::{
         TextureBindGroupLayout,
     },
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
-    view::{FrameCounter, PreviousViewUniformOffset},
+    view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
@@ -12,16 +12,18 @@ use bevy::{
     prelude::*,
     render::{
         camera::ExtractedCamera,
+        extract_component::DynamicUniformIndex,
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::{CachedTexture, FallbackImage, TextureCache},
+        texture::{FallbackImage, TextureCache},
         view::ViewUniformOffset,
         RenderApp, RenderStage,
     },
     utils::HashMap,
 };
+use itertools::multizip;
 use serde::Serialize;
 
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
@@ -78,7 +80,6 @@ pub struct LightPipeline {
     pub noise_layout: BindGroupLayout,
     pub render_layout: BindGroupLayout,
     pub reservoir_layout: BindGroupLayout,
-    pub cache_reservoir_layout: BindGroupLayout,
 }
 
 #[repr(C)]
@@ -154,7 +155,6 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.noise_layout.clone(),
                 self.render_layout.clone(),
                 self.reservoir_layout.clone(),
-                self.cache_reservoir_layout.clone(),
             ]),
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs,
@@ -252,7 +252,7 @@ fn prepare_light_pipeline(
                 binding: 2,
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
+                    ty: BufferBindingType::Storage { read_only: false },
                     has_dynamic_offset: false,
                     min_binding_size: Some(GpuReservoirBuffer::min_size()),
                 },
@@ -272,35 +272,6 @@ fn prepare_light_pipeline(
         ],
     });
 
-    let cache_reservoir_layout =
-        render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Direct Cache Reservoir
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-                // Emissive Cache Reservoir
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GpuReservoirBuffer::min_size()),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
     commands.insert_resource(LightPipeline {
         view_layout,
         deferred_layout,
@@ -310,7 +281,6 @@ fn prepare_light_pipeline(
         noise_layout,
         render_layout,
         reservoir_layout,
-        cache_reservoir_layout,
     });
 }
 
@@ -318,45 +288,45 @@ fn prepare_light_pipeline(
 pub struct LightPassTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
-    pub albedo: CachedTexture,
-    pub direct_variance: CachedTexture,
-    pub direct_render: CachedTexture,
-    pub emissive_variance: CachedTexture,
-    pub emissive_render: CachedTexture,
-    pub indirect_variance: CachedTexture,
-    pub indirect_render: CachedTexture,
+    pub albedo: TextureView,
+    pub variance: [TextureView; 3],
+    pub render: [TextureView; 3],
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_light_pass_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    frame_counter: Res<FrameCounter>,
     mut texture_cache: ResMut<TextureCache>,
     mut reservoir_cache: ResMut<ReservoirCache>,
-    cameras: Query<(Entity, &ExtractedCamera)>,
+    cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariConfig)>,
 ) {
-    for (entity, camera) in &cameras {
+    for (entity, camera, counter, config) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
+            let scale = config.upscale.ratio().recip();
+            let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let mut create_texture = |texture_format| {
                 let extent = Extent3d {
                     width: size.x,
                     height: size.y,
                     depth_or_array_layers: 1,
                 };
-                texture_cache.get(
-                    &render_device,
-                    TextureDescriptor {
-                        label: None,
-                        size: extent,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: texture_format,
-                        usage: texture_usage,
-                    },
-                )
+                texture_cache
+                    .get(
+                        &render_device,
+                        TextureDescriptor {
+                            label: None,
+                            size: extent,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: TextureDimension::D2,
+                            format: texture_format,
+                            usage: texture_usage,
+                        },
+                    )
+                    .default_view
             };
 
             if match reservoir_cache.get(&entity) {
@@ -382,15 +352,20 @@ fn prepare_light_pass_textures(
                 reservoir_cache.insert(entity, reservoirs);
             }
 
+            macro_rules! create_texture_array {
+                [$texture_format:ident; $count:literal] => {
+                    [(); $count].map(|_| create_texture($texture_format))
+                };
+            }
+
+            let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT; 3];
+            let render = create_texture_array![RENDER_TEXTURE_FORMAT; 3];
+
             commands.entity(entity).insert(LightPassTextures {
-                head: frame_counter.0 % 2,
+                head: counter.0 % 2,
                 albedo: create_texture(ALBEDO_TEXTURE_FORMAT),
-                direct_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
-                direct_render: create_texture(RENDER_TEXTURE_FORMAT),
-                emissive_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
-                emissive_render: create_texture(RENDER_TEXTURE_FORMAT),
-                indirect_variance: create_texture(VARIANCE_TEXTURE_FORMAT),
-                indirect_render: create_texture(RENDER_TEXTURE_FORMAT),
+                variance,
+                render,
             });
         }
     }
@@ -446,17 +421,8 @@ fn queue_light_pipelines(
 pub struct LightBindGroup {
     pub deferred: BindGroup,
     pub noise: BindGroup,
-
-    pub direct_render: BindGroup,
-    pub direct_reservoir: BindGroup,
-
-    pub emissive_render: BindGroup,
-    pub emissive_reservoir: BindGroup,
-
-    pub indirect_render: BindGroup,
-    pub indirect_reservoir: BindGroup,
-
-    pub cache_reservoir: BindGroup,
+    pub render: [BindGroup; 3],
+    pub reservoir: [BindGroup; 3],
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -502,169 +468,80 @@ fn queue_light_bind_groups(
             }
             .bind_group;
 
-            let direct_render = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(&light.direct_variance.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(&light.direct_render.default_view),
-                    },
-                ],
-            });
-            let emissive_render = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(
-                            &light.emissive_variance.default_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(&light.emissive_render.default_view),
-                    },
-                ],
-            });
-            let indirect_render = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo.default_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(
-                            &light.indirect_variance.default_view,
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(&light.indirect_render.default_view),
-                    },
-                ],
+            let render = [0, 1, 2].map(|id| {
+                let variance = &light.variance[id];
+                let render = &light.render[id];
+
+                render_device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.render_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&light.albedo),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::TextureView(variance),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: BindingResource::TextureView(render),
+                        },
+                    ],
+                })
             });
 
-            let direct_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[previous].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: reservoir_bindings[4 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: reservoir_bindings[4 + previous].clone(),
-                    },
-                ],
-            });
-            let emissive_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[2 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[2 + previous].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: reservoir_bindings[4 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: reservoir_bindings[4 + previous].clone(),
-                    },
-                ],
-            });
-            let indirect_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[6 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[6 + previous].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: reservoir_bindings[8 + current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: reservoir_bindings[8 + previous].clone(),
-                    },
-                ],
-            });
+            let reservoir = [(0, 4), (2, 4), (6, 8)].map(|(temporal, spatial)| {
+                let current_temporal = reservoir_bindings[current + temporal].clone();
+                let previous_temporal = reservoir_bindings[previous + temporal].clone();
+                let current_spatial = reservoir_bindings[current + spatial].clone();
+                let previous_spatial = reservoir_bindings[previous + spatial].clone();
 
-            let cache_reservoir = render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.cache_reservoir_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: reservoir_bindings[current].clone(),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: reservoir_bindings[2 + current].clone(),
-                    },
-                ],
+                render_device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.reservoir_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: current_temporal,
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: previous_temporal,
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: current_spatial,
+                        },
+                        BindGroupEntry {
+                            binding: 3,
+                            resource: previous_spatial,
+                        },
+                    ],
+                })
             });
 
             commands.entity(entity).insert(LightBindGroup {
                 deferred,
                 noise,
-                direct_render,
-                direct_reservoir,
-                emissive_render,
-                emissive_reservoir,
-                indirect_render,
-                indirect_reservoir,
-                cache_reservoir,
+                render,
+                reservoir,
             });
         }
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct LightPassNode {
     query: QueryState<(
         &'static ExtractedCamera,
+        &'static DynamicUniformIndex<FrameUniform>,
         &'static ViewUniformOffset,
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
         &'static LightBindGroup,
+        &'static HikariConfig,
     )>,
 }
 
@@ -694,11 +571,18 @@ impl Node for LightPassNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let (camera, view_uniform, previous_view_uniform, view_lights, light_bind_group) =
-            match self.query.get_manual(world, entity) {
-                Ok(query) => query,
-                Err(_) => return Ok(()),
-            };
+        let (
+            camera,
+            frame_uniform,
+            view_uniform,
+            previous_view_uniform,
+            view_lights,
+            light_bind_group,
+            config,
+        ) = match self.query.get_manual(world, entity) {
+            Ok(query) => query,
+            Err(_) => return Ok(()),
+        };
         let view_bind_group = match world.get_resource::<PrepassBindGroup>() {
             Some(bind_group) => &bind_group.view,
             None => return Ok(()),
@@ -710,7 +594,10 @@ impl Node for LightPassNode {
 
         let pipelines = world.resource::<CachedLightPipelines>();
         let pipeline_cache = world.resource::<PipelineCache>();
-        let config = world.resource::<HikariConfig>();
+
+        let size = camera.physical_target_size.unwrap();
+        let scale = config.upscale.ratio().recip();
+        let scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
             .command_encoder
@@ -720,6 +607,7 @@ impl Node for LightPassNode {
             0,
             view_bind_group,
             &[
+                frame_uniform.index(),
                 view_uniform.offset,
                 previous_view_uniform.offset,
                 view_lights.offset,
@@ -730,62 +618,39 @@ impl Node for LightPassNode {
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &light_bind_group.noise, &[]);
 
-        pass.set_bind_group(5, &light_bind_group.direct_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.direct_reservoir, &[]);
-        pass.set_bind_group(7, &light_bind_group.cache_reservoir, &[]);
+        for (render, reservoir, temporal_pipeline, spatial_pipeline) in multizip((
+            light_bind_group.render.iter(),
+            light_bind_group.reservoir.iter(),
+            [
+                &pipelines.direct_lit,
+                &pipelines.direct_emissive,
+                &pipelines.indirect_lit_ambient,
+            ],
+            [
+                None,
+                Some(&pipelines.emissive_spatial_reuse),
+                Some(&pipelines.indirect_spatial_reuse),
+            ],
+        )) {
+            pass.set_bind_group(5, render, &[]);
+            pass.set_bind_group(6, reservoir, &[]);
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_lit) {
-            pass.set_pipeline(pipeline);
-
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
-
-        pass.set_bind_group(5, &light_bind_group.emissive_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.emissive_reservoir, &[]);
-
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.direct_emissive) {
-            pass.set_pipeline(pipeline);
-
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
-
-        if config.spatial_reuse {
-            if let Some(pipeline) =
-                pipeline_cache.get_compute_pipeline(pipelines.emissive_spatial_reuse)
-            {
+            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(*temporal_pipeline) {
                 pass.set_pipeline(pipeline);
 
-                let size = camera.physical_target_size.unwrap();
-                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
-        }
 
-        pass.set_bind_group(5, &light_bind_group.indirect_render, &[]);
-        pass.set_bind_group(6, &light_bind_group.indirect_reservoir, &[]);
+            if config.spatial_reuse {
+                if let Some(pipeline) = spatial_pipeline
+                    .and_then(|pipeline| pipeline_cache.get_compute_pipeline(*pipeline))
+                {
+                    pass.set_pipeline(pipeline);
 
-        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.indirect_lit_ambient)
-        {
-            pass.set_pipeline(pipeline);
-
-            let size = camera.physical_target_size.unwrap();
-            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            pass.dispatch_workgroups(count.x, count.y, 1);
-        }
-
-        if config.spatial_reuse {
-            if let Some(pipeline) =
-                pipeline_cache.get_compute_pipeline(pipelines.indirect_spatial_reuse)
-            {
-                pass.set_pipeline(pipeline);
-
-                let size = camera.physical_target_size.unwrap();
-                let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                pass.dispatch_workgroups(count.x, count.y, 1);
+                    let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    pass.dispatch_workgroups(count.x, count.y, 1);
+                }
             }
         }
 

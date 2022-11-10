@@ -59,7 +59,8 @@ let SPATIAL_REUSE_RANGE: f32 = 20.0;
 #endif
 let SPATIAL_REUSE_TAPS: u32 = 4u;
 
-let SPATIAL_VARIANCE_SAMPLE_THRESHOLD: u32 = 10u;
+let DIRECT_VALIDATION_FRAME_SAMPLE_THRESHOLD: u32 = 4u;
+let SPATIAL_VARIANCE_SAMPLE_THRESHOLD: u32 = 4u;
 
 struct Ray {
     origin: vec3<f32>,
@@ -656,25 +657,32 @@ fn env_brdf(
     return occlusion * (diffuse_ambient + specular_ambient);
 }
 
+fn check_previous_reservoir(
+    r: ptr<function, Reservoir>,
+    s: Sample,
+) -> bool {
+    let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
+    let depth_miss = depth_ratio > 2.0 * (1.0 + s.random.x) || depth_ratio < 0.5 * s.random.y;
+    let pos_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > 0.76;
+
+    let instance_miss = (*r).s.visible_instance != s.visible_instance;
+    let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
+
+    if depth_miss || pos_miss || instance_miss || normal_miss {
+        (*r) = empty_reservoir();
+        return false;
+    } else {
+        return true;
+    }
+}
+
 fn temporal_restir(
     r: ptr<function, Reservoir>,
     s: Sample,
-    out_luminance: f32,
-    pdf: f32,
+    w_new: f32,
     max_sample_count: u32
 ) {
-    let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
-    let depth_miss = depth_ratio > 2.0 * (1.0 + s.random.x) || depth_ratio < 0.5 * s.random.y;
-
-    let instance_miss = (*r).s.visible_instance != s.visible_instance;
-    let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.866;
-
-    let w_new = select(out_luminance / pdf, 0.0, pdf < 0.0001);
-    if depth_miss || instance_miss || normal_miss {
-        set_reservoir(r, s, w_new);
-    } else {
-        update_reservoir(r, s, w_new);
-    }
+    update_reservoir(r, s, w_new);
 
     // Clamp...
     let m = f32(max_sample_count);
@@ -755,8 +763,11 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         set_reservoir(&r, s, 0.0);
         store_reservoir(coords.x + size.x * coords.y, r);
         store_spatial_reservoir(coords.x + size.x * coords.y, r);
+        store_previous_spatial_reservoir(coords.x + size.x * coords.y, r);
 
+        #ifndef INCLUDE_EMISSIVE
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
+#endif
         textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
 
@@ -779,68 +790,142 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+
+    #ifndef INCLUDE_EMISSIVE
     textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
+#endif
 
     var ray: Ray;
     var hit: Hit;
     var info: HitInfo;
 
+    let previous_uv = uv - velocity_uv.xy;
+    var r = load_previous_reservoir(previous_uv, size);
+
+    if !check_previous_reservoir(&r, s) {
+        store_previous_spatial_reservoir_uv(previous_uv, size, r);
+    }
+
 #ifdef INCLUDE_EMISSIVE
+    let validate_interval = frame.emissive_validate_interval;
     let select_light_instance = instance_material.x;
 #else
+    let validate_interval = frame.direct_validate_interval;
     let select_light_instance = DONT_SAMPLE_EMISSIVE;
 #endif
 
-    let candidate = select_light_candidate(
-        s.random,
-        s.visible_position.xyz,
-        s.visible_normal,
-        select_light_instance
-    );
-    let pdf = candidate.p;
+    // Non-validation frame, or sample count too low
+    if frame.number % validate_interval != 0u || r.count < f32(DIRECT_VALIDATION_FRAME_SAMPLE_THRESHOLD) {
+        let candidate = select_light_candidate(
+            s.random,
+            s.visible_position.xyz,
+            s.visible_normal,
+            select_light_instance
+        );
 
-    // Direct light sampling
-    ray.origin = position.xyz + normal * RAY_BIAS;
-    ray.direction = candidate.direction;
-    ray.inv_direction = 1.0 / ray.direction;
+        // Direct light sampling
+        ray.origin = position.xyz + normal * RAY_BIAS;
+        ray.direction = candidate.direction;
+        ray.inv_direction = 1.0 / ray.direction;
 
-    var trace_condition = dot(candidate.direction, normal) > 0.0;
-    trace_condition = trace_condition && candidate.p > 0.0;
+        var trace_condition = dot(candidate.direction, normal) > 0.0;
+        trace_condition = trace_condition && candidate.p > 0.0;
 #ifdef INCLUDE_EMISSIVE
-    trace_condition = trace_condition && candidate.emissive_index != DONT_SAMPLE_EMISSIVE;
+        trace_condition = trace_condition && candidate.emissive_index != DONT_SAMPLE_EMISSIVE;
 #endif
 
-    if trace_condition {
-        hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-        info = hit_info(ray, hit);
+        if trace_condition {
+            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
+            info = hit_info(ray, hit);
 
-        s.sample_position = info.position;
-        s.sample_normal = info.normal;
+            s.sample_position = info.position;
+            s.sample_normal = info.normal;
 
 #ifdef INCLUDE_EMISSIVE
-        // Don't sample directional light, sample emissive only
-        s.radiance = input_radiance(ray, info, false, true, false);
+            // Don't sample directional light, sample emissive only
+            s.radiance = input_radiance(ray, info, false, true, false);
 #else
-        // Sample directional light only, don't sample emissive
-        s.radiance = input_radiance(ray, info, true, false, false);
+            // Sample directional light only, don't sample emissive
+            s.radiance = input_radiance(ray, info, true, false, false);
 #endif
-    } else {
-        s.sample_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
-        s.sample_normal = -ray.direction;
+        } else {
+            s.sample_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
+            s.sample_normal = -ray.direction;
+        }
+
+        // let sample_radiance = shading(
+        //     view_direction,
+        //     s.visible_normal,
+        //     normalize(s.sample_position.xyz - s.visible_position.xyz),
+        //     surface,
+        //     s.radiance
+        // );
+        let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
+        temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
     }
 
-    let sample_radiance = shading(
-        view_direction,
-        s.visible_normal,
-        normalize(s.sample_position.xyz - s.visible_position.xyz),
-        surface,
-        s.radiance
-    );
+    // Validation frame
+    if frame.number % validate_interval == 0u {
+        let candidate = select_light_candidate(
+            r.s.random,
+            r.s.visible_position.xyz,
+            r.s.visible_normal,
+            select_light_instance
+        );
 
-    // ReSTIR: Temporal
-    let previous_uv = uv - velocity_uv.xy;
-    var r = load_previous_reservoir(previous_uv, size);
-    temporal_restir(&r, s, luminance(sample_radiance), pdf, frame.max_temporal_reuse_count);
+        ray.origin = s.visible_position.xyz + s.visible_normal * RAY_BIAS;
+        ray.direction = normalize(r.s.sample_position.xyz - s.visible_position.xyz);
+        ray.inv_direction = 1.0 / ray.direction;
+
+        var trace_condition = dot(candidate.direction, r.s.visible_normal) > 0.0;
+        trace_condition = trace_condition && candidate.p > 0.0;
+#ifdef INCLUDE_EMISSIVE
+        trace_condition = trace_condition && candidate.emissive_index != DONT_SAMPLE_EMISSIVE;
+#endif
+
+        var validate_position: vec4<f32>;
+        var validate_normal: vec3<f32>;
+        var validate_radiance: vec4<f32>;
+
+        if trace_condition {
+            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
+            info = hit_info(ray, hit);
+
+            validate_position = info.position;
+            validate_normal = info.normal;
+
+#ifdef INCLUDE_EMISSIVE
+            validate_radiance = input_radiance(ray, info, false, true, false);
+#else
+            validate_radiance = input_radiance(ray, info, true, false, false);
+#endif
+        } else {
+            validate_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
+            validate_normal = -ray.direction;
+        }
+
+        if r.count >= f32(DIRECT_VALIDATION_FRAME_SAMPLE_THRESHOLD) {
+            // There is no new sample taken earlier this frame, so use the validate sample
+            s.random = r.s.random;
+            s.sample_position = validate_position;
+            s.sample_normal = validate_normal;
+            s.radiance = validate_radiance;
+        }
+
+        let luminance_ratio = luminance(validate_radiance.rgb) / max(luminance(r.s.radiance.rgb), 0.0001);
+        if luminance_ratio > 1.25 || luminance_ratio < 0.8 {
+            // Luminance miss, update reservoir
+            // let sample_radiance = shading(
+            //     view_direction,
+            //     s.visible_normal,
+            //     normalize(s.sample_position.xyz - s.visible_position.xyz),
+            //     surface,
+            //     s.radiance
+            // );
+            let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
+            set_reservoir(&r, s, w_new);
+        }
+    }
 
     var out_radiance = shading(
         view_direction,
@@ -849,43 +934,13 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         surface,
         r.s.radiance
     );
-    let total_lum = r.count * luminance(out_radiance);
+
+    let total_lum = r.count * luminance(r.s.radiance.rgb);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
 
-    // Sample validation
-#ifdef INCLUDE_EMISSIVE
-    let validate_interval = frame.emissive_validate_interval;
-#else
-    let validate_interval = frame.emissive_validate_interval;
-#endif
-    if frame.number % validate_interval == 0u {
-        ray.origin = r.s.visible_position.xyz + r.s.visible_normal * RAY_BIAS;
-        ray.direction = normalize(r.s.sample_position.xyz - ray.origin);
-        ray.inv_direction = 1.0 / ray.direction;
-
-        let candidate = select_light_candidate(
-            r.s.random,
-            r.s.visible_position.xyz,
-            r.s.visible_normal,
-            select_light_instance
-        );
-
-        hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-        info = hit_info(ray, hit);
-
-#ifdef INCLUDE_EMISSIVE
-        let validation_radiance = input_radiance(ray, info, false, true, false);
-#else
-        let validation_radiance = input_radiance(ray, info, true, false, false);
-#endif
-
-        let luminance_ratio = luminance(validation_radiance.rgb) / luminance(r.s.radiance.rgb);
-        if luminance_ratio > 1.25 || luminance_ratio < 0.8 {
-            let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
-            set_reservoir(&r, s, w_new);
-        }
-    }
+    r.s.visible_position = s.visible_position;
+    r.s.visible_normal = s.visible_normal;
 
     if frame.suppress_temporal_reuse == 0u {
         store_reservoir(coords.x + size.x * coords.y, r);
@@ -922,7 +977,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     if depth < F32_EPSILON {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
         store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
+        store_previous_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
+        textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
@@ -944,63 +1001,90 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var ray: Ray;
     var hit: Hit;
     var info: HitInfo;
+    var pdf: f32;
     var surface: Surface;
+    var bounce_sample = s;
+    var color_transport = vec3<f32>(1.0);
 
-    var rand_sample = sample_cosine_hemisphere(s.random.xy);
-    ray.origin = position.xyz + normal * RAY_BIAS;
-    ray.direction = normal_basis(normal) * rand_sample.xyz;
-    ray.inv_direction = 1.0 / ray.direction;
-    let pdf = rand_sample.w;
+    for (var n = 0u; n < frame.indirect_bounces && any(color_transport > vec3<f32>(0.01)); n += 1u) {
+        var rand_sample = sample_cosine_hemisphere(bounce_sample.random.xy);
+        ray.origin = bounce_sample.visible_position.xyz + bounce_sample.visible_normal * RAY_BIAS;
+        ray.direction = normal_basis(bounce_sample.visible_normal) * rand_sample.xyz;
+        ray.inv_direction = 1.0 / ray.direction;
 
-    hit = traverse_top(ray, F32_MAX, 0.0);
-    info = hit_info(ray, hit);
-    s.sample_position = info.position;
-    s.sample_normal = info.normal;
+        hit = traverse_top(ray, F32_MAX, 0.0);
+        info = hit_info(ray, hit);
 
-    // Second bounce: from sample position
-    if hit.instance_index != U32_MAX {
-        var out_radiance = vec3<f32>(0.0);
+        if n == 0u {
+            s.sample_position = info.position;
+            s.sample_normal = info.normal;
+            pdf = rand_sample.w;
+        }
 
-        let candidate = select_light_candidate(
-            s.random,
-            s.sample_position.xyz,
-            s.sample_normal,
-            info.instance_index
-        );
-        let sample_directional = (candidate.emissive_index == DONT_SAMPLE_EMISSIVE);
+        bounce_sample.sample_position = info.position;
+        bounce_sample.sample_normal = info.normal;
 
-        if dot(candidate.direction, s.sample_normal) > 0.0 && candidate.p > 0.0 {
-            ray.origin = s.sample_position.xyz + s.sample_normal * RAY_BIAS;
-            ray.direction = candidate.direction;
-            ray.inv_direction = 1.0 / ray.direction;
+        // N bounce: from sample position
+        if hit.instance_index != U32_MAX {
+            var out_radiance = vec3<f32>(0.0);
+
+            let candidate = select_light_candidate(
+                bounce_sample.random,
+                bounce_sample.sample_position.xyz,
+                bounce_sample.sample_normal,
+                info.instance_index
+            );
+            let sample_directional = (candidate.emissive_index == DONT_SAMPLE_EMISSIVE);
+            let bounce_view_direction = normalize(bounce_sample.visible_position.xyz - bounce_sample.sample_position.xyz);
 
             surface = retreive_surface(info.material_index, info.uv);
             surface.roughness = 1.0;
 
-            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-            info = hit_info(ray, hit);
+            if dot(candidate.direction, bounce_sample.sample_normal) > 0.0 && candidate.p > 0.0 {
+                ray.origin = bounce_sample.sample_position.xyz + bounce_sample.sample_normal * RAY_BIAS;
+                ray.direction = candidate.direction;
+                ray.inv_direction = 1.0 / ray.direction;
 
-            let in_radiance = input_radiance(ray, info, sample_directional, true, false);
-            out_radiance = shading(
-                normalize(s.visible_position.xyz - s.sample_position.xyz),
-                s.sample_normal,
-                ray.direction,
-                surface,
-                in_radiance
-            );
-            out_radiance = out_radiance / candidate.p;
+                hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
+                info = hit_info(ray, hit);
 
-            // Do radiance clamping
-            let out_luminance = luminance(out_radiance);
-            if out_luminance > frame.max_indirect_luminance {
-                out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
+                var in_radiance = input_radiance(ray, info, sample_directional, true, false);
+                in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
+
+                out_radiance = shading(
+                    bounce_view_direction,
+                    bounce_sample.sample_normal,
+                    ray.direction,
+                    surface,
+                    in_radiance
+                );
+                out_radiance = out_radiance / candidate.p;
+                if n > 0u {
+                    out_radiance = select(out_radiance / rand_sample.w, vec3<f32>(0.0), rand_sample.w < 0.01);
+                }
+
+                // Do radiance clamping
+                let out_luminance = luminance(out_radiance);
+                if out_luminance > frame.max_indirect_luminance {
+                    out_radiance = out_radiance * frame.max_indirect_luminance / out_luminance;
+                }
+
+                s.radiance += vec4<f32>(color_transport * out_radiance, 1.0);
             }
+            
+            // Env BRDF approximates the reflection of the surface regardless of the input direction,
+            // which may be a good choice for color transport.
+            color_transport *= env_brdf(bounce_view_direction, bounce_sample.sample_normal, surface);
 
-            s.radiance = vec4<f32>(out_radiance, 1.0);
+            bounce_sample.random = fract(bounce_sample.random + f32(frame.number) * GOLDEN_RATIO);
+            bounce_sample.visible_position = bounce_sample.sample_position;
+            bounce_sample.visible_normal = bounce_sample.sample_normal;
+        } else {
+            // Only ambient radiance
+            var out_radiance = input_radiance(ray, info, false, false, true).rgb;
+            s.radiance += vec4<f32>(color_transport * out_radiance, 0.0);
+            break;
         }
-    } else {
-        // Only ambient radiance
-        s.radiance = input_radiance(ray, info, false, false, true);
     }
 
     surface = retreive_surface(instance_material.y, velocity_uv.zw);
@@ -1016,7 +1100,13 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
-    temporal_restir(&r, s, luminance(sample_radiance), pdf, frame.max_temporal_reuse_count);
+
+    if !check_previous_reservoir(&r, s) {
+        store_previous_spatial_reservoir_uv(previous_uv, reservoir_size, r);
+    }
+
+    let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
+    temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
     var out_radiance = shading(
         view_direction,
@@ -1028,6 +1118,9 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let total_lum = r.count * luminance(out_radiance);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
+
+    r.s.visible_position = s.visible_position;
+    r.s.visible_normal = s.visible_normal;
 
     if frame.suppress_temporal_reuse == 0u {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
@@ -1085,6 +1178,9 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         s.radiance
     );
     merge_reservoir(&r, q, luminance(out_radiance));
+
+    r.s.visible_position = s.visible_position;
+    r.s.visible_normal = s.visible_normal;
 
     let rot = mat2x2<f32>(
         vec2<f32>(0.707106781, 0.707106781),
@@ -1173,6 +1269,8 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     );
     let total_lum = r.count * luminance(out_radiance);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
+
+    store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
 
     if use_spatial_variance {
         var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);

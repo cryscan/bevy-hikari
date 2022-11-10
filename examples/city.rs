@@ -1,6 +1,5 @@
 use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
-    pbr::PbrPlugin,
     prelude::*,
     render::camera::CameraRenderGraph,
 };
@@ -24,14 +23,12 @@ fn main() {
         //     height: 300.,
         //     ..Default::default()
         // })
-        .insert_resource(Msaa { samples: 4 })
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, true)))
         .add_plugins(DefaultPlugins)
         .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
-        .add_plugin(PbrPlugin)
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .add_system(load_models)

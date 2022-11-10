@@ -17,15 +17,16 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 ## Progress
 - [x] Extraction and preparation of mesh assets and instances
 - [x] G-Buffer generation
-- [x] 2-bounce path tracing
+- [x] N-bounce indirect lighting
 - [ ] Transparency
 - [x] Next event estimation
 - [ ] Better light sampling strategy
 - [x] ReSTIR: Temporal sample reuse
 - [x] ReSTIR: Spatial sample reuse
-- [ ] Spatiotemporal filtering
+- [x] Spatiotemporal filtering
 - [x] Temporal anti-aliasing
-- [ ] Temporal up-scaling 
+- [x] Spatial up-scaling (FSR 1.0)
+- [x] Temporal up-scaling (SMAA TU4X)
 - [ ] Skinned animation
 - [ ] Hardware ray tracing (upstream related)
 
@@ -34,8 +35,8 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 2. Setup the scene with a directional light
 3. Set your camera's `camera_render_graph` to `CameraRenderGraph::new(bevy_hikari::graph::NAME)`
 
-One can also configure the renderer by inserting the `HikariConfig` resource.
-Its definition is:
+One can also configure the renderer by inserting the `HikariConfig` component to the camera entity.
+Available options are:
 ```rust
 pub struct HikariConfig {
     /// The interval of frames between sample validation passes.
@@ -46,22 +47,28 @@ pub struct HikariConfig {
     pub max_temporal_reuse_count: usize,
     /// Spatial reservoir sample count is capped by this value.
     pub max_spatial_reuse_count: usize,
-    /// Threshold for oversampling the direct illumination if the sample count is low.
-    pub direct_oversample_threshold: usize,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
-    /// Threshold that emissive objects begin to lit others.
-    pub emissive_threshold: f32,
+    /// Count of indirect bounces.
+    pub indirect_bounces: usize,
     /// Threshold for the indirect luminance to reduce fireflies.
     pub max_indirect_luminance: f32,
+    /// Clear color override.
+    pub clear_color: Color,
     /// Whether to do temporal sample reuse in ReSTIR.
     pub temporal_reuse: bool,
     /// Whether to do spatial sample reuse in ReSTIR.
     pub spatial_reuse: bool,
-    /// Which TAA implementation to use.
-    pub temporal_anti_aliasing: Option<TaaVersion>,
+    /// Whether to do noise filtering.
+    pub denoise: bool,
+    /// Which temporal filtering implementation to use.
+    pub taa: Taa,
+    /// Which upscaling implementation to use.
+    pub upscale: Upscale,
 }
 ```
+
+If you are unsure about some terms in these options, you could check [render passes](#render-passes) for details.
 
 Notes:
 - Please run with `--release` flag to avoid the texture non-uniform indexing error
@@ -86,7 +93,6 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    _asset_server: Res<AssetServer>,
 ) {
     // Plane
     commands.spawn_bundle(PbrBundle {
@@ -130,16 +136,24 @@ fn setup(
 You can check the video [here](https://youtu.be/p5g4twfe9yY).
 
 ### Screenshots
-<img src="assets/screenshots/rt-gi.png" />
-<img src="assets/screenshots/rt-gi-2.png" />
+#### Simple
+<img src="assets/screenshots/simple-1.png" />
+<img src="assets/screenshots/simple-2.png" />
+
+#### Cornell (2 Indirect Bounces)
+<img src="assets/screenshots/cornell.png">
+
+#### City
 <img src="assets/screenshots/city.png">
-<img src="assets/screenshots/scene.png">
-<img src="assets/screenshots/scene-box.png">
-<img src="assets/screenshots/dissection/final.png">
-<p float="left">
-    <img src="assets/screenshots/dissection/direct-shading-gamma.png" width=400>
-    <img src="assets/screenshots/dissection/indirect-shading-gamma.png" width=400>
-</p>
+
+#### Scene
+<img src="assets/screenshots/scene-1.png">
+<img src="assets/screenshots/scene-2.png">
+<img src="assets/screenshots/scene-3.png">
+<img src="assets/screenshots/dissection/render.png">
+
+## Render Passes
+<img src="assets/screenshots/dissection/render-graph.png">
 
 ## License
 Just like Bevy, all code in this repository is dual-licensed under either:
@@ -150,5 +164,13 @@ Just like Bevy, all code in this repository is dual-licensed under either:
 at your option.
 
 ## Credits
-"Fire Extinguisher" model and textures Copyright (C) 2021 by Cameron 'cron' Fraser.
-Released under Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0) license.
+- "Fire Extinguisher" model and textures by Cameron 'cron' Fraser.
+- "WW2 City Scene" from [sketchfab](https://sketchfab.com/3d-models/ww2-cityscene-carentan-inspired-639dc3d330a940a2b9d7f40542eabdf3).
+- "Song Dynasty Architectures" by 唐晨.
+
+## References
+- ReSTIR: https://cs.dartmouth.edu/wjarosz/publications/bitterli20spatiotemporal.pdf
+- ReSTIR GI: https://d1qx31qr3h6wln.cloudfront.net/publications/ReSTIR%20GI.pdf
+- GRIS: https://d1qx31qr3h6wln.cloudfront.net/publications/sig22_GRIS.pdf
+- SVGF: https://cg.ivd.kit.edu/publications/2017/svgf/svgf_preprint.pdf
+- Filmic SMAA TU: https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf

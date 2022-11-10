@@ -15,7 +15,7 @@ var emissive_render_texture: texture_2d<f32>;
 var indirect_render_texture: texture_2d<f32>;
 
 @group(4) @binding(0)
-var output_texture: texture_storage_2d<rgba8unorm, read_write>;
+var output_texture: texture_storage_2d<rgba16float, read_write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn tone_mapping(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
