@@ -192,7 +192,7 @@ fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, mesh: MeshIndex, early_dis
         var aabb: Aabb;
         if node.entry_index >= BVH_LEAF_FLAG {
             let primitive_index = mesh.primitive + node.entry_index - BVH_LEAF_FLAG;
-            let vertices = primitive_buffer.data[primitive_index].vertices;
+            let vertices = primitive_buffer[primitive_index].vertices;
 
             aabb.min = min(vertices[0], min(vertices[1], vertices[2]));
             aabb.max = max(vertices[0], max(vertices[1], vertices[2]));
@@ -239,7 +239,7 @@ fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
 
         if node.entry_index >= BVH_LEAF_FLAG {
             let instance_index = node.entry_index - BVH_LEAF_FLAG;
-            let instance = instance_buffer.data[instance_index];
+            let instance = instance_buffer[instance_index];
             aabb.min = instance.min;
             aabb.max = instance.max;
 
@@ -453,7 +453,7 @@ fn calculate_view(
 #ifdef NO_TEXTURE
 fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
     var surface: Surface;
-    let material = material_buffer.data[material_index];
+    let material = material_buffer[material_index];
 
     surface.base_color = material.base_color;
     surface.emissive = material.emissive;
@@ -466,13 +466,13 @@ fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
 }
 
 fn retreive_emissive(material_index: u32, uv: vec2<f32>) -> vec4<f32> {
-    var emissive = material_buffer.data[material_index].emissive;
+    var emissive = material_buffer[material_index].emissive;
     return emissive;
 }
 #else
 fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
     var surface: Surface;
-    let material = material_buffer.data[material_index];
+    let material = material_buffer[material_index];
 
     surface.base_color = material.base_color;
     var id = material.base_color_texture;
@@ -505,7 +505,7 @@ fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
 }
 
 fn retreive_emissive(material_index: u32, uv: vec2<f32>) -> vec4<f32> {
-    let material = material_buffer.data[material_index];
+    let material = material_buffer[material_index];
 
     var emissive = material.emissive;
     let id = material.emissive_texture;
@@ -523,12 +523,12 @@ fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
     info.material_index = U32_MAX;
 
     if hit.instance_index != U32_MAX {
-        let instance = instance_buffer.data[hit.instance_index];
-        let indices = primitive_buffer.data[hit.primitive_index].indices;
+        let instance = instance_buffer[hit.instance_index];
+        let indices = primitive_buffer[hit.primitive_index].indices;
 
-        let v0 = vertex_buffer.data[(instance.mesh.vertex + indices[0])];
-        let v1 = vertex_buffer.data[(instance.mesh.vertex + indices[1])];
-        let v2 = vertex_buffer.data[(instance.mesh.vertex + indices[2])];
+        let v0 = vertex_buffer[(instance.mesh.vertex + indices[0])];
+        let v1 = vertex_buffer[(instance.mesh.vertex + indices[1])];
+        let v2 = vertex_buffer[(instance.mesh.vertex + indices[2])];
         let uv = hit.intersection.uv;
         info.uv = v0.uv + uv.x * (v1.uv - v0.uv) + uv.y * (v2.uv - v0.uv);
         info.normal = v0.normal + uv.x * (v1.normal - v0.normal) + uv.y * (v2.normal - v0.normal);
