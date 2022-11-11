@@ -8,7 +8,7 @@ use crate::{
     view::ViewPlugin,
 };
 use bevy::{
-    asset::load_internal_asset,
+    asset::{load_internal_asset, load_internal_binary_asset},
     core_pipeline::{core_3d::MainPass3dNode, upscaling::UpscalingNode},
     ecs::query::QueryItem,
     prelude::*,
@@ -192,15 +192,17 @@ impl Plugin for HikariPlugin {
             "shaders/overlay.wgsl",
             Shader::from_wgsl
         );
-
-        let mut assets = app.world.resource_mut::<Assets<_>>();
-        assets.set_untracked(
+        load_internal_binary_asset!(
+            app,
             FSR1_EASU_SHADER_HANDLE,
-            Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_easu.spv").as_ref()),
+            "shaders/fsr/fsr_pass_easu.spv",
+            Shader::from_spirv
         );
-        assets.set_untracked(
+        load_internal_binary_asset!(
+            app,
             FSR1_RCAS_SHADER_HANDLE,
-            Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_rcas.spv").as_ref()),
+            "shaders/fsr/fsr_pass_rcas.spv",
+            Shader::from_spirv
         );
 
         let noise_load_system = move |mut commands: Commands, mut images: ResMut<Assets<Image>>| {
