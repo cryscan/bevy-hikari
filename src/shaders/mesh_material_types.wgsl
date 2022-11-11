@@ -59,22 +59,15 @@ struct Emissive {
     instance: u32,
 };
 
-struct Vertices {
-    data: array<Vertex>,
-};
-struct Primitives {
-    data: array<Primitive>,
-};
-struct Instances {
-    data: array<Instance>,
-};
+type Vertices = array<Vertex>;
+type Primitives = array<Primitive>;
+type Instances = array<Instance>;
+type Materials = array<Material>;
+
 struct Nodes {
     count: u32,
     data: array<Node>,
 };
-struct Materials {
-    data: array<Material>,
-}
 
 struct Emissives {
     count: u32,
