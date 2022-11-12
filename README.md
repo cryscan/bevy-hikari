@@ -13,6 +13,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 | ------ | ------------- |
 | 0.6    | 0.1           |
 | 0.8    | 0.2           |
+| 0.9    | 0.3           |
 
 ## Progress
 - [x] Extraction and preparation of mesh assets and instances
