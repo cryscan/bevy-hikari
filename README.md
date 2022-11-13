@@ -21,7 +21,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] N-bounce indirect lighting
 - [ ] Transparency
 - [x] Next event estimation
-- [ ] Better light sampling strategy
+- [ ] Better light sampling (L-BVH)
 - [x] ReSTIR: Temporal sample reuse
 - [x] ReSTIR: Spatial sample reuse
 - [x] Spatiotemporal filtering
@@ -133,21 +133,20 @@ fn setup(
 }
 ```
 
-## Effects
-You can check the video [here](https://youtu.be/p5g4twfe9yY).
+## Screenshots
+Here are the screenshots of examples.
 
-### Screenshots
-#### Simple
+### Simple
 <img src="assets/screenshots/simple-1.png" />
 <img src="assets/screenshots/simple-2.png" />
 
-#### Cornell (2 Indirect Bounces)
+### Cornell (2 Indirect Bounces)
 <img src="assets/screenshots/cornell.png">
 
-#### City
+### City (Song Dynasty)
 <img src="assets/screenshots/city.png">
 
-#### Scene
+### Scene (WW2)
 <img src="assets/screenshots/scene-1.png">
 <img src="assets/screenshots/scene-2.png">
 <img src="assets/screenshots/scene-3.png">
