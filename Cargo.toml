@@ -1,6 +1,6 @@
 [package]
 name = "bevy-hikari"
-version = "0.2.22"
+version = "0.3.0"
 edition = "2021"
 authors = ["Zhenyuan Zhang <cryscan@umich.edu>"]
 license = "MIT OR Apache-2.0"
@@ -16,12 +16,6 @@ default = []
 warn_mesh_load = []
 
 [dependencies]
-bevy = { version = "0.8", default-features = false, features = [
-    "bevy_asset",
-    "bevy_render",
-    "bevy_pbr",
-    "bevy_core_pipeline",
-] }
 bytemuck = "1.9"
 itertools = "0.10"
 bvh = "0.7.0"
@@ -31,8 +25,13 @@ serde_variant = "0.1.1"
 num-traits = "0.2"
 num-derive = "0.3"
 
+[dependencies.bevy]
+version = "0.9"
+default-features = false
+features = ["bevy_asset", "bevy_render", "bevy_pbr", "bevy_core_pipeline"]
+
 [dev-dependencies]
-bevy = { version = "0.8", default-features = true, features = [
+bevy = { version = "0.9", default-features = true, features = [
     "bevy_gltf",
     "jpeg",
     "png",

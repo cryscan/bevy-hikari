@@ -8,8 +8,8 @@ use crate::{
     view::ViewPlugin,
 };
 use bevy::{
-    asset::load_internal_asset,
-    core_pipeline::core_3d::MainPass3dNode,
+    asset::{load_internal_asset, load_internal_binary_asset},
+    core_pipeline::{core_3d::MainPass3dNode, upscaling::UpscalingNode},
     ecs::query::QueryItem,
     prelude::*,
     reflect::TypeUuid,
@@ -192,15 +192,17 @@ impl Plugin for HikariPlugin {
             "shaders/overlay.wgsl",
             Shader::from_wgsl
         );
-
-        let mut assets = app.world.resource_mut::<Assets<_>>();
-        assets.set_untracked(
+        load_internal_binary_asset!(
+            app,
             FSR1_EASU_SHADER_HANDLE,
-            Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_easu.spv").as_ref()),
+            "shaders/fsr/fsr_pass_easu.spv",
+            Shader::from_spirv
         );
-        assets.set_untracked(
+        load_internal_binary_asset!(
+            app,
             FSR1_RCAS_SHADER_HANDLE,
-            Shader::from_spirv(include_bytes!("shaders/fsr/fsr_pass_rcas.spv").as_ref()),
+            "shaders/fsr/fsr_pass_rcas.spv",
+            Shader::from_spirv
         );
 
         let noise_load_system = move |mut commands: Commands, mut images: ResMut<Assets<Image>>| {
@@ -255,6 +257,7 @@ impl Plugin for HikariPlugin {
             let light_pass_node = LightPassNode::new(&mut render_app.world);
             let post_process_pass_node = PostProcessPassNode::new(&mut render_app.world);
             let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
+            let upscaling_node = UpscalingNode::new(&mut render_app.world);
 
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
 
@@ -263,6 +266,11 @@ impl Plugin for HikariPlugin {
             hikari_graph.add_node(graph::node::LIGHT_PASS, light_pass_node);
             hikari_graph.add_node(graph::node::POST_PROCESS_PASS, post_process_pass_node);
             hikari_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
+            hikari_graph.add_node(
+                bevy::core_pipeline::core_3d::graph::node::UPSCALING,
+                upscaling_node,
+            );
+
             let input_node_id = hikari_graph.set_input(vec![SlotInfo::new(
                 graph::input::VIEW_ENTITY,
                 SlotType::Entity,
@@ -284,18 +292,12 @@ impl Plugin for HikariPlugin {
                 )
                 .unwrap();
             hikari_graph
-                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_PASS)
-                .unwrap();
-            hikari_graph
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
                     graph::node::POST_PROCESS_PASS,
                     LightPassNode::IN_VIEW,
                 )
-                .unwrap();
-            hikari_graph
-                .add_node_edge(graph::node::LIGHT_PASS, graph::node::POST_PROCESS_PASS)
                 .unwrap();
             hikari_graph
                 .add_slot_edge(
@@ -306,7 +308,28 @@ impl Plugin for HikariPlugin {
                 )
                 .unwrap();
             hikari_graph
+                .add_slot_edge(
+                    input_node_id,
+                    graph::input::VIEW_ENTITY,
+                    bevy::core_pipeline::core_3d::graph::node::UPSCALING,
+                    MainPass3dNode::IN_VIEW,
+                )
+                .unwrap();
+
+            hikari_graph
+                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_PASS)
+                .unwrap();
+            hikari_graph
+                .add_node_edge(graph::node::LIGHT_PASS, graph::node::POST_PROCESS_PASS)
+                .unwrap();
+            hikari_graph
                 .add_node_edge(graph::node::POST_PROCESS_PASS, graph::node::OVERLAY_PASS)
+                .unwrap();
+            hikari_graph
+                .add_node_edge(
+                    bevy::core_pipeline::core_3d::graph::node::UPSCALING,
+                    graph::node::POST_PROCESS_PASS,
+                )
                 .unwrap();
             graph.add_sub_graph(graph::NAME, hikari_graph);
         }
@@ -434,7 +457,7 @@ impl Upscale {
     }
 }
 
-#[derive(Clone, Deref, ExtractResource)]
+#[derive(Clone, Deref, Resource, ExtractResource)]
 pub struct NoiseTextures(pub Vec<Handle<Image>>);
 
 impl AsBindGroup for NoiseTextures {

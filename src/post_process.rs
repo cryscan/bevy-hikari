@@ -46,6 +46,7 @@ impl Plugin for PostProcessPlugin {
     }
 }
 
+#[derive(Resource)]
 pub struct PostProcessPipeline {
     pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
@@ -761,6 +762,7 @@ fn prepare_post_process_textures(
     }
 }
 
+#[derive(Resource)]
 pub struct CachedPostProcessPipelines {
     denoise: [CachedComputePipelineId; 4],
     tone_mapping: CachedComputePipelineId,

@@ -173,38 +173,38 @@ pub struct GpuEmissive {
     pub instance: u32,
 }
 
-#[derive(Default, ShaderType)]
+#[derive(Default, Resource, ShaderType)]
 pub struct GpuVertexBuffer {
     #[size(runtime)]
     pub data: Vec<GpuVertex>,
 }
 
-#[derive(Default, ShaderType)]
+#[derive(Default, Resource, ShaderType)]
 pub struct GpuPrimitiveBuffer {
     #[size(runtime)]
     pub data: Vec<GpuPrimitive>,
 }
 
-#[derive(Default, ShaderType)]
+#[derive(Default, Resource, ShaderType)]
 pub struct GpuNodeBuffer {
     pub count: u32,
     #[size(runtime)]
     pub data: Vec<GpuNode>,
 }
 
-#[derive(Default, ShaderType)]
+#[derive(Default, Resource, ShaderType)]
 pub struct GpuInstanceBuffer {
     #[size(runtime)]
     pub data: Vec<GpuInstance>,
 }
 
-#[derive(Default, ShaderType)]
+#[derive(Default, Resource, ShaderType)]
 pub struct GpuStandardMaterialBuffer {
     #[size(runtime)]
     pub data: Vec<GpuStandardMaterial>,
 }
 
-#[derive(Default, ShaderType)]
+#[derive(Default, Resource, ShaderType)]
 pub struct GpuLightSourceBuffer {
     pub count: u32,
     #[size(runtime)]
@@ -358,7 +358,7 @@ pub enum MeshMaterialSystems {
     PrepareInstances,
 }
 
-#[derive(Deref, DerefMut)]
+#[derive(Resource, Deref, DerefMut)]
 pub struct MeshMaterialBindGroupLayout(pub BindGroupLayout);
 
 impl FromWorld for MeshMaterialBindGroupLayout {
@@ -451,6 +451,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
     }
 }
 
+#[derive(Resource)]
 pub struct TextureBindGroupLayout {
     pub layout: BindGroupLayout,
     pub texture_count: u32,
@@ -527,6 +528,7 @@ fn prepare_texture_bind_group_layout(
     }
 }
 
+#[derive(Resource)]
 pub struct MeshMaterialBindGroup {
     pub mesh_material: BindGroup,
     pub texture: BindGroup,

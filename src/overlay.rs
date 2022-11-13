@@ -52,6 +52,7 @@ fn setup(mut meshes: ResMut<Assets<Mesh>>) {
     meshes.set_untracked(QUAD_MESH_HANDLE, mesh);
 }
 
+#[derive(Resource)]
 pub struct OverlayPipeline {
     pub input_layout: BindGroupLayout,
 }
@@ -175,7 +176,7 @@ fn queue_overlay_meshes(
                     return;
                 }
             };
-            let entity = commands.spawn().insert(mesh_handle.clone()).id();
+            let entity = commands.spawn(mesh_handle.clone()).id();
             overlay_phase.add(Overlay {
                 distance: 0.0,
                 entity,

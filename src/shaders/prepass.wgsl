@@ -34,7 +34,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     var projection = view.projection;
     var jitter = vec2<f32>(0.0);
-    let texel_size = frame.upscale_ratio / vec2<f32>(view.width, view.height);
+    let texel_size = frame.upscale_ratio / view.viewport.zw;
 
     var out: VertexOutput;
     out.world_position = mesh_position_local_to_world(model, vertex_position);
@@ -52,7 +52,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     jitter += select(0.5, -0.5, frame.number % 2u == 0u) * texel_size;
 #else  // SMAA_TU_4X
 #ifdef TEMPORAL_ANTI_ALIASING
-    jitter = 2.0 * (frame_jitter(frame.number, 16u) - 0.5) * texel_size;
+    jitter = 2.0 * (frame_jitter(frame.number, 12u) - 0.5) * texel_size;
 #endif // TEMPORAL_ANTI_ALIASING
 #endif // SMAA_TU_4X
 

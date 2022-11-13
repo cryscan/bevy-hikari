@@ -17,12 +17,6 @@ var upscaled_texture: texture_2d<f32>;
 @group(4) @binding(0)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
 
-// luminance coefficients from Rec. 709.
-// https://en.wikipedia.org/wiki/Rec._709
-fn luminance(v: vec3<f32>) -> f32 {
-    return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
-}
-
 // The following 3 functions are from Playdead
 // https://github.com/playdeadgames/temporal/blob/master/Assets/Shaders/TemporalReprojection.shader
 fn RGB_to_YCoCg(rgb: vec3<f32>) -> vec3<f32> {

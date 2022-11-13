@@ -30,7 +30,7 @@ impl Plugin for MeshPlugin {
 }
 
 /// Acceleration structures on GPU.
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct MeshRenderAssets {
     pub vertex_buffer: StorageBuffer<GpuVertexBuffer>,
     pub primitive_buffer: StorageBuffer<GpuPrimitiveBuffer>,
@@ -59,10 +59,10 @@ impl MeshRenderAssets {
 }
 
 /// Holds all GPU representatives of mesh assets.
-#[derive(Default, Deref, DerefMut)]
+#[derive(Default, Resource, Deref, DerefMut)]
 pub struct GpuMeshes(HashMap<Handle<Mesh>, (GpuMesh, GpuMeshIndex)>);
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct ExtractedMeshes {
     extracted: Vec<(Handle<Mesh>, Mesh)>,
     removed: Vec<Handle<Mesh>>,

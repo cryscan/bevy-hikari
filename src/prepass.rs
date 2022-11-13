@@ -67,6 +67,7 @@ impl Plugin for PrepassPlugin {
     }
 }
 
+#[derive(Resource)]
 pub struct PrepassPipeline {
     pub view_layout: BindGroupLayout,
     pub mesh_layout: BindGroupLayout,
@@ -513,6 +514,7 @@ fn queue_prepass_meshes(
     }
 }
 
+#[derive(Resource)]
 pub struct PrepassBindGroup {
     pub view: BindGroup,
     pub mesh: BindGroup,

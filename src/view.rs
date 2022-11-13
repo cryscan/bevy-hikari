@@ -34,7 +34,7 @@ pub struct PreviousViewUniform {
     inverse_view_proj: Mat4,
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct PreviousViewUniforms {
     pub uniforms: DynamicUniformBuffer<PreviousViewUniform>,
 }

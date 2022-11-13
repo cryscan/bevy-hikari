@@ -62,7 +62,7 @@ impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct InstanceRenderAssets {
     pub instance_buffer: StorageBuffer<GpuInstanceBuffer>,
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
@@ -161,7 +161,7 @@ fn instance_event_system<M: IntoStandardMaterial>(
 }
 
 #[allow(clippy::type_complexity)]
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct ExtractedInstances {
     extracted: Vec<(
         Entity,

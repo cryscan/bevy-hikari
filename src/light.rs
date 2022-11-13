@@ -59,15 +59,16 @@ pub struct GpuPackedReservoir {
     pub reservoir: UVec2,
 }
 
-#[derive(Default, Clone, ShaderType)]
+#[derive(Default, Resource, Clone, ShaderType)]
 pub struct GpuReservoirBuffer {
     #[size(runtime)]
     pub data: Vec<GpuPackedReservoir>,
 }
 
-#[derive(Default, Deref, DerefMut)]
+#[derive(Default, Resource, Deref, DerefMut)]
 pub struct ReservoirCache(HashMap<Entity, Vec<StorageBuffer<GpuReservoirBuffer>>>);
 
+#[derive(Resource)]
 pub struct LightPipeline {
     pub view_layout: BindGroupLayout,
     pub deferred_layout: BindGroupLayout,
@@ -370,7 +371,7 @@ fn prepare_light_pass_textures(
     }
 }
 
-#[allow(dead_code)]
+#[derive(Resource)]
 pub struct CachedLightPipelines {
     direct_lit: CachedComputePipelineId,
     direct_emissive: CachedComputePipelineId,

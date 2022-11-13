@@ -33,12 +33,6 @@ let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 0xFFFFFFFFu;
 
-// luminance coefficients from Rec. 709.
-// https://en.wikipedia.org/wiki/Rec._709
-fn luminance(v: vec3<f32>) -> f32 {
-    return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
-}
-
 // Normal-weighting function (4.4.1)
 fn normal_weight(n0: vec3<f32>, n1: vec3<f32>) -> f32 {
     let exponent = 16.0;
