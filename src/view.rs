@@ -1,4 +1,4 @@
-use crate::{transform::GlobalTransformQueue, HikariConfig};
+use crate::{transform::GlobalTransformQueue, HikariSettings};
 use bevy::{
     ecs::query::QueryItem,
     prelude::*,
@@ -119,11 +119,11 @@ pub struct FrameUniform {
 }
 
 impl ExtractComponent for FrameUniform {
-    type Query = (&'static HikariConfig, &'static FrameCounter);
+    type Query = (&'static HikariSettings, &'static FrameCounter);
     type Filter = ();
 
-    fn extract_component((config, counter): QueryItem<Self::Query>) -> Self {
-        let HikariConfig {
+    fn extract_component((settings, counter): QueryItem<Self::Query>) -> Self {
+        let HikariSettings {
             direct_validate_interval,
             emissive_validate_interval,
             max_temporal_reuse_count,
@@ -134,7 +134,7 @@ impl ExtractComponent for FrameUniform {
             clear_color,
             temporal_reuse,
             ..
-        } = config.clone();
+        } = settings.clone();
 
         let kernel = Mat3 {
             x_axis: Vec3::new(0.0625, 0.125, 0.0625),
@@ -149,7 +149,7 @@ impl ExtractComponent for FrameUniform {
         let max_temporal_reuse_count = max_temporal_reuse_count as u32;
         let max_spatial_reuse_count = max_spatial_reuse_count as u32;
         let suppress_temporal_reuse = if temporal_reuse { 0 } else { 1 };
-        let upscale_ratio = config.upscale.ratio();
+        let upscale_ratio = settings.upscale.ratio();
 
         Self {
             kernel,

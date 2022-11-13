@@ -1,5 +1,5 @@
 use crate::{
-    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariConfig, Taa, Upscale,
+    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariSettings, Taa, Upscale,
     OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
@@ -203,12 +203,12 @@ fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<OverlayPipeline>,
-    query: Query<(Entity, &PostProcessTextures, &HikariConfig), With<ExtractedCamera>>,
+    query: Query<(Entity, &PostProcessTextures, &HikariSettings), With<ExtractedCamera>>,
 ) {
-    for (entity, post_process, config) in &query {
+    for (entity, post_process, settings) in &query {
         let current = post_process.head;
 
-        let input_texture = match (config.upscale, config.taa) {
+        let input_texture = match (settings.upscale, settings.taa) {
             (Upscale::Fsr1 { .. }, _) => &post_process.upscale_output[1],
             (Upscale::SmaaTu4x { .. }, Taa::None) => &post_process.upscale_output[1],
             (Upscale::SmaaTu4x { .. }, Taa::Jasmine) => &post_process.taa_output[current],

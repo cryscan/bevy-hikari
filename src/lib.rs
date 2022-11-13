@@ -39,7 +39,6 @@ pub mod transform;
 pub mod view;
 
 pub mod graph {
-    pub const NAME: &str = "hikari";
     pub mod input {
         pub const VIEW_ENTITY: &str = "view_entity";
     }
@@ -237,11 +236,11 @@ impl Plugin for HikariPlugin {
             commands.insert_resource(NoiseTextures(handles));
         };
 
-        app.register_type::<HikariConfig>()
+        app.register_type::<HikariSettings>()
             .register_type::<Taa>()
             .register_type::<Upscale>()
             .add_plugin(ExtractResourcePlugin::<NoiseTextures>::default())
-            .add_plugin(ExtractComponentPlugin::<HikariConfig>::default())
+            .add_plugin(ExtractComponentPlugin::<HikariSettings>::default())
             .add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
             .add_plugin(MeshMaterialPlugin)
@@ -249,8 +248,7 @@ impl Plugin for HikariPlugin {
             .add_plugin(LightPlugin)
             .add_plugin(PostProcessPlugin)
             .add_plugin(OverlayPlugin)
-            .add_startup_system(noise_load_system)
-            .add_system_to_stage(CoreStage::PostUpdate, hikari_config_system);
+            .add_startup_system(noise_load_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             let prepass_node = PrepassNode::new(&mut render_app.world);
@@ -261,21 +259,23 @@ impl Plugin for HikariPlugin {
 
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
 
-            let mut hikari_graph = RenderGraph::default();
-            hikari_graph.add_node(graph::node::PREPASS, prepass_node);
-            hikari_graph.add_node(graph::node::LIGHT_PASS, light_pass_node);
-            hikari_graph.add_node(graph::node::POST_PROCESS_PASS, post_process_pass_node);
-            hikari_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
-            hikari_graph.add_node(
+            let draw_3d_graph = graph
+                .get_sub_graph_mut(bevy::core_pipeline::core_3d::graph::NAME)
+                .unwrap();
+            draw_3d_graph.add_node(graph::node::PREPASS, prepass_node);
+            draw_3d_graph.add_node(graph::node::LIGHT_PASS, light_pass_node);
+            draw_3d_graph.add_node(graph::node::POST_PROCESS_PASS, post_process_pass_node);
+            draw_3d_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
+            draw_3d_graph.add_node(
                 bevy::core_pipeline::core_3d::graph::node::UPSCALING,
                 upscaling_node,
             );
 
-            let input_node_id = hikari_graph.set_input(vec![SlotInfo::new(
+            let input_node_id = draw_3d_graph.set_input(vec![SlotInfo::new(
                 graph::input::VIEW_ENTITY,
                 SlotType::Entity,
             )]);
-            hikari_graph
+            draw_3d_graph
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
@@ -283,7 +283,7 @@ impl Plugin for HikariPlugin {
                     PrepassNode::IN_VIEW,
                 )
                 .unwrap();
-            hikari_graph
+            draw_3d_graph
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
@@ -291,7 +291,7 @@ impl Plugin for HikariPlugin {
                     LightPassNode::IN_VIEW,
                 )
                 .unwrap();
-            hikari_graph
+            draw_3d_graph
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
@@ -299,7 +299,7 @@ impl Plugin for HikariPlugin {
                     LightPassNode::IN_VIEW,
                 )
                 .unwrap();
-            hikari_graph
+            draw_3d_graph
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
@@ -307,7 +307,7 @@ impl Plugin for HikariPlugin {
                     MainPass3dNode::IN_VIEW,
                 )
                 .unwrap();
-            hikari_graph
+            draw_3d_graph
                 .add_slot_edge(
                     input_node_id,
                     graph::input::VIEW_ENTITY,
@@ -316,29 +316,36 @@ impl Plugin for HikariPlugin {
                 )
                 .unwrap();
 
-            hikari_graph
+            draw_3d_graph
                 .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_PASS)
                 .unwrap();
-            hikari_graph
+            draw_3d_graph
                 .add_node_edge(graph::node::LIGHT_PASS, graph::node::POST_PROCESS_PASS)
                 .unwrap();
-            hikari_graph
+            draw_3d_graph
                 .add_node_edge(graph::node::POST_PROCESS_PASS, graph::node::OVERLAY_PASS)
                 .unwrap();
-            hikari_graph
+
+            // MAIN_PASS -> HIKARI -> BLOOM
+            draw_3d_graph
                 .add_node_edge(
-                    bevy::core_pipeline::core_3d::graph::node::UPSCALING,
+                    graph::node::POST_PROCESS_PASS,
+                    bevy::core_pipeline::bloom::draw_3d_graph::node::BLOOM,
+                )
+                .unwrap();
+            draw_3d_graph
+                .add_node_edge(
+                    bevy::core_pipeline::core_3d::graph::node::MAIN_PASS,
                     graph::node::POST_PROCESS_PASS,
                 )
                 .unwrap();
-            graph.add_sub_graph(graph::NAME, hikari_graph);
         }
     }
 }
 
 #[derive(Debug, Clone, Component, Reflect)]
 #[reflect(Component)]
-pub struct HikariConfig {
+pub struct HikariSettings {
     /// The interval of frames between sample validation passes.
     pub direct_validate_interval: usize,
     /// The interval of frames between sample validation passes.
@@ -367,7 +374,7 @@ pub struct HikariConfig {
     pub upscale: Upscale,
 }
 
-impl Default for HikariConfig {
+impl Default for HikariSettings {
     fn default() -> Self {
         Self {
             direct_validate_interval: 3,
@@ -387,25 +394,12 @@ impl Default for HikariConfig {
     }
 }
 
-impl ExtractComponent for HikariConfig {
+impl ExtractComponent for HikariSettings {
     type Query = &'static Self;
     type Filter = ();
 
     fn extract_component(item: QueryItem<Self::Query>) -> Self {
         item.clone()
-    }
-}
-
-fn hikari_config_system(
-    mut commands: Commands,
-    clear_color: Res<ClearColor>,
-    query: Query<Entity, (With<Camera>, Without<HikariConfig>)>,
-) {
-    for entity in &query {
-        commands.entity(entity).insert(HikariConfig {
-            clear_color: clear_color.0,
-            ..Default::default()
-        });
     }
 }
 

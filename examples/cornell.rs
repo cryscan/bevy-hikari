@@ -1,4 +1,4 @@
-use bevy::{prelude::*, render::camera::CameraRenderGraph};
+use bevy::prelude::*;
 use bevy_hikari::prelude::*;
 
 fn main() {
@@ -31,9 +31,9 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Camera
     commands.spawn((
         Camera3dBundle {
-            camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
             ..Default::default()
         },
+        HikariSettings::default(),
         // OrbitCameraBundle::new(
         //     OrbitCameraController::default(),
         //     Vec3::new(0.0, 1.0, 4.0),
