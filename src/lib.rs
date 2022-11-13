@@ -17,7 +17,7 @@ use bevy::{
         extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_asset::RenderAssets,
-        render_graph::{RenderGraph, SlotInfo, SlotType},
+        render_graph::RenderGraph,
         render_resource::*,
         renderer::RenderDevice,
         texture::{CompressedImageFormats, FallbackImage, ImageType},
@@ -271,13 +271,9 @@ impl Plugin for HikariPlugin {
                 upscaling_node,
             );
 
-            let input_node_id = draw_3d_graph.set_input(vec![SlotInfo::new(
-                graph::input::VIEW_ENTITY,
-                SlotType::Entity,
-            )]);
             draw_3d_graph
                 .add_slot_edge(
-                    input_node_id,
+                    draw_3d_graph.input_node().unwrap().id,
                     graph::input::VIEW_ENTITY,
                     graph::node::PREPASS,
                     PrepassNode::IN_VIEW,
@@ -285,7 +281,7 @@ impl Plugin for HikariPlugin {
                 .unwrap();
             draw_3d_graph
                 .add_slot_edge(
-                    input_node_id,
+                    draw_3d_graph.input_node().unwrap().id,
                     graph::input::VIEW_ENTITY,
                     graph::node::LIGHT_PASS,
                     LightPassNode::IN_VIEW,
@@ -293,7 +289,7 @@ impl Plugin for HikariPlugin {
                 .unwrap();
             draw_3d_graph
                 .add_slot_edge(
-                    input_node_id,
+                    draw_3d_graph.input_node().unwrap().id,
                     graph::input::VIEW_ENTITY,
                     graph::node::POST_PROCESS_PASS,
                     LightPassNode::IN_VIEW,
@@ -301,7 +297,7 @@ impl Plugin for HikariPlugin {
                 .unwrap();
             draw_3d_graph
                 .add_slot_edge(
-                    input_node_id,
+                    draw_3d_graph.input_node().unwrap().id,
                     graph::input::VIEW_ENTITY,
                     graph::node::OVERLAY_PASS,
                     MainPass3dNode::IN_VIEW,
@@ -309,7 +305,7 @@ impl Plugin for HikariPlugin {
                 .unwrap();
             draw_3d_graph
                 .add_slot_edge(
-                    input_node_id,
+                    draw_3d_graph.input_node().unwrap().id,
                     graph::input::VIEW_ENTITY,
                     bevy::core_pipeline::core_3d::graph::node::UPSCALING,
                     MainPass3dNode::IN_VIEW,
