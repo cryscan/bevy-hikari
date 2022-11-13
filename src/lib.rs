@@ -9,7 +9,7 @@ use crate::{
 };
 use bevy::{
     asset::{load_internal_asset, load_internal_binary_asset},
-    core_pipeline::{core_3d::MainPass3dNode, upscaling::UpscalingNode},
+    core_pipeline::core_3d::MainPass3dNode,
     ecs::query::QueryItem,
     prelude::*,
     reflect::TypeUuid,
@@ -258,7 +258,6 @@ impl Plugin for HikariPlugin {
             let light_pass_node = LightPassNode::new(&mut render_app.world);
             let post_process_pass_node = PostProcessPassNode::new(&mut render_app.world);
             let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
-            let upscaling_node = UpscalingNode::new(&mut render_app.world);
 
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
 
@@ -269,10 +268,6 @@ impl Plugin for HikariPlugin {
             draw_3d_graph.add_node(graph::node::LIGHT_PASS, light_pass_node);
             draw_3d_graph.add_node(graph::node::POST_PROCESS_PASS, post_process_pass_node);
             draw_3d_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
-            draw_3d_graph.add_node(
-                bevy::core_pipeline::core_3d::graph::node::UPSCALING,
-                upscaling_node,
-            );
 
             draw_3d_graph
                 .add_slot_edge(
@@ -306,14 +301,6 @@ impl Plugin for HikariPlugin {
                     MainPass3dNode::IN_VIEW,
                 )
                 .unwrap();
-            draw_3d_graph
-                .add_slot_edge(
-                    draw_3d_graph.input_node().unwrap().id,
-                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
-                    bevy::core_pipeline::core_3d::graph::node::UPSCALING,
-                    MainPass3dNode::IN_VIEW,
-                )
-                .unwrap();
 
             draw_3d_graph
                 .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_PASS)
@@ -328,14 +315,14 @@ impl Plugin for HikariPlugin {
             // MAIN_PASS -> HIKARI -> BLOOM
             draw_3d_graph
                 .add_node_edge(
-                    graph::node::POST_PROCESS_PASS,
+                    graph::node::OVERLAY_PASS,
                     bevy::core_pipeline::bloom::draw_3d_graph::node::BLOOM,
                 )
                 .unwrap();
             draw_3d_graph
                 .add_node_edge(
                     bevy::core_pipeline::core_3d::graph::node::MAIN_PASS,
-                    graph::node::POST_PROCESS_PASS,
+                    graph::node::OVERLAY_PASS,
                 )
                 .unwrap();
 
