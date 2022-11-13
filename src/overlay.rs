@@ -1,5 +1,5 @@
 use crate::{
-    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariConfig, Taa, Upscale,
+    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariSettings, Taa, Upscale,
     OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
@@ -98,6 +98,13 @@ impl SpecializedMeshPipeline for OverlayPipeline {
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
         let bind_group_layout = vec![self.input_layout.clone()];
 
+        let mut shader_defs = vec![];
+        let mut format = TextureFormat::bevy_default();
+        if key.contains(MeshPipelineKey::HDR) {
+            shader_defs.push("HDR".into());
+            format = ViewTarget::TEXTURE_FORMAT_HDR;
+        }
+
         Ok(RenderPipelineDescriptor {
             label: None,
             layout: Some(bind_group_layout),
@@ -109,10 +116,10 @@ impl SpecializedMeshPipeline for OverlayPipeline {
             },
             fragment: Some(FragmentState {
                 shader: OVERLAY_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs: vec![],
+                shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
-                    format: TextureFormat::bevy_default(),
+                    format,
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
@@ -127,11 +134,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: MultisampleState {
-                count: key.msaa_samples(),
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
+            multisample: MultisampleState::default(),
         })
     }
 }
@@ -158,14 +161,18 @@ fn queue_overlay_meshes(
     overlay_pipeline: Res<OverlayPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<OverlayPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
-    mut views: Query<&mut RenderPhase<Overlay>>,
+    mut views: Query<(&mut RenderPhase<Overlay>, &ExtractedView)>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawOverlay>().unwrap();
-    for mut overlay_phase in &mut views {
+    for (mut overlay_phase, view) in &mut views {
         let mesh_handle = QUAD_MESH_HANDLE.typed::<Mesh>();
         if let Some(mesh) = render_meshes.get(&mesh_handle) {
-            let key = MeshPipelineKey::from_msaa_samples(msaa.samples)
+            let mut key = MeshPipelineKey::from_msaa_samples(msaa.samples)
                 | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+            if view.hdr {
+                key |= MeshPipelineKey::HDR;
+            }
 
             let pipeline_id =
                 pipelines.specialize(&mut pipeline_cache, &overlay_pipeline, key, &mesh.layout);
@@ -194,12 +201,12 @@ fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<OverlayPipeline>,
-    query: Query<(Entity, &PostProcessTextures, &HikariConfig), With<ExtractedCamera>>,
+    query: Query<(Entity, &PostProcessTextures, &HikariSettings), With<ExtractedCamera>>,
 ) {
-    for (entity, post_process, config) in &query {
+    for (entity, post_process, settings) in &query {
         let current = post_process.head;
 
-        let input_texture = match (config.upscale, config.taa) {
+        let input_texture = match (settings.upscale, settings.taa) {
             (Upscale::Fsr1 { .. }, _) => &post_process.upscale_output[1],
             (Upscale::SmaaTu4x { .. }, Taa::None) => &post_process.upscale_output[1],
             (Upscale::SmaaTu4x { .. }, Taa::Jasmine) => &post_process.taa_output[current],
@@ -334,7 +341,7 @@ impl Node for OverlayPassNode {
             let _main_overlay_span = info_span!("main_overlay").entered();
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("main_overlay"),
-                color_attachments: &[Some(target.get_color_attachment(Operations {
+                color_attachments: &[Some(target.get_unsampled_color_attachment(Operations {
                     load: match camera_3d.clear_color {
                         ClearColorConfig::Default => {
                             LoadOp::Clear(world.resource::<ClearColor>().0.into())

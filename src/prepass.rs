@@ -3,7 +3,7 @@ use crate::{
         DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
     },
     view::{FrameUniform, PreviousViewUniform, PreviousViewUniformOffset, PreviousViewUniforms},
-    HikariConfig, Taa, Upscale, PREPASS_SHADER_HANDLE,
+    HikariSettings, Taa, Upscale, PREPASS_SHADER_HANDLE,
 };
 use bevy::{
     ecs::{
@@ -354,13 +354,13 @@ fn prepass_textures_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut queries: ParamSet<(
-        Query<(Entity, &Camera, &HikariConfig), Changed<Camera>>,
+        Query<(Entity, &Camera, &HikariSettings), Changed<Camera>>,
         Query<&mut PrepassTextures>,
     )>,
 ) {
-    for (entity, camera, config) in &queries.p0() {
+    for (entity, camera, settings) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
-            let scale = config.upscale.ratio().recip();
+            let scale = settings.upscale.ratio().recip();
             let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let size = Extent3d {
                 width: size.x,
@@ -468,11 +468,11 @@ fn queue_prepass_meshes(
         &ExtractedView,
         &VisibleEntities,
         &mut RenderPhase<Prepass>,
-        &HikariConfig,
+        &HikariSettings,
     )>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawPrepass>().unwrap();
-    for (view, visible_entities, mut prepass_phase, config) in &mut views {
+    for (view, visible_entities, mut prepass_phase, settings) in &mut views {
         let rangefinder = view.rangefinder3d();
 
         let add_render_phase = |(entity, mesh_handle, mesh_uniform, _): (
@@ -485,8 +485,8 @@ fn queue_prepass_meshes(
                 let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
                 let key = PrepassPipelineKey {
                     mesh_pipeline_key: key,
-                    temporal_anti_aliasing: matches!(config.taa, Taa::Jasmine),
-                    smaa_tu4x: matches!(config.upscale, Upscale::SmaaTu4x { .. }),
+                    temporal_anti_aliasing: matches!(settings.taa, Taa::Jasmine),
+                    smaa_tu4x: matches!(settings.upscale, Upscale::SmaaTu4x { .. }),
                 };
                 let pipeline_id =
                     pipelines.specialize(&mut pipeline_cache, &prepass_pipeline, key, &mesh.layout);

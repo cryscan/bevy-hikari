@@ -5,7 +5,7 @@ use crate::{
     },
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
-    HikariConfig, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
+    HikariSettings, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
     pbr::ViewLightsUniformOffset,
@@ -300,12 +300,12 @@ fn prepare_light_pass_textures(
     render_queue: Res<RenderQueue>,
     mut texture_cache: ResMut<TextureCache>,
     mut reservoir_cache: ResMut<ReservoirCache>,
-    cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariConfig)>,
+    cameras: Query<(Entity, &ExtractedCamera, &FrameCounter, &HikariSettings)>,
 ) {
-    for (entity, camera, counter, config) in &cameras {
+    for (entity, camera, counter, settings) in &cameras {
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
-            let scale = config.upscale.ratio().recip();
+            let scale = settings.upscale.ratio().recip();
             let size = (scale * size.as_vec2()).ceil().as_uvec2();
             let mut create_texture = |texture_format| {
                 let extent = Extent3d {
@@ -541,7 +541,7 @@ pub struct LightPassNode {
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
         &'static LightBindGroup,
-        &'static HikariConfig,
+        &'static HikariSettings,
     )>,
 }
 
@@ -578,7 +578,7 @@ impl Node for LightPassNode {
             previous_view_uniform,
             view_lights,
             light_bind_group,
-            config,
+            settings,
         ) = match self.query.get_manual(world, entity) {
             Ok(query) => query,
             Err(_) => return Ok(()),
@@ -596,7 +596,7 @@ impl Node for LightPassNode {
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let size = camera.physical_target_size.unwrap();
-        let scale = config.upscale.ratio().recip();
+        let scale = settings.upscale.ratio().recip();
         let scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
@@ -642,7 +642,7 @@ impl Node for LightPassNode {
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
 
-            if config.spatial_reuse {
+            if settings.spatial_reuse {
                 if let Some(pipeline) = spatial_pipeline
                     .and_then(|pipeline| pipeline_cache.get_compute_pipeline(*pipeline))
                 {

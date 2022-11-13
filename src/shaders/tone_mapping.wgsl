@@ -1,3 +1,4 @@
+#import bevy_core_pipeline::tonemapping
 #import bevy_hikari::mesh_view_bindings
 #import bevy_hikari::deferred_bindings
 #import bevy_hikari::utils

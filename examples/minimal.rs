@@ -1,4 +1,4 @@
-use bevy::{prelude::*, render::camera::CameraRenderGraph};
+use bevy::prelude::*;
 use bevy_hikari::prelude::*;
 use std::f32::consts::PI;
 
@@ -45,10 +45,12 @@ fn setup(
     });
 
     // Camera
-    commands.spawn(Camera3dBundle {
-        // Set the camera's render graph to Hikari's
-        camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..Default::default()
-    });
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..Default::default()
+        },
+        // Add [`HikariSettings`] component to enable GI rendering
+        HikariSettings::default(),
+    ));
 }

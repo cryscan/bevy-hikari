@@ -69,14 +69,3 @@ fn frame_jitter(index: u32, sequence: u32) -> vec2<f32> {
 fn luminance(v: vec3<f32>) -> f32 {
     return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
-
-fn change_luminance(c_in: vec3<f32>, l_out: f32) -> vec3<f32> {
-    let l_in = luminance(c_in);
-    return c_in * (l_out / l_in);
-}
-
-fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
-    let l_old = luminance(color);
-    let l_new = l_old / (1.0 + l_old);
-    return change_luminance(color, l_new);
-}

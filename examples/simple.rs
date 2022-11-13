@@ -1,4 +1,4 @@
-use bevy::{prelude::*, render::camera::CameraRenderGraph};
+use bevy::{core_pipeline::bloom::BloomSettings, prelude::*};
 use bevy_hikari::prelude::*;
 use std::f32::consts::PI;
 
@@ -195,10 +195,15 @@ fn setup(
     // Camera
     commands.spawn((
         Camera3dBundle {
-            camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
+            camera: Camera {
+                hdr: true,
+                ..Default::default()
+            },
             transform: Transform::from_xyz(-10.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         },
+        HikariSettings::default(),
+        BloomSettings::default(),
         // OrbitCameraBundle::new(
         //     OrbitCameraController::default(),
         //     Vec3::new(-10.0, 5.0, 20.0),
