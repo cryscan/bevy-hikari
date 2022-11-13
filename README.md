@@ -29,6 +29,8 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] Spatial up-scaling (FSR 1.0)
 - [x] Temporal up-scaling (SMAA TU4X)
 - [ ] Skinned animation
+- [x] HDR output
+- [x] Bloom
 - [ ] Hardware ray tracing (upstream related)
 
 ## Basic Usage

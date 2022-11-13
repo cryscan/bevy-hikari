@@ -35,9 +35,10 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let uv = clip_to_uv(vec4<f32>(in.position, 1.0));
 
     out.color = textureSample(input_texture, linear_sampler, uv);
+    out.color = select(out.color, vec4<f32>(0.0), any_is_nan_vec4(out.color));
 
 #ifdef HDR
-    out.color = vec4<f32>(inverse_reintard_luminance(out.color.rgb), out_color.a);
+    out.color = vec4<f32>(inverse_reintard_luminance(out.color.rgb), out.color.a);
 #endif
 
     return out;

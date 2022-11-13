@@ -99,8 +99,10 @@ impl SpecializedMeshPipeline for OverlayPipeline {
         let bind_group_layout = vec![self.input_layout.clone()];
 
         let mut shader_defs = vec![];
+        let mut format = TextureFormat::bevy_default();
         if key.contains(MeshPipelineKey::HDR) {
             shader_defs.push("HDR".into());
+            format = ViewTarget::TEXTURE_FORMAT_HDR;
         }
 
         Ok(RenderPipelineDescriptor {
@@ -117,7 +119,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
-                    format: TextureFormat::bevy_default(),
+                    format,
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
@@ -132,11 +134,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: MultisampleState {
-                count: key.msaa_samples(),
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
+            multisample: MultisampleState::default(),
         })
     }
 }
@@ -343,7 +341,7 @@ impl Node for OverlayPassNode {
             let _main_overlay_span = info_span!("main_overlay").entered();
             let pass_descriptor = RenderPassDescriptor {
                 label: Some("main_overlay"),
-                color_attachments: &[Some(target.get_color_attachment(Operations {
+                color_attachments: &[Some(target.get_unsampled_color_attachment(Operations {
                     load: match camera_3d.clear_color {
                         ClearColorConfig::Default => {
                             LoadOp::Clear(world.resource::<ClearColor>().0.into())
