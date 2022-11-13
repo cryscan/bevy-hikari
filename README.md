@@ -85,7 +85,9 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugin(HikariPlugin)
+        .add_plugin(HikariPlugin {
+            remove_main_pass: true,
+        })
         .add_startup_system(setup)
         .run();
 }

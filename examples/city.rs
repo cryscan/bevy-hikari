@@ -10,7 +10,9 @@ fn main() {
         // .add_plugin(LookTransformPlugin)
         // .add_plugin(OrbitCameraPlugin::new(false))
         // .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
-        .add_plugin(HikariPlugin)
+        .add_plugin(HikariPlugin {
+            remove_main_pass: true,
+        })
         .add_startup_system(setup)
         .add_system(load_models)
         // .add_system(camera_input_map)

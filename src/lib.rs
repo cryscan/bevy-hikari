@@ -39,9 +39,6 @@ pub mod transform;
 pub mod view;
 
 pub mod graph {
-    pub mod input {
-        pub const VIEW_ENTITY: &str = "view_entity";
-    }
     pub mod node {
         pub const PREPASS: &str = "prepass";
         pub const LIGHT_PASS: &str = "light_pass";
@@ -92,7 +89,13 @@ pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
 pub const QUAD_MESH_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 
-pub struct HikariPlugin;
+#[derive(Default)]
+pub struct HikariPlugin {
+    /// If true, bevy's main pass won't be rendered.
+    /// If you are using bevy's main renderer at the same time, leave it as `false`.
+    pub remove_main_pass: bool,
+}
+
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(
@@ -274,7 +277,7 @@ impl Plugin for HikariPlugin {
             draw_3d_graph
                 .add_slot_edge(
                     draw_3d_graph.input_node().unwrap().id,
-                    graph::input::VIEW_ENTITY,
+                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
                     graph::node::PREPASS,
                     PrepassNode::IN_VIEW,
                 )
@@ -282,7 +285,7 @@ impl Plugin for HikariPlugin {
             draw_3d_graph
                 .add_slot_edge(
                     draw_3d_graph.input_node().unwrap().id,
-                    graph::input::VIEW_ENTITY,
+                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
                     graph::node::LIGHT_PASS,
                     LightPassNode::IN_VIEW,
                 )
@@ -290,7 +293,7 @@ impl Plugin for HikariPlugin {
             draw_3d_graph
                 .add_slot_edge(
                     draw_3d_graph.input_node().unwrap().id,
-                    graph::input::VIEW_ENTITY,
+                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
                     graph::node::POST_PROCESS_PASS,
                     LightPassNode::IN_VIEW,
                 )
@@ -298,7 +301,7 @@ impl Plugin for HikariPlugin {
             draw_3d_graph
                 .add_slot_edge(
                     draw_3d_graph.input_node().unwrap().id,
-                    graph::input::VIEW_ENTITY,
+                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
                     graph::node::OVERLAY_PASS,
                     MainPass3dNode::IN_VIEW,
                 )
@@ -306,7 +309,7 @@ impl Plugin for HikariPlugin {
             draw_3d_graph
                 .add_slot_edge(
                     draw_3d_graph.input_node().unwrap().id,
-                    graph::input::VIEW_ENTITY,
+                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
                     bevy::core_pipeline::core_3d::graph::node::UPSCALING,
                     MainPass3dNode::IN_VIEW,
                 )
@@ -335,6 +338,12 @@ impl Plugin for HikariPlugin {
                     graph::node::POST_PROCESS_PASS,
                 )
                 .unwrap();
+
+            if self.remove_main_pass {
+                draw_3d_graph
+                    .remove_node(bevy::core_pipeline::core_3d::graph::node::MAIN_PASS)
+                    .unwrap();
+            }
         }
     }
 }
