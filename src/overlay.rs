@@ -98,6 +98,11 @@ impl SpecializedMeshPipeline for OverlayPipeline {
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
         let bind_group_layout = vec![self.input_layout.clone()];
 
+        let mut shader_defs = vec![];
+        if key.contains(MeshPipelineKey::HDR) {
+            shader_defs.push("HDR".into());
+        }
+
         Ok(RenderPipelineDescriptor {
             label: None,
             layout: Some(bind_group_layout),
@@ -109,7 +114,7 @@ impl SpecializedMeshPipeline for OverlayPipeline {
             },
             fragment: Some(FragmentState {
                 shader: OVERLAY_SHADER_HANDLE.typed::<Shader>(),
-                shader_defs: vec![],
+                shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
                     format: TextureFormat::bevy_default(),
@@ -158,14 +163,18 @@ fn queue_overlay_meshes(
     overlay_pipeline: Res<OverlayPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<OverlayPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
-    mut views: Query<&mut RenderPhase<Overlay>>,
+    mut views: Query<(&mut RenderPhase<Overlay>, &ExtractedView)>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawOverlay>().unwrap();
-    for mut overlay_phase in &mut views {
+    for (mut overlay_phase, view) in &mut views {
         let mesh_handle = QUAD_MESH_HANDLE.typed::<Mesh>();
         if let Some(mesh) = render_meshes.get(&mesh_handle) {
-            let key = MeshPipelineKey::from_msaa_samples(msaa.samples)
+            let mut key = MeshPipelineKey::from_msaa_samples(msaa.samples)
                 | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+            if view.hdr {
+                key |= MeshPipelineKey::HDR;
+            }
 
             let pipeline_id =
                 pipelines.specialize(&mut pipeline_cache, &overlay_pipeline, key, &mesh.layout);
