@@ -36,7 +36,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 ## Basic Usage
 1. Add `HikariPlugin` to your `App` after `PbrPlugin`
 2. Setup the scene with a directional light
-3. Insert [`HikariSettings`] component to the camera
+3. Insert `HikariSettings` component to the camera
 
 One can configure the renderer through `HikariSettings` component on the camera entity.
 Available options are:
