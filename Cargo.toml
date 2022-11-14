@@ -37,7 +37,8 @@ bevy = { version = "0.9", default-features = true, features = [
     "png",
     "x11",
 ] }
-smooth-bevy-cameras = "0.5"
+bevy_flycam = "0.9"
+# smooth-bevy-cameras = "0.5"
 bevy_mod_raycast = "0.7"
 bevy-inspector-egui = "0.14"
 
