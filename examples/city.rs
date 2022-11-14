@@ -1,4 +1,5 @@
-use bevy::{prelude::*, render::camera::CameraRenderGraph};
+use bevy::{core_pipeline::bloom::BloomSettings, prelude::*, render::camera::CameraRenderGraph};
+use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
 use bevy_hikari::prelude::*;
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_mod_raycast::{
@@ -18,6 +19,7 @@ fn main() {
             ..Default::default()
         }))
         .add_plugin(WorldInspectorPlugin::new())
+        .add_plugin(NoCameraPlayerPlugin)
         // .add_plugin(LookTransformPlugin)
         // .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
@@ -100,15 +102,21 @@ fn setup(
     commands.spawn((
         Camera3dBundle {
             camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
+            camera: Camera {
+                hdr: true,
+                ..Default::default()
+            },
             transform: Transform::from_xyz(0.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         },
         HikariSettings::default(),
+        BloomSettings::default(),
         // OrbitCameraBundle::new(
         //     OrbitCameraController::default(),
         //     Vec3::new(-50.0, 25.0, 100.0),
         //     Vec3::new(0., 0., 0.),
         // ),
+        FlyCam,
         RaycastSource::<RaycastSet>::default(),
     ));
 }
@@ -255,7 +263,7 @@ pub fn control_directional_light(
         }
     }
 
-    if keys.pressed(KeyCode::LShift) {
+    if keys.pressed(KeyCode::LControl) {
         if let Ok(mut transform) = queries.p0().get_single_mut() {
             transform.look_at(*target, Vec3::Z);
         }

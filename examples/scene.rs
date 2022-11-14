@@ -1,4 +1,5 @@
 use bevy::{core_pipeline::bloom::BloomSettings, prelude::*, render::camera::CameraRenderGraph};
+use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
 use bevy_hikari::prelude::*;
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_mod_raycast::{
@@ -17,6 +18,7 @@ fn main() {
             ..Default::default()
         }))
         .add_plugin(WorldInspectorPlugin::new())
+        .add_plugin(NoCameraPlayerPlugin)
         // .add_plugin(LookTransformPlugin)
         // .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
@@ -117,6 +119,7 @@ fn setup(
         //     Vec3::new(-20.0, 10.0, 20.0),
         //     Vec3::new(0., 0., 0.),
         // ),
+        FlyCam,
         RaycastSource::<RaycastSet>::default(),
     ));
 }
@@ -200,7 +203,7 @@ pub fn control_directional_light(
         }
     }
 
-    if keys.pressed(KeyCode::LShift) {
+    if keys.pressed(KeyCode::LControl) {
         if let Ok(mut transform) = queries.p0().get_single_mut() {
             transform.look_at(*target, Vec3::Z);
         }
