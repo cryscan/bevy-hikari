@@ -1,5 +1,5 @@
 use crate::{
-    light::{LightPassTextures, VARIANCE_TEXTURE_FORMAT},
+    light::{LightTextures, VARIANCE_TEXTURE_FORMAT},
     prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariSettings, Taa, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_SHADER_HANDLE,
@@ -844,7 +844,7 @@ fn queue_post_process_bind_groups(
         (
             Entity,
             &PrepassTextures,
-            &LightPassTextures,
+            &LightTextures,
             &PostProcessTextures,
             &HikariSettings,
         ),
@@ -1125,7 +1125,7 @@ fn queue_post_process_bind_groups(
 }
 
 #[allow(clippy::type_complexity)]
-pub struct PostProcessPassNode {
+pub struct PostProcessNode {
     query: QueryState<(
         &'static ExtractedCamera,
         &'static DynamicUniformIndex<FrameUniform>,
@@ -1138,7 +1138,7 @@ pub struct PostProcessPassNode {
     )>,
 }
 
-impl PostProcessPassNode {
+impl PostProcessNode {
     pub const IN_VIEW: &'static str = "view";
 
     pub fn new(world: &mut World) -> Self {
@@ -1148,7 +1148,7 @@ impl PostProcessPassNode {
     }
 }
 
-impl Node for PostProcessPassNode {
+impl Node for PostProcessNode {
     fn input(&self) -> Vec<SlotInfo> {
         vec![SlotInfo::new(Self::IN_VIEW, SlotType::Entity)]
     }

@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, render::camera::CameraRenderGraph};
 use bevy_hikari::prelude::*;
 use bevy_inspector_egui::WorldInspectorPlugin;
 
@@ -16,9 +16,7 @@ fn main() {
         .add_plugin(WorldInspectorPlugin::new())
         // .add_plugin(LookTransformPlugin)
         // .add_plugin(OrbitCameraPlugin::new(false))
-        .add_plugin(HikariPlugin {
-            remove_main_pass: true,
-        })
+        .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         // .add_system(camera_input_map)
         .run();
@@ -36,6 +34,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Camera
     commands.spawn((
         Camera3dBundle {
+            camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
             transform: Transform::from_xyz(0.0, 1.0, 4.0)
                 .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
             ..Default::default()

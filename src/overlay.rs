@@ -288,7 +288,7 @@ impl<const I: usize> EntityRenderCommand for SetOverlayBindGroup<I> {
     }
 }
 
-pub struct OverlayPassNode {
+pub struct OverlayNode {
     query: QueryState<
         (
             &'static ExtractedCamera,
@@ -300,7 +300,7 @@ pub struct OverlayPassNode {
     >,
 }
 
-impl OverlayPassNode {
+impl OverlayNode {
     pub const IN_VIEW: &'static str = "view";
 
     pub fn new(world: &mut World) -> Self {
@@ -310,7 +310,7 @@ impl OverlayPassNode {
     }
 }
 
-impl Node for OverlayPassNode {
+impl Node for OverlayNode {
     fn input(&self) -> Vec<SlotInfo> {
         vec![SlotInfo::new(Self::IN_VIEW, SlotType::Entity)]
     }

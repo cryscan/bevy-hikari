@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, render::camera::CameraRenderGraph};
 use bevy_hikari::prelude::*;
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_mod_raycast::{
@@ -21,9 +21,7 @@ fn main() {
         // .add_plugin(LookTransformPlugin)
         // .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
-        .add_plugin(HikariPlugin {
-            remove_main_pass: true,
-        })
+        .add_plugin(HikariPlugin)
         .add_startup_system(setup)
         .add_system(load_models)
         // .add_system(camera_input_map)
@@ -101,6 +99,7 @@ fn setup(
     // Camera
     commands.spawn((
         Camera3dBundle {
+            camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
             transform: Transform::from_xyz(0.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         },
