@@ -1,15 +1,26 @@
 use bevy::prelude::*;
 use bevy_hikari::prelude::*;
+use bevy_inspector_egui::WorldInspectorPlugin;
+use bevy_mod_raycast::{
+    DefaultRaycastingPlugin, Intersection, RaycastMesh, RaycastMethod, RaycastSource, RaycastSystem,
+};
 use std::f32::consts::PI;
 
 fn main() {
     App::new()
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, TimerMode::Repeating)))
-        .add_plugins(DefaultPlugins)
-        // .add_plugin(WorldInspectorPlugin::new())
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            // window: WindowDescriptor {
+            //     width: 400.0,
+            //     height: 300.0,
+            //     ..Default::default()
+            // },
+            ..Default::default()
+        }))
+        .add_plugin(WorldInspectorPlugin::new())
         // .add_plugin(LookTransformPlugin)
         // .add_plugin(OrbitCameraPlugin::new(false))
-        // .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
+        .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
         .add_plugin(HikariPlugin {
             remove_main_pass: true,
         })
@@ -17,10 +28,10 @@ fn main() {
         .add_system(load_models)
         // .add_system(camera_input_map)
         .add_system(sphere_rotate_system)
-        // .add_system_to_stage(
-        //     CoreStage::First,
-        //     control_directional_light.before(RaycastSystem::BuildRays::<RaycastSet>),
-        // )
+        .add_system_to_stage(
+            CoreStage::First,
+            control_directional_light.before(RaycastSystem::BuildRays::<RaycastSet>),
+        )
         .run();
 }
 
@@ -50,7 +61,7 @@ fn setup(
             },
             ..Default::default()
         },
-        // RayCastMesh::<RaycastSet>::default(),
+        RaycastMesh::<RaycastSet>::default(),
     ));
 
     // Sphere
@@ -90,7 +101,7 @@ fn setup(
     // Camera
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(-10.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(0.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         },
         HikariSettings::default(),
@@ -99,7 +110,7 @@ fn setup(
         //     Vec3::new(-50.0, 25.0, 100.0),
         //     Vec3::new(0., 0., 0.),
         // ),
-        // RayCastSource::<RaycastSet>::default(),
+        RaycastSource::<RaycastSet>::default(),
     ));
 }
 
@@ -219,38 +230,38 @@ fn load_models(
 //     events.send(ControlEvent::Zoom(scalar));
 // }
 
-// pub fn control_directional_light(
-//     time: Res<Time>,
-//     mut cursor: EventReader<CursorMoved>,
-//     keys: Res<Input<KeyCode>>,
-//     mut queries: ParamSet<(
-//         Query<&mut Transform, With<DirectionalLight>>,
-//         Query<&mut RayCastSource<RaycastSet>>,
-//         Query<&Intersection<RaycastSet>>,
-//     )>,
-//     mut target: Local<Vec3>,
-// ) {
-//     let cursor_position = match cursor.iter().last() {
-//         Some(cursor_moved) => cursor_moved.position,
-//         None => return,
-//     };
+pub fn control_directional_light(
+    time: Res<Time>,
+    mut cursor: EventReader<CursorMoved>,
+    keys: Res<Input<KeyCode>>,
+    mut queries: ParamSet<(
+        Query<&mut Transform, With<DirectionalLight>>,
+        Query<&mut RaycastSource<RaycastSet>>,
+        Query<&Intersection<RaycastSet>>,
+    )>,
+    mut target: Local<Vec3>,
+) {
+    let cursor_position = match cursor.iter().last() {
+        Some(cursor_moved) => cursor_moved.position,
+        None => return,
+    };
 
-//     for mut pick_source in &mut queries.p1() {
-//         pick_source.cast_method = RayCastMethod::Screenspace(cursor_position);
-//     }
+    for mut pick_source in &mut queries.p1() {
+        pick_source.cast_method = RaycastMethod::Screenspace(cursor_position);
+    }
 
-//     if let Ok(intersection) = queries.p2().get_single() {
-//         if let Some(position) = intersection.position() {
-//             *target = target.lerp(*position, 1.0 - (-10.0 * time.delta_seconds()).exp());
-//         }
-//     }
+    if let Ok(intersection) = queries.p2().get_single() {
+        if let Some(position) = intersection.position() {
+            *target = target.lerp(*position, 1.0 - (-10.0 * time.delta_seconds()).exp());
+        }
+    }
 
-//     if keys.pressed(KeyCode::LShift) {
-//         if let Ok(mut transform) = queries.p0().get_single_mut() {
-//             transform.look_at(*target, Vec3::Z);
-//         }
-//     }
-// }
+    if keys.pressed(KeyCode::LShift) {
+        if let Ok(mut transform) = queries.p0().get_single_mut() {
+            transform.look_at(*target, Vec3::Z);
+        }
+    }
+}
 
 fn sphere_rotate_system(time: Res<Time>, mut query: Query<&mut Transform, With<EmissiveSphere>>) {
     for mut transform in &mut query {

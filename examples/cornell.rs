@@ -1,23 +1,26 @@
 use bevy::prelude::*;
 use bevy_hikari::prelude::*;
+use bevy_inspector_egui::WorldInspectorPlugin;
 
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(DefaultPlugins)
-        // .add_plugin(WorldInspectorPlugin::new())
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            // window: WindowDescriptor {
+            //     width: 400.0,
+            //     height: 300.0,
+            //     ..Default::default()
+            // },
+            ..Default::default()
+        }))
+        .add_plugin(WorldInspectorPlugin::new())
         // .add_plugin(LookTransformPlugin)
         // .add_plugin(OrbitCameraPlugin::new(false))
-        // .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
         .add_plugin(HikariPlugin {
             remove_main_pass: true,
         })
         .add_startup_system(setup)
         // .add_system(camera_input_map)
-        // .add_system_to_stage(
-        //     CoreStage::First,
-        //     control_directional_light.before(RaycastSystem::BuildRays::<RaycastSet>),
-        // )
         .run();
 }
 
@@ -33,6 +36,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Camera
     commands.spawn((
         Camera3dBundle {
+            transform: Transform::from_xyz(0.0, 1.0, 4.0)
+                .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
             ..Default::default()
         },
         HikariSettings::default(),
@@ -96,37 +101,4 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 //         scalar *= 1.0 - scroll_amount * mouse_wheel_zoom_sensitivity;
 //     }
 //     events.send(ControlEvent::Zoom(scalar));
-// }
-
-// pub fn control_directional_light(
-//     time: Res<Time>,
-//     mut cursor: EventReader<CursorMoved>,
-//     keys: Res<Input<KeyCode>>,
-//     mut queries: ParamSet<(
-//         Query<&mut Transform, With<DirectionalLight>>,
-//         Query<&mut RayCastSource<RaycastSet>>,
-//         Query<&Intersection<RaycastSet>>,
-//     )>,
-//     mut target: Local<Vec3>,
-// ) {
-//     let cursor_position = match cursor.iter().last() {
-//         Some(cursor_moved) => cursor_moved.position,
-//         None => return,
-//     };
-
-//     for mut pick_source in &mut queries.p1() {
-//         pick_source.cast_method = RayCastMethod::Screenspace(cursor_position);
-//     }
-
-//     if let Ok(intersection) = queries.p2().get_single() {
-//         if let Some(position) = intersection.position() {
-//             *target = target.lerp(*position, 1.0 - (-10.0 * time.delta_seconds()).exp());
-//         }
-//     }
-
-//     if keys.pressed(KeyCode::LShift) {
-//         if let Ok(mut transform) = queries.p0().get_single_mut() {
-//             transform.look_at(*target, Vec3::Z);
-//         }
-//     }
 // }
