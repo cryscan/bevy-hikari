@@ -1,15 +1,15 @@
 use crate::{
-    light::{LightPassNode, LightPlugin},
+    light::{LightNode, LightPlugin},
     mesh_material::MeshMaterialPlugin,
-    overlay::{OverlayPassNode, OverlayPlugin},
-    post_process::{PostProcessPassNode, PostProcessPlugin},
+    overlay::{OverlayNode, OverlayPlugin},
+    post_process::{PostProcessNode, PostProcessPlugin},
     prepass::{PrepassNode, PrepassPlugin},
     transform::TransformPlugin,
     view::ViewPlugin,
 };
 use bevy::{
     asset::{load_internal_asset, load_internal_binary_asset},
-    core_pipeline::core_3d::MainPass3dNode,
+    core_pipeline::{bloom::BloomNode, tonemapping::TonemappingNode, upscaling::UpscalingNode},
     ecs::query::QueryItem,
     prelude::*,
     reflect::TypeUuid,
@@ -17,7 +17,7 @@ use bevy::{
         extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_asset::RenderAssets,
-        render_graph::RenderGraph,
+        render_graph::{RenderGraph, SlotInfo, SlotType},
         render_resource::*,
         renderer::RenderDevice,
         texture::{CompressedImageFormats, FallbackImage, ImageType},
@@ -39,11 +39,12 @@ pub mod transform;
 pub mod view;
 
 pub mod graph {
+    pub const NAME: &str = "hikari";
     pub mod node {
-        pub const PREPASS: &str = "prepass";
-        pub const LIGHT_PASS: &str = "light_pass";
-        pub const POST_PROCESS_PASS: &str = "post_process_pass";
-        pub const OVERLAY_PASS: &str = "overlay_pass";
+        pub const PREPASS: &str = "hikari_prepass";
+        pub const LIGHT: &str = "hikari_light";
+        pub const POST_PROCESS: &str = "hikari_post_process";
+        pub const OVERLAY: &str = "hikari_overlay";
     }
 }
 
@@ -89,13 +90,7 @@ pub const OVERLAY_SHADER_HANDLE: HandleUntyped =
 pub const QUAD_MESH_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 4740146776519512271);
 
-#[derive(Default)]
-pub struct HikariPlugin {
-    /// If true, bevy's main pass won't be rendered.
-    /// If you are using bevy's main renderer at the same time, leave it as `false`.
-    pub remove_main_pass: bool,
-}
-
+pub struct HikariPlugin;
 impl Plugin for HikariPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(
@@ -254,83 +249,119 @@ impl Plugin for HikariPlugin {
             .add_startup_system(noise_load_system);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            use bevy::core_pipeline::core_3d;
+
             let prepass_node = PrepassNode::new(&mut render_app.world);
-            let light_pass_node = LightPassNode::new(&mut render_app.world);
-            let post_process_pass_node = PostProcessPassNode::new(&mut render_app.world);
-            let overlay_pass_node = OverlayPassNode::new(&mut render_app.world);
+            let light_node = LightNode::new(&mut render_app.world);
+            let post_process_node = PostProcessNode::new(&mut render_app.world);
+            let overlay_node = OverlayNode::new(&mut render_app.world);
+            let bloom_node = BloomNode::new(&mut render_app.world);
+            let tonemapping_node = TonemappingNode::new(&mut render_app.world);
+            let upscaling_node = UpscalingNode::new(&mut render_app.world);
 
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
 
-            let draw_3d_graph = graph
-                .get_sub_graph_mut(bevy::core_pipeline::core_3d::graph::NAME)
-                .unwrap();
-            draw_3d_graph.add_node(graph::node::PREPASS, prepass_node);
-            draw_3d_graph.add_node(graph::node::LIGHT_PASS, light_pass_node);
-            draw_3d_graph.add_node(graph::node::POST_PROCESS_PASS, post_process_pass_node);
-            draw_3d_graph.add_node(graph::node::OVERLAY_PASS, overlay_pass_node);
+            let mut sub_graph = RenderGraph::default();
+            sub_graph.set_input(vec![SlotInfo::new(
+                core_3d::graph::input::VIEW_ENTITY,
+                SlotType::Entity,
+            )]);
 
-            draw_3d_graph
+            sub_graph.add_node(graph::node::PREPASS, prepass_node);
+            sub_graph.add_node(graph::node::LIGHT, light_node);
+            sub_graph.add_node(graph::node::POST_PROCESS, post_process_node);
+            sub_graph.add_node(graph::node::OVERLAY, overlay_node);
+            sub_graph.add_node(core_3d::graph::node::BLOOM, bloom_node);
+            sub_graph.add_node(core_3d::graph::node::TONEMAPPING, tonemapping_node);
+            sub_graph.add_node(core_3d::graph::node::UPSCALING, upscaling_node);
+
+            sub_graph
                 .add_slot_edge(
-                    draw_3d_graph.input_node().unwrap().id,
-                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
                     graph::node::PREPASS,
                     PrepassNode::IN_VIEW,
                 )
                 .unwrap();
-            draw_3d_graph
+            sub_graph
                 .add_slot_edge(
-                    draw_3d_graph.input_node().unwrap().id,
-                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
-                    graph::node::LIGHT_PASS,
-                    LightPassNode::IN_VIEW,
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
+                    graph::node::LIGHT,
+                    LightNode::IN_VIEW,
                 )
                 .unwrap();
-            draw_3d_graph
+            sub_graph
                 .add_slot_edge(
-                    draw_3d_graph.input_node().unwrap().id,
-                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
-                    graph::node::POST_PROCESS_PASS,
-                    LightPassNode::IN_VIEW,
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
+                    graph::node::POST_PROCESS,
+                    PostProcessNode::IN_VIEW,
                 )
                 .unwrap();
-            draw_3d_graph
+            sub_graph
                 .add_slot_edge(
-                    draw_3d_graph.input_node().unwrap().id,
-                    bevy::core_pipeline::core_3d::graph::input::VIEW_ENTITY,
-                    graph::node::OVERLAY_PASS,
-                    MainPass3dNode::IN_VIEW,
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
+                    graph::node::OVERLAY,
+                    OverlayNode::IN_VIEW,
+                )
+                .unwrap();
+            sub_graph
+                .add_slot_edge(
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
+                    core_3d::graph::node::BLOOM,
+                    BloomNode::IN_VIEW,
+                )
+                .unwrap();
+            sub_graph
+                .add_slot_edge(
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
+                    core_3d::graph::node::TONEMAPPING,
+                    TonemappingNode::IN_VIEW,
+                )
+                .unwrap();
+            sub_graph
+                .add_slot_edge(
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
+                    core_3d::graph::node::UPSCALING,
+                    UpscalingNode::IN_VIEW,
                 )
                 .unwrap();
 
-            draw_3d_graph
-                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT_PASS)
+            // PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
+            sub_graph
+                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT)
                 .unwrap();
-            draw_3d_graph
-                .add_node_edge(graph::node::LIGHT_PASS, graph::node::POST_PROCESS_PASS)
+            sub_graph
+                .add_node_edge(graph::node::LIGHT, graph::node::POST_PROCESS)
                 .unwrap();
-            draw_3d_graph
-                .add_node_edge(graph::node::POST_PROCESS_PASS, graph::node::OVERLAY_PASS)
+            sub_graph
+                .add_node_edge(graph::node::POST_PROCESS, graph::node::OVERLAY)
                 .unwrap();
-
-            // MAIN_PASS -> HIKARI -> BLOOM
-            draw_3d_graph
+            sub_graph
                 .add_node_edge(
-                    graph::node::OVERLAY_PASS,
-                    bevy::core_pipeline::bloom::draw_3d_graph::node::BLOOM,
+                    graph::node::OVERLAY,
+                    bevy::core_pipeline::core_3d::graph::node::BLOOM,
                 )
                 .unwrap();
-            draw_3d_graph
+            sub_graph
                 .add_node_edge(
-                    bevy::core_pipeline::core_3d::graph::node::MAIN_PASS,
-                    graph::node::OVERLAY_PASS,
+                    bevy::core_pipeline::core_3d::graph::node::BLOOM,
+                    bevy::core_pipeline::core_3d::graph::node::TONEMAPPING,
+                )
+                .unwrap();
+            sub_graph
+                .add_node_edge(
+                    bevy::core_pipeline::core_3d::graph::node::TONEMAPPING,
+                    bevy::core_pipeline::core_3d::graph::node::UPSCALING,
                 )
                 .unwrap();
 
-            if self.remove_main_pass {
-                draw_3d_graph
-                    .remove_node(bevy::core_pipeline::core_3d::graph::node::MAIN_PASS)
-                    .unwrap();
-            }
+            graph.add_sub_graph(graph::NAME, sub_graph);
         }
     }
 }

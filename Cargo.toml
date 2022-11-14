@@ -40,3 +40,6 @@ bevy = { version = "0.9", default-features = true, features = [
 smooth-bevy-cameras = "0.5"
 bevy_mod_raycast = "0.7"
 bevy-inspector-egui = "0.14"
+
+[patch.crates-io]
+bevy = { git = "https://github.com/cryscan/bevy.git", branch = "core-pipeline-nodes-public" }

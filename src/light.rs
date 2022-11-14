@@ -41,7 +41,7 @@ impl Plugin for LightPlugin {
                     RenderStage::Prepare,
                     prepare_light_pipeline.after(MeshMaterialSystems::PrepareAssets),
                 )
-                .add_system_to_stage(RenderStage::Prepare, prepare_light_pass_textures)
+                .add_system_to_stage(RenderStage::Prepare, prepare_light_textures)
                 .add_system_to_stage(RenderStage::Queue, queue_light_bind_groups)
                 .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
         }
@@ -285,7 +285,7 @@ fn prepare_light_pipeline(
 }
 
 #[derive(Component)]
-pub struct LightPassTextures {
+pub struct LightTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
     pub albedo: TextureView,
@@ -294,7 +294,7 @@ pub struct LightPassTextures {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn prepare_light_pass_textures(
+fn prepare_light_textures(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
@@ -361,7 +361,7 @@ fn prepare_light_pass_textures(
             let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT; 3];
             let render = create_texture_array![RENDER_TEXTURE_FORMAT; 3];
 
-            commands.entity(entity).insert(LightPassTextures {
+            commands.entity(entity).insert(LightTextures {
                 head: counter.0 % 2,
                 albedo: create_texture(ALBEDO_TEXTURE_FORMAT),
                 variance,
@@ -434,7 +434,7 @@ fn queue_light_bind_groups(
     images: Res<RenderAssets<Image>>,
     fallback: Res<FallbackImage>,
     reservoir_cache: Res<ReservoirCache>,
-    query: Query<(Entity, &PrepassTextures, &LightPassTextures), With<ExtractedCamera>>,
+    query: Query<(Entity, &PrepassTextures, &LightTextures), With<ExtractedCamera>>,
 ) {
     for (entity, prepass, light) in &query {
         let reservoirs = reservoir_cache.get(&entity).unwrap();
@@ -533,7 +533,7 @@ fn queue_light_bind_groups(
 }
 
 #[allow(clippy::type_complexity)]
-pub struct LightPassNode {
+pub struct LightNode {
     query: QueryState<(
         &'static ExtractedCamera,
         &'static DynamicUniformIndex<FrameUniform>,
@@ -545,7 +545,7 @@ pub struct LightPassNode {
     )>,
 }
 
-impl LightPassNode {
+impl LightNode {
     pub const IN_VIEW: &'static str = "view";
 
     pub fn new(world: &mut World) -> Self {
@@ -555,7 +555,7 @@ impl LightPassNode {
     }
 }
 
-impl Node for LightPassNode {
+impl Node for LightNode {
     fn input(&self) -> Vec<SlotInfo> {
         vec![SlotInfo::new(Self::IN_VIEW, SlotType::Entity)]
     }
