@@ -15,6 +15,7 @@ fn empty_reservoir() -> Reservoir {
     var r: Reservoir;
     r.s = empty_sample();
     r.count = 0.0;
+    r.lifetime = 0.0;
     r.w = 0.0;
     r.w_sum = 0.0;
     r.w2_sum = 0.0;
@@ -42,14 +43,15 @@ fn unpack_reservoir(packed: PackedReservoir) -> Reservoir {
     t1 = unpack2x16unorm(packed.random.y);
     r.s.random = vec4<f32>(t0, t1);
 
+    var t2 = unpack4x8snorm(packed.visible_normal);
     r.s.visible_position = packed.visible_position;
-    r.s.sample_position = packed.sample_position;
+    r.s.visible_normal = normalize(t2.xyz);
+    r.lifetime = 127.0 * (1.0 + t2.w);
 
-    r.s.visible_normal = normalize(unpack4x8snorm(packed.visible_normal).xyz);
-    r.s.sample_normal = normalize(unpack4x8snorm(packed.sample_normal).xyz);
-
-    r.s.visible_instance = ((packed.visible_normal >> 24u) & 0xFFu) << 8u;
-    r.s.visible_instance |= (packed.sample_normal >> 24u) & 0xFFu;
+    t2 = unpack4x8snorm(packed.sample_normal);
+    r.s.sample_position = vec4<f32>(packed.sample_position.xyz, t2.w);
+    r.s.sample_normal = normalize(t2.xyz);
+    r.s.visible_instance = u32(packed.sample_position.w);
 
     return r;
 }
@@ -73,19 +75,17 @@ fn pack_reservoir(r: Reservoir) -> PackedReservoir {
     packed.random = vec2<u32>(t0, t1);
 
     packed.visible_position = r.s.visible_position;
-    packed.sample_position = r.s.sample_position;
+    packed.sample_position = vec4<f32>(r.s.sample_position.xyz, f32(r.s.visible_instance));
 
-    packed.visible_normal = pack4x8snorm(vec4<f32>(r.s.visible_normal, 0.0));
-    packed.sample_normal = pack4x8snorm(vec4<f32>(r.s.sample_normal, 0.0));
-
-    packed.visible_normal |= ((r.s.visible_instance >> 8u) & 0xFFu) << 24u;
-    packed.sample_normal |= (r.s.visible_instance & 0xFFu) << 24u;
+    packed.visible_normal = pack4x8snorm(vec4<f32>(r.s.visible_normal, r.lifetime / 127.0 - 1.0));
+    packed.sample_normal = pack4x8snorm(vec4<f32>(r.s.sample_normal, r.s.sample_position.w));
 
     return packed;
 }
 
 fn set_reservoir(r: ptr<function, Reservoir>, s: Sample, w_new: f32) {
     (*r).count = 1.0;
+    (*r).lifetime = 0.0;
     (*r).w_sum = w_new;
     (*r).w2_sum = w_new * w_new;
     (*r).s = s;
@@ -99,9 +99,10 @@ fn update_reservoir(
     (*r).w_sum += w_new;
     (*r).w2_sum += w_new * w_new;
     (*r).count = (*r).count + 1.0;
+    (*r).lifetime += 1.0;
 
     let rand = fract(dot(s.random, vec4<f32>(1.0)));
-    if (rand < w_new / (*r).w_sum) {
+    if rand < w_new / (*r).w_sum {
         // trsh suggests that instead of substituting the sample in the reservoir,
         // merging the two with similar luminance works better.
         // (*r).s = s;
@@ -111,12 +112,13 @@ fn update_reservoir(
         let ratio = l1 / max(l2, 0.0001);
         var radiance = s.radiance;
 
-        if (ratio > 0.8 && ratio < 1.25) {
+        if ratio > 0.8 && ratio < 1.25 {
             radiance = mix((*r).s.radiance, s.radiance, 0.5);
         }
 
         (*r).s = s;
         (*r).s.radiance = radiance;
+        (*r).lifetime = 0.0;
     }
 }
 
@@ -128,7 +130,7 @@ fn merge_reservoir(r: ptr<function, Reservoir>, other: Reservoir, p: f32) {
 
 fn load_previous_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> Reservoir {
     var r = empty_reservoir();
-    if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
+    if all(abs(uv - 0.5) < vec2<f32>(0.5)) {
         let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
         let index = coords.x + reservoir_size.x * coords.y;
         let packed = previous_reservoir_buffer.data[index];
@@ -148,7 +150,7 @@ fn store_reservoir(index: i32, r: Reservoir) {
 
 fn load_previous_spatial_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> Reservoir {
     var r = empty_reservoir();
-    if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
+    if all(abs(uv - 0.5) < vec2<f32>(0.5)) {
         let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
         let index = coords.x + reservoir_size.x * coords.y;
         let packed = previous_spatial_reservoir_buffer.data[index];
@@ -158,7 +160,7 @@ fn load_previous_spatial_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> 
 }
 
 fn store_previous_spatial_reservoir_uv(uv: vec2<f32>, reservoir_size: vec2<i32>, r: Reservoir) {
-    if (all(abs(uv - 0.5) < vec2<f32>(0.5))) {
+    if all(abs(uv - 0.5) < vec2<f32>(0.5)) {
         let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
         let index = coords.x + reservoir_size.x * coords.y;
         previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);

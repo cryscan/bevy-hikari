@@ -28,6 +28,7 @@ struct Sample {
 struct Reservoir {
     s: Sample,
     count: f32,
+    lifetime: f32,
     w: f32,
     w_sum: f32,
     w2_sum: f32,
