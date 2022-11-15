@@ -10,10 +10,10 @@ struct Frame {
     suppress_temporal_reuse: u32,
     max_temporal_reuse_count: u32,
     max_spatial_reuse_count: u32,
+    max_reservoir_lifetime: f32,
     solar_angle: f32,
     max_indirect_luminance: f32,
     upscale_ratio: f32,
-    max_reservoir_lifetime: f32,
 };
 
 struct PreviousView {

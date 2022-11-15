@@ -113,10 +113,10 @@ pub struct FrameUniform {
     pub suppress_temporal_reuse: u32,
     pub max_temporal_reuse_count: u32,
     pub max_spatial_reuse_count: u32,
+    pub max_reservoir_lifetime: f32,
     pub solar_angle: f32,
     pub max_indirect_luminance: f32,
     pub upscale_ratio: f32,
-    pub max_reservoir_lifetime: f32,
 }
 
 impl ExtractComponent for FrameUniform {
@@ -129,12 +129,12 @@ impl ExtractComponent for FrameUniform {
             emissive_validate_interval,
             max_temporal_reuse_count,
             max_spatial_reuse_count,
+            max_reservoir_lifetime,
             solar_angle,
             indirect_bounces,
             max_indirect_luminance,
             clear_color,
             temporal_reuse,
-            max_reservoir_lifetime,
             ..
         } = settings.clone();
 
@@ -163,10 +163,10 @@ impl ExtractComponent for FrameUniform {
             suppress_temporal_reuse,
             max_temporal_reuse_count,
             max_spatial_reuse_count,
+            max_reservoir_lifetime,
             solar_angle,
             max_indirect_luminance,
             upscale_ratio,
-            max_reservoir_lifetime,
         }
     }
 }

@@ -50,6 +50,8 @@ pub struct HikariSettings {
     pub max_temporal_reuse_count: usize,
     /// Spatial reservoir sample count is capped by this value.
     pub max_spatial_reuse_count: usize,
+    /// Max lifetime of a reservoir sample before being replaced with new one.
+    pub max_reservoir_lifetime: f32,
     /// Half angle of the solar cone apex in radians.
     pub solar_angle: f32,
     /// Count of indirect bounces.
@@ -68,8 +70,6 @@ pub struct HikariSettings {
     pub taa: Taa,
     /// Which upscaling implementation to use.
     pub upscale: Upscale,
-    /// Max age of a reservoir before its replaced with new one
-    pub max_reservoir_lifetime: f32,
 }
 ```
 
