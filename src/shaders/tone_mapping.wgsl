@@ -26,7 +26,7 @@ fn tone_mapping(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     color += textureLoad(emissive_render_texture, coords, 0);
     color += textureLoad(indirect_render_texture, coords, 0);
 
-    color = vec4<f32>(reinhard_luminance(color.rgb), color.a);
+    color = vec4<f32>(reinhard_luminance(max(color.rgb, vec3<f32>(0.0039))), color.a);
     color = select(frame.clear_color, color, color.a > 0.0);
     textureStore(output_texture, coords, color);
 }
