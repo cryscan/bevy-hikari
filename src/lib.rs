@@ -395,6 +395,8 @@ pub struct HikariSettings {
     pub taa: Taa,
     /// Which upscaling implementation to use.
     pub upscale: Upscale,
+    /// Max age of a reservoir before its replaced with new one
+    pub max_reservoir_lifetime: f32,
 }
 
 impl Default for HikariSettings {
@@ -413,6 +415,7 @@ impl Default for HikariSettings {
             denoise: true,
             taa: Taa::default(),
             upscale: Upscale::default(),
+            max_reservoir_lifetime: 100.0,
         }
     }
 }

@@ -68,6 +68,8 @@ pub struct HikariSettings {
     pub taa: Taa,
     /// Which upscaling implementation to use.
     pub upscale: Upscale,
+    /// Max age of a reservoir before its replaced with new one
+    pub max_reservoir_lifetime: f32,
 }
 ```
 

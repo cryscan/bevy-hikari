@@ -13,6 +13,7 @@ struct Frame {
     solar_angle: f32,
     max_indirect_luminance: f32,
     upscale_ratio: f32,
+    max_reservoir_lifetime: f32,
 };
 
 struct PreviousView {

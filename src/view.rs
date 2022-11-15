@@ -116,6 +116,7 @@ pub struct FrameUniform {
     pub solar_angle: f32,
     pub max_indirect_luminance: f32,
     pub upscale_ratio: f32,
+    pub max_reservoir_lifetime: f32,
 }
 
 impl ExtractComponent for FrameUniform {
@@ -133,6 +134,7 @@ impl ExtractComponent for FrameUniform {
             max_indirect_luminance,
             clear_color,
             temporal_reuse,
+            max_reservoir_lifetime,
             ..
         } = settings.clone();
 
@@ -164,6 +166,7 @@ impl ExtractComponent for FrameUniform {
             solar_angle,
             max_indirect_luminance,
             upscale_ratio,
+            max_reservoir_lifetime,
         }
     }
 }

@@ -668,7 +668,7 @@ fn check_previous_reservoir(
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
 
-    if depth_miss || pos_miss || instance_miss || normal_miss {
+    if (*r).lifetime > frame.max_reservoir_lifetime || depth_miss || pos_miss || instance_miss || normal_miss {
         (*r) = empty_reservoir();
         return false;
     } else {
@@ -805,6 +805,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     if !check_previous_reservoir(&r, s) {
         store_previous_spatial_reservoir_uv(previous_uv, size, r);
     }
+
+    r.lifetime += 1.0;
 
 #ifdef INCLUDE_EMISSIVE
     let validate_interval = frame.emissive_validate_interval;
@@ -1150,6 +1152,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         store_previous_spatial_reservoir_uv(previous_uv, reservoir_size, r);
     }
 
+    r.lifetime += 1.0;
+
     let w_new = select(luminance(s.radiance.rgb) / pdf, 0.0, pdf < 0.0001);
     temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
@@ -1215,6 +1219,10 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var q = r;
     let s = q.s;
     r = load_previous_spatial_reservoir(previous_uv, reservoir_size);
+
+    if r.lifetime > frame.max_reservoir_lifetime {
+        r = empty_reservoir();
+    }
 
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
     var out_radiance = shading(
@@ -1316,6 +1324,8 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     );
     let total_lum = r.count * luminance(out_radiance);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
+
+    r.lifetime += 1.0;
 
     store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
 

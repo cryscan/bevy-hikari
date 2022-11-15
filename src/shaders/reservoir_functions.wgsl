@@ -99,7 +99,6 @@ fn update_reservoir(
     (*r).w_sum += w_new;
     (*r).w2_sum += w_new * w_new;
     (*r).count = (*r).count + 1.0;
-    (*r).lifetime += 1.0;
 
     let rand = fract(dot(s.random, vec4<f32>(1.0)));
     if rand < w_new / (*r).w_sum {
@@ -118,7 +117,6 @@ fn update_reservoir(
 
         (*r).s = s;
         (*r).s.radiance = radiance;
-        (*r).lifetime = 0.0;
     }
 }
 
