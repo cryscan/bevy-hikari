@@ -1,9 +1,19 @@
-use bevy::{core_pipeline::bloom::BloomSettings, prelude::*, render::camera::CameraRenderGraph};
-use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
+use bevy::{
+    core_pipeline::bloom::BloomSettings,
+    input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
+    prelude::*,
+    render::camera::CameraRenderGraph,
+};
 use bevy_hikari::prelude::*;
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_mod_raycast::{
     DefaultRaycastingPlugin, Intersection, RaycastMesh, RaycastMethod, RaycastSource, RaycastSystem,
+};
+use smooth_bevy_cameras::{
+    controllers::orbit::{
+        ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
+    },
+    LookTransformPlugin,
 };
 use std::f32::consts::PI;
 
@@ -18,13 +28,12 @@ fn main() {
             ..Default::default()
         }))
         .add_plugin(WorldInspectorPlugin::new())
-        .add_plugin(NoCameraPlayerPlugin)
-        // .add_plugin(LookTransformPlugin)
-        // .add_plugin(OrbitCameraPlugin::new(false))
+        .add_plugin(LookTransformPlugin)
+        .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
-        // .add_system(camera_input_map)
+        .add_system(camera_input_map)
         .add_system_to_stage(
             CoreStage::First,
             control_directional_light.before(RaycastSystem::BuildRays::<RaycastSet>),
@@ -102,80 +111,80 @@ fn setup(
     });
 
     // Camera
-    commands.spawn((
-        Camera3dBundle {
-            camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
-            camera: Camera {
-                hdr: true,
+    commands
+        .spawn((
+            Camera3dBundle {
+                camera_render_graph: CameraRenderGraph::new(bevy_hikari::graph::NAME),
+                camera: Camera {
+                    hdr: true,
+                    ..Default::default()
+                },
+                transform: Transform::from_xyz(-20.0, 10.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
                 ..Default::default()
             },
-            transform: Transform::from_xyz(-20.0, 10.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..Default::default()
-        },
-        BloomSettings::default(),
-        HikariSettings::default(),
-        // OrbitCameraBundle::new(
-        //     OrbitCameraController::default(),
-        //     Vec3::new(-20.0, 10.0, 20.0),
-        //     Vec3::new(0., 0., 0.),
-        // ),
-        FlyCam,
-        RaycastSource::<RaycastSet>::default(),
-    ));
+            BloomSettings::default(),
+            HikariSettings::default(),
+            RaycastSource::<RaycastSet>::default(),
+        ))
+        .insert(OrbitCameraBundle::new(
+            OrbitCameraController::default(),
+            Vec3::new(-20.0, 10.0, 20.0),
+            Vec3::ZERO,
+        ));
 }
 
-// pub fn camera_input_map(
-//     mut events: EventWriter<ControlEvent>,
-//     mut mouse_wheel_reader: EventReader<MouseWheel>,
-//     mut mouse_motion_events: EventReader<MouseMotion>,
-//     mouse_buttons: Res<Input<MouseButton>>,
-//     controllers: Query<&OrbitCameraController>,
-// ) {
-//     // Can only control one camera at a time.
-//     let controller = if let Some(controller) = controllers.iter().next() {
-//         controller
-//     } else {
-//         return;
-//     };
-//     let OrbitCameraController {
-//         enabled,
-//         mouse_rotate_sensitivity,
-//         mouse_translate_sensitivity,
-//         mouse_wheel_zoom_sensitivity,
-//         pixels_per_line,
-//         ..
-//     } = *controller;
+pub fn camera_input_map(
+    mut events: EventWriter<ControlEvent>,
+    mut mouse_wheel_reader: EventReader<MouseWheel>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mouse_buttons: Res<Input<MouseButton>>,
+    controllers: Query<&OrbitCameraController>,
+) {
+    // Can only control one camera at a time.
+    let controller = if let Some(controller) = controllers.iter().next() {
+        controller
+    } else {
+        return;
+    };
+    let OrbitCameraController {
+        enabled,
+        mouse_rotate_sensitivity,
+        mouse_translate_sensitivity,
+        mouse_wheel_zoom_sensitivity,
+        pixels_per_line,
+        ..
+    } = *controller;
 
-//     if !enabled {
-//         return;
-//     }
+    if !enabled {
+        return;
+    }
 
-//     let mut cursor_delta = Vec2::ZERO;
-//     for event in mouse_motion_events.iter() {
-//         cursor_delta += event.delta;
-//     }
+    let mut cursor_delta = Vec2::ZERO;
+    for event in mouse_motion_events.iter() {
+        cursor_delta += event.delta;
+    }
 
-//     if mouse_buttons.pressed(MouseButton::Left) {
-//         events.send(ControlEvent::Orbit(mouse_rotate_sensitivity * cursor_delta));
-//     }
+    if mouse_buttons.pressed(MouseButton::Left) {
+        events.send(ControlEvent::Orbit(mouse_rotate_sensitivity * cursor_delta));
+    }
 
-//     if mouse_buttons.pressed(MouseButton::Right) {
-//         events.send(ControlEvent::TranslateTarget(
-//             mouse_translate_sensitivity * cursor_delta,
-//         ));
-//     }
+    if mouse_buttons.pressed(MouseButton::Right) {
+        events.send(ControlEvent::TranslateTarget(
+            mouse_translate_sensitivity * cursor_delta,
+        ));
+    }
 
-//     let mut scalar = 1.0;
-//     for event in mouse_wheel_reader.iter() {
-//         // scale the event magnitude per pixel or per line
-//         let scroll_amount = match event.unit {
-//             MouseScrollUnit::Line => event.y,
-//             MouseScrollUnit::Pixel => event.y / pixels_per_line,
-//         };
-//         scalar *= 1.0 - scroll_amount * mouse_wheel_zoom_sensitivity;
-//     }
-//     events.send(ControlEvent::Zoom(scalar));
-// }
+    let mut scalar = 1.0;
+    for event in mouse_wheel_reader.iter() {
+        // scale the event magnitude per pixel or per line
+        let scroll_amount = match event.unit {
+            MouseScrollUnit::Line => event.y,
+            MouseScrollUnit::Pixel => event.y / pixels_per_line,
+        };
+        scalar *= 1.0 - scroll_amount * mouse_wheel_zoom_sensitivity;
+    }
+    events.send(ControlEvent::Zoom(scalar));
+}
 
 pub fn control_directional_light(
     time: Res<Time>,
