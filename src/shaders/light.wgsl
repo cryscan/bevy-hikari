@@ -1237,15 +1237,13 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
 
-    let rot = mat2x2<f32>(
-        vec2<f32>(0.707106781, 0.707106781),
-        vec2<f32>(-0.707106781, 0.707106781)
-    );
-    var offset = sign(s.random.zw - 0.5);
-
     for (var i = 1u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
-        let offset_dist = mix(1.414213562, SPATIAL_REUSE_RANGE, f32(i) / f32(SPATIAL_REUSE_COUNT));
-        offset = offset_dist * normalize(offset);
+        // Fibonacci spiral: http://extremelearning.com.au/how-to-evenly-distribute-points-on-a-sphere-more-effectively-than-the-canonical-fibonacci-lattice/
+        let polar_offset = vec2<f32>(
+            TAU * fract(f32(i) * GOLDEN_RATIO),
+            sqrt(f32(i) / f32(SPATIAL_REUSE_COUNT)) * SPATIAL_REUSE_RANGE
+        );
+        let offset = polar_offset.y * vec2<f32>(cos(polar_offset.x), sin(polar_offset.x));
 
         let sample_coords = coords + vec2<i32>(offset);
         if any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size) {
@@ -1270,8 +1268,8 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
 
         // Perform screen-space ray-marching the depth to reject samples
-        let tap_interval = max(1.0, offset_dist / f32(SPATIAL_REUSE_TAPS + 1u));
-        let tap_count = u32(offset_dist / tap_interval);
+        let tap_interval = max(1.0, polar_offset.y / f32(SPATIAL_REUSE_TAPS + 1u));
+        let tap_count = u32(polar_offset.y / tap_interval);
         var occluded = false;
         for (var j = 1u; j <= tap_count; j += 1u) {
             let tap_dist = f32(j) * tap_interval;
@@ -1302,9 +1300,6 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             q.s.radiance
         );
         merge_reservoir(&r, q, luminance(out_radiance) / jacobian);
-
-        // offset = mix(1.25, 1.2, q.count / f32(frame.max_temporal_reuse_count)) * rot * offset;
-        offset = rot * offset;
     }
 
     // Clamp...
