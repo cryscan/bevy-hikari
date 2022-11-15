@@ -37,10 +37,11 @@ bevy = { version = "0.9", default-features = true, features = [
     "png",
     "x11",
 ] }
-bevy_flycam = "0.9"
-# smooth-bevy-cameras = "0.5"
+# bevy_flycam = "0.9"
+smooth-bevy-cameras = "0.6"
 bevy_mod_raycast = "0.7"
 bevy-inspector-egui = "0.14"
 
 [patch.crates-io]
 bevy = { git = "https://github.com/cryscan/bevy.git", branch = "core-pipeline-nodes-public" }
+smooth-bevy-cameras = { git = "https://github.com/bonsairobo/smooth-bevy-cameras", rev = "1388352469519b1451cd85482c46c8a4252440e7" }
