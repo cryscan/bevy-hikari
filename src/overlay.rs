@@ -1,6 +1,6 @@
 use crate::{
-    post_process::PostProcessTextures, prepass::PrepassBindGroup, HikariSettings, Taa, Upscale,
-    OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
+    light::LightTextures, post_process::PostProcessTextures, prepass::PrepassBindGroup,
+    HikariSettings, Taa, Upscale, OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
@@ -75,6 +75,16 @@ impl FromWorld for OverlayPipeline {
                 },
                 BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
@@ -201,9 +211,17 @@ fn queue_overlay_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<OverlayPipeline>,
-    query: Query<(Entity, &PostProcessTextures, &HikariSettings), With<ExtractedCamera>>,
+    query: Query<
+        (
+            Entity,
+            &LightTextures,
+            &PostProcessTextures,
+            &HikariSettings,
+        ),
+        With<ExtractedCamera>,
+    >,
 ) {
-    for (entity, post_process, settings) in &query {
+    for (entity, light, post_process, settings) in &query {
         let current = post_process.head;
 
         let input_texture = match (settings.upscale, settings.taa) {
@@ -224,6 +242,10 @@ fn queue_overlay_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
+                    resource: BindingResource::TextureView(&light.albedo),
+                },
+                BindGroupEntry {
+                    binding: 2,
                     resource: BindingResource::Sampler(&post_process.linear_sampler),
                 },
             ],

@@ -1143,27 +1143,18 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     }
 #endif
 
-    surface = retreive_surface(instance_material.y, velocity_uv.zw);
-    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
-    let sample_radiance = shading(
-        view_direction,
-        s.visible_normal,
-        normalize(s.sample_position.xyz - s.visible_position.xyz),
-        surface,
-        s.radiance
-    );
-
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
-
     if !check_previous_reservoir(&r, s) {
         store_previous_spatial_reservoir_uv(previous_uv, reservoir_size, r);
     }
 
-    let w_new = select(luminance(sample_radiance) / pdf, 0.0, pdf < 0.0001);
+    let w_new = select(luminance(s.radiance.rgb) / pdf, 0.0, pdf < 0.0001);
     temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
+    surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
     var out_radiance = shading(
         view_direction,
         r.s.visible_normal,
@@ -1171,7 +1162,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         surface,
         r.s.radiance
     );
-    let total_lum = r.count * luminance(out_radiance);
+    let total_lum = r.count * luminance(r.s.radiance.rgb);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
 
