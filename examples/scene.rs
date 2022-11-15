@@ -212,7 +212,7 @@ pub fn control_directional_light(
         }
     }
 
-    if keys.pressed(KeyCode::LControl) {
+    if keys.pressed(KeyCode::LShift) {
         if let Ok(mut transform) = queries.p0().get_single_mut() {
             transform.look_at(*target, Vec3::Z);
         }
