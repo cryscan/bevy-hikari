@@ -152,8 +152,8 @@ impl ExtractComponent for FrameUniform {
         let clear_color = clear_color.into();
         let max_temporal_reuse_count = max_temporal_reuse_count as u32;
         let max_spatial_reuse_count = max_spatial_reuse_count as u32;
-        let enable_temporal_reuse = if temporal_reuse { 1 } else { 0 };
-        let enable_spatial_reuse = if spatial_reuse { 1 } else { 0 };
+        let enable_temporal_reuse = temporal_reuse.into();
+        let enable_spatial_reuse = spatial_reuse.into();
         let upscale_ratio = settings.upscale.ratio();
 
         Self {
