@@ -55,8 +55,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ))
         .insert(OrbitCameraBundle::new(
             OrbitCameraController::default(),
-            Vec3::new(-20.0, 10.0, 20.0),
-            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 4.0),
+            Vec3::new(0.0, 1.0, 0.0),
         ));
 }
 

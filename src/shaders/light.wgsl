@@ -657,6 +657,12 @@ fn env_brdf(
     return occlusion * (diffuse_ambient + specular_ambient);
 }
 
+// The lifetime of the reservoir is randomized per sample
+fn reservoir_lifetime(r: Reservoir) -> f32 {
+    let rand = fract(dot(r.s.random, vec4<f32>(1.0))) - 0.5;
+    return frame.max_reservoir_lifetime + rand * 60.0;
+}
+
 fn check_previous_reservoir(
     r: ptr<function, Reservoir>,
     s: Sample,
@@ -668,7 +674,7 @@ fn check_previous_reservoir(
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
 
-    if (*r).lifetime > frame.max_reservoir_lifetime || depth_miss || pos_miss || instance_miss || normal_miss {
+    if (*r).lifetime > reservoir_lifetime((*r)) || depth_miss || pos_miss || instance_miss || normal_miss {
         (*r) = empty_reservoir();
         return false;
     } else {
@@ -801,12 +807,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
-
     if !check_previous_reservoir(&r, s) {
         store_previous_spatial_reservoir_uv(previous_uv, size, r);
     }
-
-    r.lifetime += 1.0;
 
 #ifdef INCLUDE_EMISSIVE
     let validate_interval = frame.emissive_validate_interval;
@@ -943,6 +946,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
+
+    r.lifetime += 1.0;
 
     if frame.suppress_temporal_reuse == 0u {
         store_reservoir(coords.x + size.x * coords.y, r);
@@ -1152,8 +1157,6 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         store_previous_spatial_reservoir_uv(previous_uv, reservoir_size, r);
     }
 
-    r.lifetime += 1.0;
-
     let w_new = select(luminance(s.radiance.rgb) / pdf, 0.0, pdf < 0.0001);
     temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
@@ -1172,6 +1175,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
+
+    r.lifetime += 1.0;
 
     if frame.suppress_temporal_reuse == 0u {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
@@ -1218,10 +1223,9 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var q = r;
     let s = q.s;
-    r = load_previous_spatial_reservoir(previous_uv, reservoir_size);
 
-    if r.lifetime > frame.max_reservoir_lifetime {
-        r = empty_reservoir();
+    if r.lifetime <= reservoir_lifetime(r) {
+        r = load_previous_spatial_reservoir(previous_uv, reservoir_size);
     }
 
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
@@ -1240,7 +1244,7 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     for (var i = 1u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
         // Fibonacci spiral: http://extremelearning.com.au/how-to-evenly-distribute-points-on-a-sphere-more-effectively-than-the-canonical-fibonacci-lattice/
         let polar_offset = vec2<f32>(
-            TAU * fract(f32(i) * GOLDEN_RATIO),
+            TAU * fract(f32(i) * GOLDEN_RATIO + dot(s.random, vec4<f32>(1.0))),
             sqrt(f32(i) / f32(SPATIAL_REUSE_COUNT)) * SPATIAL_REUSE_RANGE
         );
         let offset = polar_offset.y * vec2<f32>(cos(polar_offset.x), sin(polar_offset.x));
