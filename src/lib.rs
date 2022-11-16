@@ -9,7 +9,9 @@ use crate::{
 };
 use bevy::{
     asset::{load_internal_asset, load_internal_binary_asset},
-    core_pipeline::{bloom::BloomNode, tonemapping::TonemappingNode, upscaling::UpscalingNode},
+    core_pipeline::{
+        bloom::BloomNode, fxaa::FxaaNode, tonemapping::TonemappingNode, upscaling::UpscalingNode,
+    },
     ecs::query::QueryItem,
     prelude::*,
     reflect::TypeUuid,
@@ -257,6 +259,7 @@ impl Plugin for HikariPlugin {
             let overlay_node = OverlayNode::new(&mut render_app.world);
             let bloom_node = BloomNode::new(&mut render_app.world);
             let tonemapping_node = TonemappingNode::new(&mut render_app.world);
+            let fxaa_node = FxaaNode::new(&mut render_app.world);
             let upscaling_node = UpscalingNode::new(&mut render_app.world);
 
             let mut graph = render_app.world.resource_mut::<RenderGraph>();
@@ -273,6 +276,7 @@ impl Plugin for HikariPlugin {
             sub_graph.add_node(graph::node::OVERLAY, overlay_node);
             sub_graph.add_node(core_3d::graph::node::BLOOM, bloom_node);
             sub_graph.add_node(core_3d::graph::node::TONEMAPPING, tonemapping_node);
+            sub_graph.add_node(core_3d::graph::node::FXAA, fxaa_node);
             sub_graph.add_node(core_3d::graph::node::UPSCALING, upscaling_node);
 
             sub_graph
@@ -327,6 +331,14 @@ impl Plugin for HikariPlugin {
                 .add_slot_edge(
                     sub_graph.input_node().unwrap().id,
                     core_3d::graph::input::VIEW_ENTITY,
+                    core_3d::graph::node::FXAA,
+                    FxaaNode::IN_VIEW,
+                )
+                .unwrap();
+            sub_graph
+                .add_slot_edge(
+                    sub_graph.input_node().unwrap().id,
+                    core_3d::graph::input::VIEW_ENTITY,
                     core_3d::graph::node::UPSCALING,
                     UpscalingNode::IN_VIEW,
                 )
@@ -357,6 +369,12 @@ impl Plugin for HikariPlugin {
             sub_graph
                 .add_node_edge(
                     bevy::core_pipeline::core_3d::graph::node::TONEMAPPING,
+                    bevy::core_pipeline::core_3d::graph::node::FXAA,
+                )
+                .unwrap();
+            sub_graph
+                .add_node_edge(
+                    bevy::core_pipeline::core_3d::graph::node::FXAA,
                     bevy::core_pipeline::core_3d::graph::node::UPSCALING,
                 )
                 .unwrap();
