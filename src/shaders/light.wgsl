@@ -659,8 +659,8 @@ fn env_brdf(
 
 // The lifetime of the reservoir is randomized per sample
 fn reservoir_lifetime(r: Reservoir) -> f32 {
-    let rand = fract(dot(r.s.random, vec4<f32>(1.0))) - 0.5;
-    return frame.max_reservoir_lifetime + rand * 60.0;
+    let rand = fract(dot(r.s.random, vec4<f32>(1.0)));
+    return select(frame.max_reservoir_lifetime * rand, F32_MAX, frame.max_reservoir_lifetime <= 1.0);
 }
 
 fn check_previous_reservoir(
