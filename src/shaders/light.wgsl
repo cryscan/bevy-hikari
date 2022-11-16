@@ -770,7 +770,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_spatial_reservoir(coords.x + size.x * coords.y, r);
         store_previous_spatial_reservoir(coords.x + size.x * coords.y, r);
 
-        #ifndef INCLUDE_EMISSIVE
+#ifdef INCLUDE_EMISSIVE
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
 #endif
         textureStore(variance_texture, coords, vec4<f32>(0.0));
@@ -793,10 +793,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     s.visible_normal = normal;
     s.visible_instance = instance_material.x;
 
+#ifdef INCLUDE_EMISSIVE
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
-    #ifndef INCLUDE_EMISSIVE
     textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
 #endif
 
@@ -933,6 +933,41 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
     }
 
+    let total_lum = r.count * luminance(r.s.radiance.rgb);
+    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
+
+    r.s.visible_position = s.visible_position;
+    r.s.visible_normal = s.visible_normal;
+
+    r.lifetime += 1.0;
+
+    var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
+    variance = select(variance / r.count, 0.0, r.count < 0.0001);
+    textureStore(variance_texture, coords, vec4<f32>(variance));
+
+    if frame.enable_temporal_reuse > 0u {
+        store_reservoir(coords.x + size.x * coords.y, r);
+    }
+
+#ifdef INCLUDE_EMISSIVE
+    if frame.enable_spatial_reuse == 0u {
+        var out_radiance = shading(
+            view_direction,
+            r.s.visible_normal,
+            normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+            surface,
+            r.s.radiance
+        );
+        out_radiance *= r.w;
+
+        var out_color = out_radiance;
+        out_color += compute_emissive_radiance(surface.emissive);
+        textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
+    }
+#else
+    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+
     var out_radiance = shading(
         view_direction,
         r.s.visible_normal,
@@ -940,29 +975,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         surface,
         r.s.radiance
     );
-
-    let total_lum = r.count * luminance(r.s.radiance.rgb);
-    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
     out_radiance *= r.w;
-
-    r.s.visible_position = s.visible_position;
-    r.s.visible_normal = s.visible_normal;
-
-    r.lifetime += 1.0;
-
-    if frame.suppress_temporal_reuse == 0u {
-        store_reservoir(coords.x + size.x * coords.y, r);
-    }
-
-    var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
-    variance = select(variance / r.count, 0.0, r.count < 0.0001);
-    textureStore(variance_texture, coords, vec4<f32>(variance));
-
-    var out_color = out_radiance;
-#ifdef INCLUDE_EMISSIVE
-    out_color += compute_emissive_radiance(surface.emissive);
-#endif
+    let out_color = out_radiance;
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
+#endif
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -1163,33 +1179,36 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let w_new = select(luminance(s.radiance.rgb) / pdf, 0.0, pdf < 0.0001);
     temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
-    surface = retreive_surface(instance_material.y, velocity_uv.zw);
-    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
-    var out_radiance = shading(
-        view_direction,
-        r.s.visible_normal,
-        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
-        surface,
-        r.s.radiance
-    );
     let total_lum = r.count * luminance(r.s.radiance.rgb);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
-    out_radiance *= r.w;
 
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
 
     r.lifetime += 1.0;
 
-    if frame.suppress_temporal_reuse == 0u {
-        store_reservoir(coords.x + reservoir_size.x * coords.y, r);
-    }
-
     var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
     variance = select(variance / r.count, 0.0, r.count < 0.0001);
     textureStore(variance_texture, coords, vec4<f32>(variance));
 
-    textureStore(render_texture, coords, vec4<f32>(out_radiance, 1.0));
+    if frame.enable_temporal_reuse > 0u {
+        store_reservoir(coords.x + reservoir_size.x * coords.y, r);
+    }
+
+    if frame.enable_spatial_reuse == 0u {
+        surface = retreive_surface(instance_material.y, velocity_uv.zw);
+        let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+        var out_radiance = shading(
+            view_direction,
+            r.s.visible_normal,
+            normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+            surface,
+            r.s.radiance
+        );
+        out_radiance *= r.w;
+
+        textureStore(render_texture, coords, vec4<f32>(out_radiance, 1.0));
+    }
 }
 
 @compute @workgroup_size(8, 8, 1)
