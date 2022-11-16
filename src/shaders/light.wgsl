@@ -659,8 +659,7 @@ fn env_brdf(
 
 // The lifetime of the reservoir is randomized per sample
 fn reservoir_lifetime(r: Reservoir) -> f32 {
-    let rand = fract(dot(r.s.random, vec4<f32>(1.0)));
-    return select(frame.max_reservoir_lifetime * rand, F32_MAX, frame.max_reservoir_lifetime <= 1.0);
+    return select(frame.max_reservoir_lifetime, F32_MAX, frame.max_reservoir_lifetime <= 1.0);
 }
 
 fn check_previous_reservoir(
@@ -807,8 +806,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
-    if !check_previous_reservoir(&r, s) {
-        store_previous_spatial_reservoir_uv(previous_uv, size, r);
+
+    if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
+        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
+        store_previous_spatial_reservoir(previous_coords.x + size.x * previous_coords.y, r);
     }
 
 #ifdef INCLUDE_EMISSIVE
@@ -1153,8 +1154,10 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     // ReSTIR: Temporal
     let previous_uv = uv - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, reservoir_size);
-    if !check_previous_reservoir(&r, s) {
-        store_previous_spatial_reservoir_uv(previous_uv, reservoir_size, r);
+
+    if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
+        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(reservoir_size));
+        store_previous_spatial_reservoir(previous_coords.x + reservoir_size.x * previous_coords.y, r);
     }
 
     let w_new = select(luminance(s.radiance.rgb) / pdf, 0.0, pdf < 0.0001);
