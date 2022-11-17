@@ -664,10 +664,9 @@ impl Node for LightNode {
 
                 let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
-            }
 
-            if settings.spatial_reuse {
                 if let Some(pipeline) = spatial_pipeline
+                    .filter(|_| settings.spatial_reuse)
                     .and_then(|pipeline| pipeline_cache.get_compute_pipeline(*pipeline))
                 {
                     pass.set_pipeline(pipeline);

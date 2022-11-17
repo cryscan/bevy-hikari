@@ -998,7 +998,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var s = empty_sample();
     var r = empty_reservoir();
 
-    if depth < F32_EPSILON {
+    if frame.indirect_bounces == 0u || depth < F32_EPSILON {
         store_reservoir(coords.x + reservoir_size.x * coords.y, r);
         store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
         store_previous_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
