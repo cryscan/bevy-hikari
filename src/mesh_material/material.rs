@@ -1,8 +1,6 @@
-use super::{
-    GpuStandardMaterial, GpuStandardMaterialBuffer, IntoStandardMaterial, MeshMaterialSystems,
-};
+use super::{GpuStandardMaterial, GpuStandardMaterialBuffer, MeshMaterialSystems};
 use bevy::{
-    asset::HandleId,
+    asset::{Asset, HandleId},
     prelude::*,
     render::{
         render_resource::*,
@@ -33,8 +31,12 @@ impl Plugin for MaterialPlugin {
 }
 
 #[derive(Default)]
-pub struct GenericMaterialPlugin<M: IntoStandardMaterial>(PhantomData<M>);
-impl<M: IntoStandardMaterial> Plugin for GenericMaterialPlugin<M> {
+pub struct GenericMaterialPlugin<M: Into<StandardMaterial>>(PhantomData<M>);
+
+impl<M> Plugin for GenericMaterialPlugin<M>
+where
+    M: Into<StandardMaterial> + Clone + Asset,
+{
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.add_system_to_stage(RenderStage::Extract, extract_material_assets::<M>);
@@ -48,6 +50,24 @@ pub struct MaterialRenderAssets {
     pub textures: BTreeSet<Handle<Image>>,
 }
 
+impl MaterialRenderAssets {
+    pub fn add_standard_material_textures(&mut self, material: &StandardMaterial) {
+        macro_rules! add_texture {
+            ($texture_name:ident) => {
+                if let Some(texture) = &material.$texture_name {
+                    self.textures.insert(texture.clone_weak());
+                }
+            };
+        }
+
+        add_texture!(base_color_texture);
+        add_texture!(emissive_texture);
+        add_texture!(metallic_roughness_texture);
+        add_texture!(normal_map_texture);
+        add_texture!(occlusion_texture);
+    }
+}
+
 #[derive(Default, Resource, Deref, DerefMut)]
 pub struct GpuStandardMaterials(HashMap<HandleUntyped, (GpuStandardMaterial, u32)>);
 
@@ -57,10 +77,9 @@ pub struct ExtractedMaterials {
     removed: Vec<HandleUntyped>,
 }
 
-fn extract_material_assets<M: IntoStandardMaterial>(
+fn extract_material_assets<M: Into<StandardMaterial> + Clone + Asset>(
     mut events: Extract<EventReader<AssetEvent<M>>>,
     assets: Extract<Res<Assets<M>>>,
-    mut render_assets: ResMut<MaterialRenderAssets>,
     mut extracted_assets: ResMut<ExtractedMaterials>,
 ) {
     let mut changed_assets = HashSet::default();
@@ -81,7 +100,7 @@ fn extract_material_assets<M: IntoStandardMaterial>(
     for handle in changed_assets.drain() {
         if let Some(material) = assets.get(handle) {
             let handle = handle.clone_weak_untyped();
-            let material = material.clone().into_standard_material(&mut render_assets);
+            let material = material.clone().into();
             extracted.push((handle, material));
         }
     }
@@ -107,6 +126,7 @@ fn prepare_material_assets(
         assets.remove(&handle.into());
     }
     for (handle, material) in extracted_assets.extracted.drain(..) {
+        render_assets.add_standard_material_textures(&material);
         assets.insert(handle.into(), material);
     }
 

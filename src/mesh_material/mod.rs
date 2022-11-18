@@ -325,33 +325,6 @@ pub struct GpuMeshIndex {
     pub node_len: u32,
 }
 
-pub trait IntoStandardMaterial: Material {
-    /// Coverts a [`Material`] into a [`StandardMaterial`].
-    /// Any new textures should be registered into [`MaterialRenderAssets`].
-    fn into_standard_material(self, render_assets: &mut MaterialRenderAssets) -> StandardMaterial;
-}
-
-impl IntoStandardMaterial for StandardMaterial {
-    fn into_standard_material(self, render_assets: &mut MaterialRenderAssets) -> Self {
-        if let Some(texture) = &self.base_color_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.emissive_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.metallic_roughness_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.normal_map_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.occlusion_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        self
-    }
-}
-
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum MeshMaterialSystems {
     PrepareAssets,
