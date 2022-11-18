@@ -9,10 +9,7 @@ use bevy::{
     },
     utils::{HashMap, HashSet},
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    marker::PhantomData,
-};
+use std::{collections::BTreeMap, marker::PhantomData};
 
 pub struct MaterialPlugin;
 impl Plugin for MaterialPlugin {
@@ -21,7 +18,14 @@ impl Plugin for MaterialPlugin {
             render_app
                 .init_resource::<ExtractedMaterials>()
                 .init_resource::<MaterialRenderAssets>()
+                .init_resource::<MaterialTextures>()
                 .init_resource::<GpuStandardMaterials>()
+                .add_system_to_stage(
+                    RenderStage::Prepare,
+                    prepare_material_textures
+                        .label(MeshMaterialSystems::PrepareTextures)
+                        .before(MeshMaterialSystems::PrepareAssets),
+                )
                 .add_system_to_stage(
                     RenderStage::Prepare,
                     prepare_material_assets.label(MeshMaterialSystems::PrepareAssets),
@@ -44,18 +48,22 @@ where
     }
 }
 
+#[derive(Default, Resource, Deref, DerefMut)]
+pub struct MaterialRenderAssets(pub StorageBuffer<GpuStandardMaterialBuffer>);
+
 #[derive(Default, Resource)]
-pub struct MaterialRenderAssets {
-    pub buffer: StorageBuffer<GpuStandardMaterialBuffer>,
-    pub textures: BTreeSet<Handle<Image>>,
+pub struct MaterialTextures {
+    pub data: Vec<Handle<Image>>,
+    pub index: HashMap<Handle<Image>, usize>,
 }
 
-impl MaterialRenderAssets {
+impl MaterialTextures {
     pub fn add_standard_material_textures(&mut self, material: &StandardMaterial) {
         macro_rules! add_texture {
             ($texture_name:ident) => {
                 if let Some(texture) = &material.$texture_name {
-                    self.textures.insert(texture.clone_weak());
+                    self.index.insert(texture.clone_weak(), self.data.len());
+                    self.data.push(texture.clone_weak());
                 }
             };
         }
@@ -65,6 +73,16 @@ impl MaterialRenderAssets {
         add_texture!(metallic_roughness_texture);
         add_texture!(normal_map_texture);
         add_texture!(occlusion_texture);
+    }
+
+    pub fn id(&self, maybe_handle: &Option<Handle<Image>>) -> u32 {
+        match maybe_handle
+            .as_ref()
+            .and_then(|handle| self.index.get(handle))
+        {
+            Some(index) => *index as u32,
+            None => u32::MAX,
+        }
     }
 }
 
@@ -109,11 +127,21 @@ fn extract_material_assets<M: Into<StandardMaterial> + Clone + Asset>(
     extracted_assets.removed.append(&mut removed);
 }
 
+fn prepare_material_textures(
+    extracted_assets: Res<ExtractedMaterials>,
+    mut textures: ResMut<MaterialTextures>,
+) {
+    for (_, material) in &extracted_assets.extracted {
+        textures.add_standard_material_textures(material);
+    }
+}
+
 fn prepare_material_assets(
     mut extracted_assets: ResMut<ExtractedMaterials>,
     mut assets: Local<BTreeMap<HandleId, StandardMaterial>>,
     mut materials: ResMut<GpuStandardMaterials>,
     mut render_assets: ResMut<MaterialRenderAssets>,
+    textures: Res<MaterialTextures>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
@@ -126,23 +154,10 @@ fn prepare_material_assets(
         assets.remove(&handle.into());
     }
     for (handle, material) in extracted_assets.extracted.drain(..) {
-        render_assets.add_standard_material_textures(&material);
         assets.insert(handle.into(), material);
     }
 
     materials.clear();
-
-    // TODO: remove unused textures.
-    let textures: Vec<_> = render_assets.textures.iter().cloned().collect();
-    let texture_id = |handle: &Option<Handle<Image>>| {
-        if let Some(handle) = handle {
-            match textures.binary_search(handle) {
-                Ok(id) | Err(id) => id as u32,
-            }
-        } else {
-            u32::MAX
-        }
-    };
 
     let materials = assets
         .iter()
@@ -151,24 +166,30 @@ fn prepare_material_assets(
             let handle = HandleUntyped::weak(*handle);
 
             let base_color = material.base_color.into();
-            let base_color_texture = texture_id(&material.base_color_texture);
+            let base_color_texture = textures.id(&material.base_color_texture);
 
             let emissive = material.emissive.into();
-            let emissive_texture = texture_id(&material.emissive_texture);
+            let emissive_texture = textures.id(&material.emissive_texture);
 
-            let metallic_roughness_texture = texture_id(&material.metallic_roughness_texture);
-            let normal_map_texture = texture_id(&material.normal_map_texture);
-            let occlusion_texture = texture_id(&material.occlusion_texture);
+            let metallic_roughness_texture = textures.id(&material.metallic_roughness_texture);
+            let normal_map_texture = textures.id(&material.normal_map_texture);
+            let occlusion_texture = textures.id(&material.occlusion_texture);
+
+            let (perceptual_roughness, metallic, reflectance) = (
+                material.perceptual_roughness,
+                material.metallic,
+                material.reflectance,
+            );
 
             let material = GpuStandardMaterial {
                 base_color,
                 base_color_texture,
                 emissive,
                 emissive_texture,
-                perceptual_roughness: material.perceptual_roughness,
-                metallic: material.metallic,
+                perceptual_roughness,
+                metallic,
                 metallic_roughness_texture,
-                reflectance: material.reflectance,
+                reflectance,
                 normal_map_texture,
                 occlusion_texture,
             };
@@ -177,8 +198,6 @@ fn prepare_material_assets(
         })
         .collect();
 
-    render_assets.buffer.get_mut().data = materials;
-    render_assets
-        .buffer
-        .write_buffer(&render_device, &render_queue);
+    render_assets.get_mut().data = materials;
+    render_assets.write_buffer(&render_device, &render_queue);
 }

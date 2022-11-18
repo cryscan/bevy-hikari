@@ -1,4 +1,8 @@
-use self::{instance::InstancePlugin, material::MaterialPlugin, mesh::MeshPlugin};
+use self::{
+    instance::InstancePlugin,
+    material::{MaterialPlugin, MaterialTextures},
+    mesh::MeshPlugin,
+};
 use bevy::{
     ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::MeshPipeline,
@@ -324,6 +328,7 @@ pub struct GpuMeshIndex {
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum MeshMaterialSystems {
+    PrepareTextures,
     PrepareAssets,
     PrepareInstances,
 }
@@ -464,10 +469,10 @@ impl FromWorld for TextureBindGroupLayout {
 
 fn prepare_texture_bind_group_layout(
     render_device: Res<RenderDevice>,
-    materials: Res<MaterialRenderAssets>,
+    textures: Res<MaterialTextures>,
     mut texture_layout: ResMut<TextureBindGroupLayout>,
 ) {
-    let texture_count = materials.textures.len() as u32;
+    let texture_count = textures.data.len() as u32;
     let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
@@ -510,6 +515,7 @@ fn queue_mesh_material_bind_group(
     render_device: Res<RenderDevice>,
     mesh_pipeline: Res<MeshPipeline>,
     meshes: Res<MeshRenderAssets>,
+    textures: Res<MaterialTextures>,
     materials: Res<MaterialRenderAssets>,
     instances: Res<InstanceRenderAssets>,
     images: Res<RenderAssets<Image>>,
@@ -530,7 +536,7 @@ fn queue_mesh_material_bind_group(
         meshes.node_buffer.binding(),
         instances.instance_buffer.binding(),
         instances.node_buffer.binding(),
-        materials.buffer.binding(),
+        materials.binding(),
         instances.source_buffer.binding(),
     ) {
         let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
@@ -568,7 +574,7 @@ fn queue_mesh_material_bind_group(
             ],
         });
 
-        let images = materials.textures.iter().map(|handle| {
+        let images = textures.data.iter().map(|handle| {
             images
                 .get(handle)
                 .unwrap_or(&mesh_pipeline.dummy_white_gpu_image)
