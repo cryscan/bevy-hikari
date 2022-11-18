@@ -1,1 +1,4 @@
-pub use crate::{HikariPlugin, HikariSettings, Taa, Upscale};
+pub use crate::{
+    mesh_material::{GenericInstancePlugin, GenericMaterialPlugin},
+    HikariPlugin, HikariSettings, Taa, Upscale,
+};

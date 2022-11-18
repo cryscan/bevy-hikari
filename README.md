@@ -142,6 +142,14 @@ fn setup(
 }
 ```
 
+## Custom Materials
+`bevy-hikari` is built based on `bevy`'s PBR standard material.
+A material that is eligible for lighting needs to have surface properties a `StandardMaterial` has (base color, metallic, etc).
+In order to render with custom materials,
+1. Implement `Into<StandardMaterial>` for the material `CustomMaterial`, and
+2. Add `GenericMaterialPlugin::<CustomMaterial>::default()` to the app
+3. Add `GenericInstancePlugin::<CustomMaterial>::default()` to the app
+
 ## Screenshots
 Here are the screenshots of examples.
 

@@ -1,8 +1,4 @@
-use self::{
-    instance::{GenericInstancePlugin, InstancePlugin},
-    material::{GenericMaterialPlugin, MaterialPlugin},
-    mesh::MeshPlugin,
-};
+use self::{instance::InstancePlugin, material::MaterialPlugin, mesh::MeshPlugin};
 use bevy::{
     ecs::system::{lifetimeless::SRes, SystemParamItem},
     pbr::MeshPipeline,
@@ -29,9 +25,10 @@ pub mod material;
 pub mod mesh;
 
 pub use instance::{
-    DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
+    DynamicInstanceIndex, GenericInstancePlugin, InstanceIndex, InstanceRenderAssets,
+    PreviousMeshUniform,
 };
-pub use material::MaterialRenderAssets;
+pub use material::{GenericMaterialPlugin, MaterialRenderAssets};
 pub use mesh::MeshRenderAssets;
 
 pub struct MeshMaterialPlugin;
