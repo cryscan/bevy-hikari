@@ -1,6 +1,6 @@
 use self::{
-    instance::{GenericInstancePlugin, InstancePlugin},
-    material::{GenericMaterialPlugin, MaterialPlugin},
+    instance::InstancePlugin,
+    material::{MaterialPlugin, MaterialTextures},
     mesh::MeshPlugin,
 };
 use bevy::{
@@ -29,9 +29,10 @@ pub mod material;
 pub mod mesh;
 
 pub use instance::{
-    DynamicInstanceIndex, InstanceIndex, InstanceRenderAssets, PreviousMeshUniform,
+    DynamicInstanceIndex, GenericInstancePlugin, InstanceIndex, InstanceRenderAssets,
+    PreviousMeshUniform,
 };
-pub use material::MaterialRenderAssets;
+pub use material::{GenericMaterialPlugin, MaterialRenderAssets};
 pub use mesh::MeshRenderAssets;
 
 pub struct MeshMaterialPlugin;
@@ -325,35 +326,9 @@ pub struct GpuMeshIndex {
     pub node_len: u32,
 }
 
-pub trait IntoStandardMaterial: Material {
-    /// Coverts a [`Material`] into a [`StandardMaterial`].
-    /// Any new textures should be registered into [`MaterialRenderAssets`].
-    fn into_standard_material(self, render_assets: &mut MaterialRenderAssets) -> StandardMaterial;
-}
-
-impl IntoStandardMaterial for StandardMaterial {
-    fn into_standard_material(self, render_assets: &mut MaterialRenderAssets) -> Self {
-        if let Some(texture) = &self.base_color_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.emissive_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.metallic_roughness_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.normal_map_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        if let Some(texture) = &self.occlusion_texture {
-            render_assets.textures.insert(texture.clone_weak());
-        }
-        self
-    }
-}
-
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum MeshMaterialSystems {
+    PrepareTextures,
     PrepareAssets,
     PrepareInstances,
 }
@@ -494,10 +469,10 @@ impl FromWorld for TextureBindGroupLayout {
 
 fn prepare_texture_bind_group_layout(
     render_device: Res<RenderDevice>,
-    materials: Res<MaterialRenderAssets>,
+    textures: Res<MaterialTextures>,
     mut texture_layout: ResMut<TextureBindGroupLayout>,
 ) {
-    let texture_count = materials.textures.len() as u32;
+    let texture_count = textures.data.len() as u32;
     let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
@@ -540,6 +515,7 @@ fn queue_mesh_material_bind_group(
     render_device: Res<RenderDevice>,
     mesh_pipeline: Res<MeshPipeline>,
     meshes: Res<MeshRenderAssets>,
+    textures: Res<MaterialTextures>,
     materials: Res<MaterialRenderAssets>,
     instances: Res<InstanceRenderAssets>,
     images: Res<RenderAssets<Image>>,
@@ -560,7 +536,7 @@ fn queue_mesh_material_bind_group(
         meshes.node_buffer.binding(),
         instances.instance_buffer.binding(),
         instances.node_buffer.binding(),
-        materials.buffer.binding(),
+        materials.binding(),
         instances.source_buffer.binding(),
     ) {
         let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
@@ -598,7 +574,7 @@ fn queue_mesh_material_bind_group(
             ],
         });
 
-        let images = materials.textures.iter().map(|handle| {
+        let images = textures.data.iter().map(|handle| {
             images
                 .get(handle)
                 .unwrap_or(&mesh_pipeline.dummy_white_gpu_image)

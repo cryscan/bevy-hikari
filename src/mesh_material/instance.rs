@@ -3,10 +3,11 @@ use super::{
     MeshMaterialSystems,
 };
 use crate::{
-    mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer, IntoStandardMaterial},
+    mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer},
     transform::GlobalTransformQueue,
 };
 use bevy::{
+    asset::Asset,
     ecs::query::QueryItem,
     math::{Vec3A, Vec4Swizzles},
     prelude::*,
@@ -45,8 +46,12 @@ impl Plugin for InstancePlugin {
 }
 
 #[derive(Default)]
-pub struct GenericInstancePlugin<M: IntoStandardMaterial>(PhantomData<M>);
-impl<M: IntoStandardMaterial> Plugin for GenericInstancePlugin<M> {
+pub struct GenericInstancePlugin<M: Into<StandardMaterial>>(PhantomData<M>);
+
+impl<M> Plugin for GenericInstancePlugin<M>
+where
+    M: Into<StandardMaterial> + Asset,
+{
     fn build(&self, app: &mut App) {
         app.add_event::<InstanceEvent<M>>().add_system_to_stage(
             CoreStage::PostUpdate,
@@ -113,14 +118,14 @@ impl ExtractComponent for PreviousMeshUniform {
     }
 }
 
-pub enum InstanceEvent<M: IntoStandardMaterial> {
+pub enum InstanceEvent<M: Into<StandardMaterial> + Asset> {
     Created(Entity, Handle<Mesh>, Handle<M>, ComputedVisibility),
     Modified(Entity, Handle<Mesh>, Handle<M>, ComputedVisibility),
     Removed(Entity),
 }
 
 #[allow(clippy::type_complexity)]
-fn instance_event_system<M: IntoStandardMaterial>(
+fn instance_event_system<M: Into<StandardMaterial> + Asset>(
     mut events: EventWriter<InstanceEvent<M>>,
     removed: RemovedComponents<Handle<Mesh>>,
     mut set: ParamSet<(
@@ -174,7 +179,7 @@ pub struct ExtractedInstances {
     removed: Vec<Entity>,
 }
 
-fn extract_instances<M: IntoStandardMaterial>(
+fn extract_instances<M: Into<StandardMaterial> + Asset>(
     mut events: Extract<EventReader<InstanceEvent<M>>>,
     query: Extract<Query<(&Aabb, &GlobalTransform)>>,
     mut extracted_instances: ResMut<ExtractedInstances>,
