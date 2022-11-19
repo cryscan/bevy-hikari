@@ -45,6 +45,7 @@ let RAY_BIAS: f32 = 0.02;
 let DISTANCE_MAX: f32 = 65535.0;
 let NOISE_TEXTURE_COUNT: u32 = 16u;
 let GOLDEN_RATIO: f32 = 1.618033989;
+let POSITION_MISS_THRESHOLD: f32 = 0.5;
 
 let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
@@ -668,12 +669,12 @@ fn check_previous_reservoir(
 ) -> bool {
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
     let depth_miss = depth_ratio > 2.0 * (1.0 + s.random.x) || depth_ratio < 0.5 * s.random.y;
-    let pos_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > 0.76;
+    let position_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > POSITION_MISS_THRESHOLD;
 
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
 
-    if (*r).lifetime > reservoir_lifetime((*r)) || depth_miss || pos_miss || instance_miss || normal_miss {
+    if (*r).lifetime > reservoir_lifetime((*r)) || depth_miss || position_miss || instance_miss || normal_miss {
         (*r) = empty_reservoir();
         return false;
     } else {
