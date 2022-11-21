@@ -319,9 +319,10 @@ impl PrepassTextures {
 impl ExtractComponent for PrepassTextures {
     type Query = &'static Self;
     type Filter = ();
+    type Out = Self;
 
-    fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        item.clone()
+    fn extract_component(item: QueryItem<Self::Query>) -> Option<Self> {
+        Some(item.clone())
     }
 }
 
