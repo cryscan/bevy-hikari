@@ -187,8 +187,8 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
 fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, mesh: MeshIndex, early_distance: f32) -> bool {
     var intersected = false;
     var index = 0u;
-    for (; index < mesh.node_len;) {
-        let node_index = mesh.node_offset + index;
+    for (; index < mesh.node.y;) {
+        let node_index = mesh.node.x + index;
         let node = asset_node_buffer.data[node_index];
         var aabb: Aabb;
         if node.entry_index >= BVH_LEAF_FLAG {

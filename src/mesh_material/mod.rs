@@ -123,7 +123,7 @@ impl BHShape for GpuInstance {
     }
 }
 
-#[derive(Debug, Default, Clone, ShaderType)]
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuNode {
     pub min: Vec3,
     pub entry_index: u32,
@@ -167,6 +167,14 @@ pub struct GpuStandardMaterial {
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuAliasEntry {
+    /// The probability of choosing the other one in the bucket.
+    pub prob: f32,
+    /// The index of the other one in the bucket.
+    pub index: u32,
+}
+
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
 pub struct GpuEmissive {
     pub emissive: Vec4,
     pub position: Vec3,
@@ -174,39 +182,45 @@ pub struct GpuEmissive {
     pub instance: u32,
 }
 
-#[derive(Default, Resource, ShaderType)]
+#[derive(Default, ShaderType)]
 pub struct GpuVertexBuffer {
     #[size(runtime)]
     pub data: Vec<GpuVertex>,
 }
 
-#[derive(Default, Resource, ShaderType)]
+#[derive(Default, ShaderType)]
 pub struct GpuPrimitiveBuffer {
     #[size(runtime)]
     pub data: Vec<GpuPrimitive>,
 }
 
-#[derive(Default, Resource, ShaderType)]
+#[derive(Default, ShaderType)]
 pub struct GpuNodeBuffer {
     pub count: u32,
     #[size(runtime)]
     pub data: Vec<GpuNode>,
 }
 
-#[derive(Default, Resource, ShaderType)]
+#[derive(Default, ShaderType)]
 pub struct GpuInstanceBuffer {
     #[size(runtime)]
     pub data: Vec<GpuInstance>,
 }
 
-#[derive(Default, Resource, ShaderType)]
+#[derive(Default, ShaderType)]
 pub struct GpuStandardMaterialBuffer {
     #[size(runtime)]
     pub data: Vec<GpuStandardMaterial>,
 }
 
-#[derive(Default, Resource, ShaderType)]
-pub struct GpuLightSourceBuffer {
+#[derive(Default, ShaderType)]
+pub struct GpuAliasTableBuffer {
+    #[size(runtime)]
+    pub data: Vec<GpuAliasEntry>,
+}
+
+#[derive(Default, ShaderType)]
+pub struct GpuEmissiveBuffer {
     pub count: u32,
     #[size(runtime)]
     pub data: Vec<GpuEmissive>,
@@ -226,10 +240,14 @@ pub struct GpuMesh {
     pub vertices: Vec<GpuVertex>,
     pub primitives: Vec<GpuPrimitive>,
     pub nodes: Vec<GpuNode>,
+    pub alias_table: Vec<GpuAliasEntry>,
+    pub surface_area: f32,
 }
 
-impl GpuMesh {
-    pub fn from_mesh(mesh: Mesh) -> Result<Self, PrepareMeshError> {
+impl TryFrom<Mesh> for GpuMesh {
+    type Error = PrepareMeshError;
+
+    fn try_from(mesh: Mesh) -> Result<Self, Self::Error> {
         let positions = mesh
             .attribute(Mesh::ATTRIBUTE_POSITION)
             .and_then(VertexAttributeValues::as_float3)
@@ -308,10 +326,66 @@ impl GpuMesh {
         let bvh = BVH::build(&mut primitives);
         let nodes = bvh.flatten_custom(&GpuNode::pack);
 
+        // Compute surface area.
+        let surface_areas = primitives.iter().map(|primitive| {
+            let [v0, v1, v2] = [0, 1, 2]
+                .map(|id| vertices[primitive.indices[id] as usize])
+                .map(|v| v.position);
+            0.5 * (v1 - v0).cross(v2 - v0).length().abs()
+        });
+
+        let surface_area = surface_areas.clone().sum();
+        let primitive_count = primitives.len();
+
+        // Build alias table.
+        let alias_table = if primitive_count == 0 {
+            vec![]
+        } else {
+            let mean_area = surface_area / (primitive_count as f32);
+            let probabilities = surface_areas
+                .clone()
+                .enumerate()
+                .map(|(id, area)| (id, area / mean_area));
+            let mut over: Vec<_> = probabilities.clone().filter(|prob| prob.1 > 1.0).collect();
+            let mut under: Vec<_> = probabilities.filter(|prob| prob.1 < 1.0).collect();
+
+            let mut alias_table: Vec<_> = (0..primitive_count)
+                .map(|id| GpuAliasEntry {
+                    prob: 0.0,
+                    index: id as u32,
+                })
+                .collect();
+
+            while !under.is_empty() && !over.is_empty() {
+                let mut over_bucket = over.pop().unwrap();
+                let under_bucket = under.pop().unwrap();
+
+                // Pour some part of `over_bucket` into `under_bucket` to equalize the later.
+                let delta = 1.0 - under_bucket.1;
+                over_bucket.1 -= delta;
+                assert!(over_bucket.1 >= 0.0);
+
+                if over_bucket.1 > 1.0 {
+                    over.push(over_bucket);
+                } else if over_bucket.1 < 1.0 {
+                    under.push(over_bucket);
+                }
+
+                alias_table[under_bucket.0] = GpuAliasEntry {
+                    prob: delta,
+                    index: over_bucket.0 as u32,
+                };
+            }
+
+            alias_table
+        };
+
         Ok(Self {
             vertices,
             primitives,
             nodes,
+            alias_table,
+            surface_area,
         })
     }
 }
@@ -322,8 +396,9 @@ impl GpuMesh {
 pub struct GpuMeshIndex {
     pub vertex: u32,
     pub primitive: u32,
-    pub node_offset: u32,
-    pub node_len: u32,
+    pub node: UVec2,
+    pub alias: UVec2,
+    pub surface_area: f32,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
@@ -375,9 +450,20 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                     },
                     count: None,
                 },
-                // Instances
+                // Alias Table
                 BindGroupLayoutEntry {
                     binding: 3,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuAliasTableBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Instances
+                BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -388,7 +474,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 },
                 // Instance nodes
                 BindGroupLayoutEntry {
-                    binding: 4,
+                    binding: 5,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -399,7 +485,7 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                 },
                 // Materials
                 BindGroupLayoutEntry {
-                    binding: 5,
+                    binding: 6,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -408,14 +494,14 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                     },
                     count: None,
                 },
-                // Light Sources
+                // Emissives
                 BindGroupLayoutEntry {
-                    binding: 6,
+                    binding: 7,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: Some(GpuLightSourceBuffer::min_size()),
+                        min_binding_size: Some(GpuEmissiveBuffer::min_size()),
                     },
                     count: None,
                 },
@@ -526,18 +612,20 @@ fn queue_mesh_material_bind_group(
         Some(vertex_binding),
         Some(primitive_binding),
         Some(asset_node_binding),
+        Some(alias_table_binding),
         Some(instance_binding),
         Some(instance_node_binding),
         Some(material_binding),
-        Some(light_source_binding),
+        Some(emissive_binding),
     ) = (
         meshes.vertex_buffer.binding(),
         meshes.primitive_buffer.binding(),
         meshes.node_buffer.binding(),
+        meshes.alias_table_buffer.binding(),
         instances.instance_buffer.binding(),
         instances.node_buffer.binding(),
         materials.binding(),
-        instances.source_buffer.binding(),
+        instances.emissive_buffer.binding(),
     ) {
         let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -557,19 +645,23 @@ fn queue_mesh_material_bind_group(
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: instance_binding,
+                    resource: alias_table_binding,
                 },
                 BindGroupEntry {
                     binding: 4,
-                    resource: instance_node_binding,
+                    resource: instance_binding,
                 },
                 BindGroupEntry {
                     binding: 5,
-                    resource: material_binding,
+                    resource: instance_node_binding,
                 },
                 BindGroupEntry {
                     binding: 6,
-                    resource: light_source_binding,
+                    resource: material_binding,
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: emissive_binding,
                 },
             ],
         });
