@@ -1,6 +1,6 @@
 [package]
 name = "bevy-hikari"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["Zhenyuan Zhang <cryscan@umich.edu>"]
 license = "MIT OR Apache-2.0"
@@ -40,8 +40,8 @@ bevy = { version = "0.9", default-features = true, features = [
 # bevy_flycam = "0.9"
 smooth-bevy-cameras = "0.6"
 bevy_mod_raycast = "0.7"
-bevy-inspector-egui = "0.14"
+# bevy-inspector-egui = "0.14"
 
 [patch.crates-io]
-bevy = { git = "https://github.com/cryscan/bevy.git", branch = "core-pipeline-nodes-public" }
+bevy = { git = "https://github.com/bevyengine/bevy.git", branch = "main" }
 smooth-bevy-cameras = { git = "https://github.com/bonsairobo/smooth-bevy-cameras", rev = "1388352469519b1451cd85482c46c8a4252440e7" }

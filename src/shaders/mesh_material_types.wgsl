@@ -15,8 +15,9 @@ struct Primitive {
 struct MeshIndex {
     vertex: u32,
     primitive: u32,
-    node_offset: u32,
-    node_len: u32,
+    node: vec2<u32>,    // x: offset, y: size
+    alias: vec2<u32>,   // x: offset, y: size
+    surface_area: f32,
 };
 
 struct Instance {
@@ -52,6 +53,11 @@ struct Material {
     occlusion_texture: u32,
 };
 
+struct AliasEntry {
+    prob: f32,
+    index: u32,
+}
+
 struct Emissive {
     emissive: vec4<f32>,
     position: vec3<f32>,
@@ -63,6 +69,7 @@ type Vertices = array<Vertex>;
 type Primitives = array<Primitive>;
 type Instances = array<Instance>;
 type Materials = array<Material>;
+type AliasTable = array<AliasEntry>;
 
 struct Nodes {
     count: u32,

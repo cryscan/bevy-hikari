@@ -22,9 +22,10 @@ pub struct GlobalTransformQueue(pub [Mat4; 2]);
 impl ExtractComponent for GlobalTransformQueue {
     type Query = &'static Self;
     type Filter = ();
+    type Out = Self;
 
-    fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        item.clone()
+    fn extract_component(item: QueryItem<Self::Query>) -> Option<Self::Out> {
+        Some(item.clone())
     }
 }
 

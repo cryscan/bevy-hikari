@@ -9,10 +9,12 @@ var<storage> primitive_buffer: Primitives;
 @group(2) @binding(2)
 var<storage> asset_node_buffer: Nodes;
 @group(2) @binding(3)
-var<storage> instance_buffer: Instances;
+var<storage> alias_table_buffer: AliasTable;
 @group(2) @binding(4)
-var<storage> instance_node_buffer: Nodes;
+var<storage> instance_buffer: Instances;
 @group(2) @binding(5)
-var<storage> material_buffer: Materials;
+var<storage> instance_node_buffer: Nodes;
 @group(2) @binding(6)
+var<storage> material_buffer: Materials;
+@group(2) @binding(7)
 var<storage> emissive_buffer: Emissives;

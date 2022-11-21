@@ -1,5 +1,5 @@
 use super::{
-    material::GpuStandardMaterials, mesh::GpuMeshes, GpuEmissive, GpuLightSourceBuffer,
+    material::GpuStandardMaterials, mesh::GpuMeshes, GpuEmissive, GpuEmissiveBuffer,
     MeshMaterialSystems,
 };
 use crate::{
@@ -71,7 +71,7 @@ where
 pub struct InstanceRenderAssets {
     pub instance_buffer: StorageBuffer<GpuInstanceBuffer>,
     pub node_buffer: StorageBuffer<GpuNodeBuffer>,
-    pub source_buffer: StorageBuffer<GpuLightSourceBuffer>,
+    pub emissive_buffer: StorageBuffer<GpuEmissiveBuffer>,
     pub instance_indices: DynamicUniformBuffer<InstanceIndex>,
 }
 
@@ -80,21 +80,21 @@ impl InstanceRenderAssets {
         &mut self,
         instances: Vec<GpuInstance>,
         nodes: Vec<GpuNode>,
-        sources: Vec<GpuEmissive>,
+        emissives: Vec<GpuEmissive>,
     ) {
         self.instance_buffer.get_mut().data = instances;
 
         self.node_buffer.get_mut().count = nodes.len() as u32;
         self.node_buffer.get_mut().data = nodes;
 
-        self.source_buffer.get_mut().count = sources.len() as u32;
-        self.source_buffer.get_mut().data = sources;
+        self.emissive_buffer.get_mut().count = emissives.len() as u32;
+        self.emissive_buffer.get_mut().data = emissives;
     }
 
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
         self.instance_buffer.write_buffer(device, queue);
         self.node_buffer.write_buffer(device, queue);
-        self.source_buffer.write_buffer(device, queue);
+        self.emissive_buffer.write_buffer(device, queue);
         self.instance_indices.write_buffer(device, queue);
     }
 }
@@ -108,13 +108,14 @@ pub struct PreviousMeshUniform {
 impl ExtractComponent for PreviousMeshUniform {
     type Query = &'static GlobalTransformQueue;
     type Filter = With<Handle<Mesh>>;
+    type Out = Self;
 
-    fn extract_component(queue: QueryItem<Self::Query>) -> Self {
+    fn extract_component(queue: QueryItem<Self::Query>) -> Option<Self::Out> {
         let transform = queue[1];
-        PreviousMeshUniform {
+        Some(PreviousMeshUniform {
             transform,
             inverse_transpose_model: transform.inverse().transpose(),
-        }
+        })
     }
 }
 
@@ -359,9 +360,9 @@ fn prepare_instances(
                 }
             }
         }
-        let sources = emissives.values().cloned().collect();
+        let emissives = emissives.values().cloned().collect();
 
-        render_assets.set(values, nodes, sources);
+        render_assets.set(values, nodes, emissives);
         render_assets.write_buffer(&render_device, &render_queue);
     } else {
         add_instance_indices(&instances);
