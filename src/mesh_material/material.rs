@@ -193,7 +193,7 @@ fn prepare_material_assets(
                 normal_map_texture,
                 occlusion_texture,
             };
-            materials.insert(handle, (material, offset as u32));
+            materials.insert(handle, (material.clone(), offset as u32));
             material
         })
         .collect();

@@ -93,7 +93,7 @@ impl BHShape for GpuPrimitive {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, ShaderType)]
+#[derive(Debug, Default, Clone, ShaderType)]
 pub struct GpuInstance {
     pub min: Vec3,
     pub material: u32,
@@ -149,7 +149,7 @@ impl GpuNode {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, ShaderType)]
+#[derive(Debug, Default, Clone, ShaderType)]
 pub struct GpuStandardMaterial {
     pub base_color: Vec4,
     pub base_color_texture: u32,
@@ -174,12 +174,14 @@ pub struct GpuAliasEntry {
     pub index: u32,
 }
 
-#[derive(Debug, Default, Clone, Copy, ShaderType)]
+#[derive(Debug, Default, Clone, ShaderType)]
 pub struct GpuEmissive {
     pub emissive: Vec4,
     pub position: Vec3,
     pub radius: f32,
     pub instance: u32,
+    pub alias_table: UVec2,
+    pub surface_area: f32,
 }
 
 #[derive(Default, ShaderType)]
@@ -240,8 +242,68 @@ pub struct GpuMesh {
     pub vertices: Vec<GpuVertex>,
     pub primitives: Vec<GpuPrimitive>,
     pub nodes: Vec<GpuNode>,
-    pub alias_table: Vec<GpuAliasEntry>,
-    pub surface_area: f32,
+}
+
+impl GpuMesh {
+    pub fn transformed_primitive_areas(&self, transform: Mat4) -> Vec<f32> {
+        self.primitives
+            .iter()
+            .map(|primitive| {
+                let [v0, v1, v2] = [0, 1, 2]
+                    .map(|id| self.vertices[primitive.indices[id] as usize])
+                    .map(|v| transform.transform_point3(v.position));
+                0.5 * (v1 - v0).cross(v2 - v0).length().abs()
+            })
+            .collect()
+    }
+
+    pub fn build_alias_table(&self, transform: Mat4) -> Vec<GpuAliasEntry> {
+        let primitive_count = self.primitives.len();
+        let areas = self.transformed_primitive_areas(transform);
+        let surface_area: f32 = areas.iter().sum();
+
+        if primitive_count == 0 {
+            vec![]
+        } else {
+            let mean_area = surface_area / (primitive_count as f32);
+            let probabilities = areas
+                .iter()
+                .enumerate()
+                .map(|(id, area)| (id, area / mean_area));
+            let mut over: Vec<_> = probabilities.clone().filter(|prob| prob.1 > 1.0).collect();
+            let mut under: Vec<_> = probabilities.filter(|prob| prob.1 < 1.0).collect();
+
+            let mut alias_table: Vec<_> = (0..primitive_count)
+                .map(|id| GpuAliasEntry {
+                    prob: 0.0,
+                    index: id as u32,
+                })
+                .collect();
+
+            while !under.is_empty() && !over.is_empty() {
+                let mut over_bucket = over.pop().unwrap();
+                let under_bucket = under.pop().unwrap();
+
+                // Pour some part of `over_bucket` into `under_bucket` to equalize the later.
+                let delta = 1.0 - under_bucket.1;
+                over_bucket.1 -= delta;
+                assert!(over_bucket.1 >= 0.0);
+
+                if over_bucket.1 > 1.0 {
+                    over.push(over_bucket);
+                } else if over_bucket.1 < 1.0 {
+                    under.push(over_bucket);
+                }
+
+                alias_table[under_bucket.0] = GpuAliasEntry {
+                    prob: delta,
+                    index: over_bucket.0 as u32,
+                };
+            }
+
+            alias_table
+        }
+    }
 }
 
 impl TryFrom<Mesh> for GpuMesh {
@@ -326,66 +388,10 @@ impl TryFrom<Mesh> for GpuMesh {
         let bvh = BVH::build(&mut primitives);
         let nodes = bvh.flatten_custom(&GpuNode::pack);
 
-        // Compute surface area.
-        let surface_areas = primitives.iter().map(|primitive| {
-            let [v0, v1, v2] = [0, 1, 2]
-                .map(|id| vertices[primitive.indices[id] as usize])
-                .map(|v| v.position);
-            0.5 * (v1 - v0).cross(v2 - v0).length().abs()
-        });
-
-        let surface_area = surface_areas.clone().sum();
-        let primitive_count = primitives.len();
-
-        // Build alias table.
-        let alias_table = if primitive_count == 0 {
-            vec![]
-        } else {
-            let mean_area = surface_area / (primitive_count as f32);
-            let probabilities = surface_areas
-                .clone()
-                .enumerate()
-                .map(|(id, area)| (id, area / mean_area));
-            let mut over: Vec<_> = probabilities.clone().filter(|prob| prob.1 > 1.0).collect();
-            let mut under: Vec<_> = probabilities.filter(|prob| prob.1 < 1.0).collect();
-
-            let mut alias_table: Vec<_> = (0..primitive_count)
-                .map(|id| GpuAliasEntry {
-                    prob: 0.0,
-                    index: id as u32,
-                })
-                .collect();
-
-            while !under.is_empty() && !over.is_empty() {
-                let mut over_bucket = over.pop().unwrap();
-                let under_bucket = under.pop().unwrap();
-
-                // Pour some part of `over_bucket` into `under_bucket` to equalize the later.
-                let delta = 1.0 - under_bucket.1;
-                over_bucket.1 -= delta;
-                assert!(over_bucket.1 >= 0.0);
-
-                if over_bucket.1 > 1.0 {
-                    over.push(over_bucket);
-                } else if over_bucket.1 < 1.0 {
-                    under.push(over_bucket);
-                }
-
-                alias_table[under_bucket.0] = GpuAliasEntry {
-                    prob: delta,
-                    index: over_bucket.0 as u32,
-                };
-            }
-
-            alias_table
-        };
-
         Ok(Self {
             vertices,
             primitives,
             nodes,
-            alias_table,
-            surface_area,
         })
     }
 }
@@ -397,8 +403,6 @@ pub struct GpuMeshIndex {
     pub vertex: u32,
     pub primitive: u32,
     pub node: UVec2,
-    pub alias: UVec2,
-    pub surface_area: f32,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
@@ -612,20 +616,20 @@ fn queue_mesh_material_bind_group(
         Some(vertex_binding),
         Some(primitive_binding),
         Some(asset_node_binding),
-        Some(alias_table_binding),
         Some(instance_binding),
         Some(instance_node_binding),
         Some(material_binding),
         Some(emissive_binding),
+        Some(alias_table_binding),
     ) = (
         meshes.vertex_buffer.binding(),
         meshes.primitive_buffer.binding(),
         meshes.node_buffer.binding(),
-        meshes.alias_table_buffer.binding(),
         instances.instance_buffer.binding(),
         instances.node_buffer.binding(),
         materials.binding(),
         instances.emissive_buffer.binding(),
+        instances.alias_table_buffer.binding(),
     ) {
         let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,

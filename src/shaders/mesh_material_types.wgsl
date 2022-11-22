@@ -16,8 +16,6 @@ struct MeshIndex {
     vertex: u32,
     primitive: u32,
     node: vec2<u32>,    // x: offset, y: size
-    alias: vec2<u32>,   // x: offset, y: size
-    surface_area: f32,
 };
 
 struct Instance {
@@ -63,6 +61,8 @@ struct Emissive {
     position: vec3<f32>,
     radius: f32,
     instance: u32,
+    alias_table: vec2<u32>,
+    surface_area: f32,
 };
 
 type Vertices = array<Vertex>;
