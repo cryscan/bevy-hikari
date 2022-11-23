@@ -8,7 +8,7 @@ use crate::{
 };
 use bevy::{
     ecs::query::QueryItem,
-    pbr::ViewLightsUniformOffset,
+    pbr::{ViewLightsUniformOffset, MAX_DIRECTIONAL_LIGHTS},
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -426,7 +426,11 @@ impl SpecializedComputePipeline for PostProcessPipeline {
             .unwrap()
             .into();
 
-        let mut shader_defs: Vec<String> = vec![];
+        let mut shader_defs: Vec<_> = vec![];
+        shader_defs.push(ShaderDefVal::Int(
+            "MAX_DIRECTIONAL_LIGHTS".into(),
+            MAX_DIRECTIONAL_LIGHTS as i32,
+        ));
 
         let (layout, shader) = match key.entry_point() {
             PostProcessEntryPoint::Denoise => {
@@ -437,7 +441,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.denoise_internal_layout.clone(),
                     self.denoise_render_layout.clone(),
                 ];
-                shader_defs.push(format!("DENOISE_LEVEL_{}", key.denoise_level()));
+                shader_defs.push(format!("DENOISE_LEVEL_{}", key.denoise_level()).into());
                 let shader = DENOISE_SHADER_HANDLE.typed();
                 (layout, shader)
             }

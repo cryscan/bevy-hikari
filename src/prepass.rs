@@ -15,7 +15,7 @@ use bevy::{
     },
     pbr::{
         DrawMesh, GpuLights, LightMeta, MeshPipelineKey, MeshUniform, ViewLightsUniformOffset,
-        SHADOW_FORMAT,
+        MAX_DIRECTIONAL_LIGHTS, SHADOW_FORMAT,
     },
     prelude::*,
     render::{
@@ -190,6 +190,11 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
 
         let mut shader_defs = vec![];
+        shader_defs.push(ShaderDefVal::Int(
+            "MAX_DIRECTIONAL_LIGHTS".into(),
+            MAX_DIRECTIONAL_LIGHTS as i32,
+        ));
+
         if key.temporal_anti_aliasing {
             shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
         }

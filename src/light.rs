@@ -8,7 +8,7 @@ use crate::{
     HikariSettings, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
 use bevy::{
-    pbr::ViewLightsUniformOffset,
+    pbr::{ViewLightsUniformOffset, MAX_DIRECTIONAL_LIGHTS},
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -136,6 +136,10 @@ impl SpecializedComputePipeline for LightPipeline {
 
     fn specialize(&self, key: Self::Key) -> ComputePipelineDescriptor {
         let mut shader_defs = vec![];
+        shader_defs.push(ShaderDefVal::Int(
+            "MAX_DIRECTIONAL_LIGHTS".into(),
+            MAX_DIRECTIONAL_LIGHTS as i32,
+        ));
 
         if key.texture_count() == 0 {
             shader_defs.push("NO_TEXTURE".into());
