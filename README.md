@@ -21,7 +21,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 - [x] N-bounce indirect lighting
 - [ ] Transparency
 - [x] Next event estimation
-- [ ] Better light sampling (L-BVH)
+- [x] Better light sampling (L-BVH + Alias table)
 - [x] ReSTIR: Temporal sample reuse
 - [x] ReSTIR: Spatial sample reuse
 - [x] Spatiotemporal filtering
