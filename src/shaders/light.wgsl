@@ -872,7 +872,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             select_light_instance
         );
 
+#ifdef INCLUDE_EMISSIVE
         textureStore(debug_texture, coords, vec4<f32>(candidate.direction, candidate.p));
+#endif
 
         // Direct light sampling
         ray.origin = position.xyz + normal * RAY_BIAS;
