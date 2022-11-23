@@ -5,7 +5,6 @@ use self::{
 };
 use bevy::{
     ecs::system::{lifetimeless::SRes, SystemParamItem},
-    math::Vec4Swizzles,
     pbr::MeshPipeline,
     prelude::*,
     render::{
@@ -188,10 +187,9 @@ pub struct GpuEmissive {
 
 impl Bounded for GpuEmissive {
     fn aabb(&self) -> AABB {
-        let range = self.radius + self.emissive.w * self.emissive.xyz().length().sqrt();
         AABB {
-            min: self.position - range,
-            max: self.position + range,
+            min: self.position - self.radius,
+            max: self.position + self.radius,
         }
     }
 }

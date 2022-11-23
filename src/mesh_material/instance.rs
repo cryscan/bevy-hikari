@@ -370,7 +370,7 @@ fn prepare_instances(
 
         for (id, (_, (instance, mesh, material, _))) in collection.iter().enumerate() {
             let emissive = material.emissive;
-            let intensity = emissive.w * emissive.xyz().length();
+            let intensity = 255.0 * emissive.w * emissive.xyz().length();
             if intensity > 0.0 {
                 // Compute alias table for light sampling
                 let alias_table = {
@@ -387,7 +387,7 @@ fn prepare_instances(
 
                 // Add to emissive list.
                 let position = 0.5 * (instance.max + instance.min);
-                let radius = 0.5 * (instance.max - instance.min).length();
+                let radius = 0.5 * (instance.max - instance.min).length() + intensity.sqrt();
                 emissives.push(GpuEmissive {
                     emissive,
                     position,
