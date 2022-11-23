@@ -5,6 +5,7 @@ use self::{
 };
 use bevy::{
     ecs::system::{lifetimeless::SRes, SystemParamItem},
+    math::Vec4Swizzles,
     pbr::MeshPipeline,
     prelude::*,
     render::{
@@ -182,6 +183,27 @@ pub struct GpuEmissive {
     pub instance: u32,
     pub alias_table: UVec2,
     pub surface_area: f32,
+    node_index: u32,
+}
+
+impl Bounded for GpuEmissive {
+    fn aabb(&self) -> AABB {
+        let range = self.radius + self.emissive.w * self.emissive.xyz().length().sqrt();
+        AABB {
+            min: self.position - range,
+            max: self.position + range,
+        }
+    }
+}
+
+impl BHShape for GpuEmissive {
+    fn set_bh_node_index(&mut self, index: usize) {
+        self.node_index = index as u32;
+    }
+
+    fn bh_node_index(&self) -> usize {
+        self.node_index as usize
+    }
 }
 
 #[derive(Default, ShaderType)]
@@ -223,7 +245,6 @@ pub struct GpuAliasTableBuffer {
 
 #[derive(Default, ShaderType)]
 pub struct GpuEmissiveBuffer {
-    pub count: u32,
     #[size(runtime)]
     pub data: Vec<GpuEmissive>,
 }
@@ -498,9 +519,20 @@ impl FromWorld for MeshMaterialBindGroupLayout {
                     },
                     count: None,
                 },
-                // Emissives
+                // Emissive nodes
                 BindGroupLayoutEntry {
                     binding: 7,
+                    visibility: ShaderStages::all(),
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(GpuNodeBuffer::min_size()),
+                    },
+                    count: None,
+                },
+                // Emissives
+                BindGroupLayoutEntry {
+                    binding: 8,
                     visibility: ShaderStages::all(),
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -620,15 +652,17 @@ fn queue_mesh_material_bind_group(
         Some(instance_node_binding),
         Some(material_binding),
         Some(emissive_binding),
+        Some(emissive_node_binding),
         Some(alias_table_binding),
     ) = (
         meshes.vertex_buffer.binding(),
         meshes.primitive_buffer.binding(),
         meshes.node_buffer.binding(),
         instances.instance_buffer.binding(),
-        instances.node_buffer.binding(),
+        instances.instance_node_buffer.binding(),
         materials.binding(),
         instances.emissive_buffer.binding(),
+        instances.emissive_node_buffer.binding(),
         instances.alias_table_buffer.binding(),
     ) {
         let mesh_material = render_device.create_bind_group(&BindGroupDescriptor {
@@ -665,6 +699,10 @@ fn queue_mesh_material_bind_group(
                 },
                 BindGroupEntry {
                     binding: 7,
+                    resource: emissive_node_binding,
+                },
+                BindGroupEntry {
+                    binding: 8,
                     resource: emissive_binding,
                 },
             ],

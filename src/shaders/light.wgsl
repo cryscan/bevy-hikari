@@ -124,6 +124,10 @@ fn instance_direction_world_to_local(instance: Instance, world_direction: vec3<f
     return direction.xyz;
 }
 
+fn inside_aabb(p: vec3<f32>, aabb: Aabb) -> bool {
+    return all(p > aabb.min) && all(p < aabb.max);
+}
+
 fn intersects_aabb(ray: Ray, aabb: Aabb) -> f32 {
     let t1 = (aabb.min - ray.origin) * ray.inv_direction;
     let t2 = (aabb.max - ray.origin) * ray.inv_direction;
@@ -368,68 +372,68 @@ fn select_light_candidate(
         return candidate;
     }
 
-    var lum = luminance(directional.color.rgb);
-    var sum_lum = lum;
+    // var lum = luminance(directional.color.rgb);
+    // var sum_lum = lum;
 
-    var rand_1d = fract(dot(rand, vec4<f32>(1.0)));
-    for (var id = 0u; id < emissive_buffer.count; id += 1u) {
-        let source = emissive_buffer.data[id];
-        if source.instance == instance {
-            continue;
-        }
+    // var rand_1d = fract(dot(rand, vec4<f32>(1.0)));
+    // for (var id = 0u; id < emissive_buffer.count; id += 1u) {
+    //     let source = emissive_buffer.data[id];
+    //     if source.instance == instance {
+    //         continue;
+    //     }
 
-        cone = compute_emissive_cone(source, position, normal);
-        rand_sample = sample_uniform_cone(rand.zw, cone.w);
-        let direction = normal_basis(cone.xyz) * rand_sample.xyz;
-        if dot(direction, normal) < 0.0 {
-            continue;
-        }
+    //     cone = compute_emissive_cone(source, position, normal);
+    //     rand_sample = sample_uniform_cone(rand.zw, cone.w);
+    //     let direction = normal_basis(cone.xyz) * rand_sample.xyz;
+    //     if dot(direction, normal) < 0.0 {
+    //         continue;
+    //     }
 
-        lum = luminance(compute_emissive_radiance(source.emissive));
-        lum = lum * TAU * (1.0 - cone.w);
-        sum_lum += lum;
-        if rand_1d <= lum / max(sum_lum, 0.01) {
-            candidate.cone = cone;
-            candidate.direction = direction;
-            candidate.emissive_index = source.instance;
+    //     lum = luminance(compute_emissive_radiance(source.emissive));
+    //     lum = lum * TAU * (1.0 - cone.w);
+    //     sum_lum += lum;
+    //     if rand_1d <= lum / max(sum_lum, 0.01) {
+    //         candidate.cone = cone;
+    //         candidate.direction = direction;
+    //         candidate.emissive_index = source.instance;
 
-            let dist = distance(source.position, position);
-            candidate.min_distance = dist - source.radius;
-            candidate.max_distance = dist + source.radius;
-        }
-    }
+    //         let dist = distance(source.position, position);
+    //         candidate.min_distance = dist - source.radius;
+    //         candidate.max_distance = dist + source.radius;
+    //     }
+    // }
 
-    // MIS
-    if candidate.emissive_index != DONT_SAMPLE_EMISSIVE {
-        var sum_pdf = select(luminance(directional.color.rgb) / sum_lum, 0.0, sum_lum < 0.01);
-        var selected_pdf = 0.0;
-        for (var id = 0u; id < emissive_buffer.count; id += 1u) {
-            let source = emissive_buffer.data[id];
-            if source.instance == instance {
-                continue;
-            }
+    // // MIS
+    // if candidate.emissive_index != DONT_SAMPLE_EMISSIVE {
+    //     var sum_pdf = select(luminance(directional.color.rgb) / sum_lum, 0.0, sum_lum < 0.01);
+    //     var selected_pdf = 0.0;
+    //     for (var id = 0u; id < emissive_buffer.count; id += 1u) {
+    //         let source = emissive_buffer.data[id];
+    //         if source.instance == instance {
+    //             continue;
+    //         }
 
-            cone = compute_emissive_cone(source, position, normal);
-            rand_sample = sample_uniform_cone(rand.zw, cone.w);
-            let direction = normal_basis(cone.xyz) * rand_sample.xyz;
-            if dot(direction, normal) < 0.0 {
-                continue;
-            }
+    //         cone = compute_emissive_cone(source, position, normal);
+    //         rand_sample = sample_uniform_cone(rand.zw, cone.w);
+    //         let direction = normal_basis(cone.xyz) * rand_sample.xyz;
+    //         if dot(direction, normal) < 0.0 {
+    //             continue;
+    //         }
 
-            lum = luminance(compute_emissive_radiance(source.emissive));
-            lum = lum * TAU * (1.0 - cone.w);
+    //         lum = luminance(compute_emissive_radiance(source.emissive));
+    //         lum = lum * TAU * (1.0 - cone.w);
 
-            var pdf = cone_pdf(cone, candidate.direction);
-            pdf *= select(lum / sum_lum, 0.0, sum_lum < 0.01);
-            if source.instance == candidate.emissive_index {
-                selected_pdf = pdf;
-            }
-            sum_pdf += pdf;
-        }
+    //         var pdf = cone_pdf(cone, candidate.direction);
+    //         pdf *= select(lum / sum_lum, 0.0, sum_lum < 0.01);
+    //         if source.instance == candidate.emissive_index {
+    //             selected_pdf = pdf;
+    //         }
+    //         sum_pdf += pdf;
+    //     }
 
-        candidate.p = cone_pdf(candidate.cone, candidate.direction);
-        candidate.p *= select(selected_pdf / sum_pdf, 0.0, sum_pdf < 0.0001);
-    }
+    //     candidate.p = cone_pdf(candidate.cone, candidate.direction);
+    //     candidate.p *= select(selected_pdf / sum_pdf, 0.0, sum_pdf < 0.0001);
+    // }
 
     return candidate;
 }
@@ -587,7 +591,7 @@ fn input_radiance(
     ray: Ray,
     info: HitInfo,
     sample_directional: bool,
-    sample_emissive: bool,
+    sample_emissive: u32,
     sample_ambient: bool,
 ) -> vec4<f32> {
     var radiance = vec3<f32>(0.0);
@@ -608,7 +612,7 @@ fn input_radiance(
         }
     } else {
         // Input radiance is emissive, but bounced radiance is not added here
-        if sample_emissive {
+        if sample_emissive == SAMPLE_ALL_EMISSIVE || sample_emissive == info.instance_index {
             let emissive = retreive_emissive(info.material_index, info.uv);
             radiance = compute_emissive_radiance(emissive);
         }
@@ -850,10 +854,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
 #ifdef INCLUDE_EMISSIVE
             // Don't sample directional light, sample emissive only
-            s.radiance = input_radiance(ray, info, false, true, false);
+            s.radiance = input_radiance(ray, info, false, candidate.emissive_index, false);
 #else
             // Sample directional light only, don't sample emissive
-            s.radiance = input_radiance(ray, info, true, false, false);
+            s.radiance = input_radiance(ray, info, true, DONT_SAMPLE_EMISSIVE, false);
 #endif
         } else {
             s.sample_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
@@ -902,9 +906,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             validate_normal = info.normal;
 
 #ifdef INCLUDE_EMISSIVE
-            validate_radiance = input_radiance(ray, info, false, true, false);
+            validate_radiance = input_radiance(ray, info, false, candidate.emissive_index, false);
 #else
-            validate_radiance = input_radiance(ray, info, true, false, false);
+            validate_radiance = input_radiance(ray, info, true, DONT_SAMPLE_EMISSIVE, false);
 #endif
         } else {
             validate_position = vec4<f32>(ray.origin + DISTANCE_MAX * ray.direction, 0.0);
@@ -1075,7 +1079,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
                 hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
                 info = hit_info(ray, hit);
 
-                var in_radiance = input_radiance(ray, info, sample_directional, true, false);
+                var in_radiance = input_radiance(ray, info, sample_directional, candidate.emissive_index, false);
                 in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
 
                 out_radiance = shading(
@@ -1108,7 +1112,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             bounce_sample.visible_normal = bounce_sample.sample_normal;
         } else {
             // Only ambient radiance
-            var out_radiance = input_radiance(ray, info, false, false, true).rgb;
+            var out_radiance = input_radiance(ray, info, false, DONT_SAMPLE_EMISSIVE, true).rgb;
             s.radiance += vec4<f32>(color_transport * out_radiance, 0.0);
             break;
         }
@@ -1148,7 +1152,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
             info = hit_info(ray, hit);
 
-            var in_radiance = input_radiance(ray, info, sample_directional, true, false);
+            var in_radiance = input_radiance(ray, info, sample_directional, candidate.emissive_index, false);
             in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
 
             out_radiance = shading(
@@ -1163,7 +1167,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         }
     } else {
         // Only ambient radiance
-        var out_radiance = input_radiance(ray, info, false, false, true).rgb;
+        var out_radiance = input_radiance(ray, info, false, DONT_SAMPLE_EMISSIVE, true).rgb;
         s.radiance += vec4<f32>(out_radiance, 0.0);
     }
 #endif
