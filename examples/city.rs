@@ -86,7 +86,7 @@ fn setup(
                 emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
                 ..Default::default()
             }),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            transform: Transform::from_xyz(0.0, 1.0, 0.0),
             ..Default::default()
         },
         EmissiveSphere,
