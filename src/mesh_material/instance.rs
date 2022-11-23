@@ -1,6 +1,6 @@
 use super::{
-    material::GpuStandardMaterials, mesh::GpuMeshes, GpuEmissive, GpuEmissiveBuffer,
-    MeshMaterialSystems,
+    material::GpuStandardMaterials, mesh::GpuMeshes, GpuAliasEntry, GpuAliasTableBuffer,
+    GpuEmissive, GpuEmissiveBuffer, GpuMesh, GpuStandardMaterial, MeshMaterialSystems,
 };
 use crate::{
     mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer},
@@ -70,8 +70,10 @@ where
 #[derive(Default, Resource)]
 pub struct InstanceRenderAssets {
     pub instance_buffer: StorageBuffer<GpuInstanceBuffer>,
-    pub node_buffer: StorageBuffer<GpuNodeBuffer>,
+    pub instance_node_buffer: StorageBuffer<GpuNodeBuffer>,
     pub emissive_buffer: StorageBuffer<GpuEmissiveBuffer>,
+    pub emissive_node_buffer: StorageBuffer<GpuNodeBuffer>,
+    pub alias_table_buffer: StorageBuffer<GpuAliasTableBuffer>,
     pub instance_indices: DynamicUniformBuffer<InstanceIndex>,
 }
 
@@ -79,23 +81,29 @@ impl InstanceRenderAssets {
     pub fn set(
         &mut self,
         instances: Vec<GpuInstance>,
-        nodes: Vec<GpuNode>,
+        instance_nodes: Vec<GpuNode>,
         emissives: Vec<GpuEmissive>,
+        emissive_nodes: Vec<GpuNode>,
+        alias_table: Vec<GpuAliasEntry>,
     ) {
         self.instance_buffer.get_mut().data = instances;
-
-        self.node_buffer.get_mut().count = nodes.len() as u32;
-        self.node_buffer.get_mut().data = nodes;
-
-        self.emissive_buffer.get_mut().count = emissives.len() as u32;
         self.emissive_buffer.get_mut().data = emissives;
+        self.alias_table_buffer.get_mut().data = alias_table;
+
+        self.instance_node_buffer.get_mut().count = instance_nodes.len() as u32;
+        self.instance_node_buffer.get_mut().data = instance_nodes;
+
+        self.emissive_node_buffer.get_mut().count = emissive_nodes.len() as u32;
+        self.emissive_node_buffer.get_mut().data = emissive_nodes;
     }
 
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
         self.instance_buffer.write_buffer(device, queue);
-        self.node_buffer.write_buffer(device, queue);
+        self.instance_node_buffer.write_buffer(device, queue);
         self.emissive_buffer.write_buffer(device, queue);
+        self.emissive_node_buffer.write_buffer(device, queue);
         self.instance_indices.write_buffer(device, queue);
+        self.alias_table_buffer.write_buffer(device, queue);
     }
 }
 
@@ -220,8 +228,15 @@ pub struct InstanceIndex {
 #[derive(Component, Default, Clone, Copy)]
 pub struct DynamicInstanceIndex(pub u32);
 
-type Instances = BTreeMap<Entity, (GpuInstance, Handle<Mesh>, HandleUntyped, ComputedVisibility)>;
-type Emissives = BTreeMap<Entity, GpuEmissive>;
+type Instances = BTreeMap<
+    Entity,
+    (
+        GpuInstance,
+        GpuMesh,
+        GpuStandardMaterial,
+        ComputedVisibility,
+    ),
+>;
 
 /// Note: this system must run AFTER [`prepare_mesh_assets`].
 #[allow(clippy::too_many_arguments)]
@@ -231,8 +246,7 @@ fn prepare_instances(
     render_queue: Res<RenderQueue>,
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut extracted_instances: ResMut<ExtractedInstances>,
-    mut instances: Local<Instances>,
-    mut emissives: Local<Emissives>,
+    mut collection: Local<Instances>,
     meshes: Res<GpuMeshes>,
     materials: Res<GpuStandardMaterials>,
 ) {
@@ -240,13 +254,26 @@ fn prepare_instances(
         !extracted_instances.extracted.is_empty() || !extracted_instances.removed.is_empty();
 
     for removed in extracted_instances.removed.drain(..) {
-        instances.remove(&removed);
+        collection.remove(&removed);
     }
 
-    for (entity, aabb, transform, mesh, material, visibility) in
-        extracted_instances.extracted.drain(..)
+    let mut prepare_next_frame = vec![];
+
+    for (entity, aabb, transform, mesh, material, visibility) in extracted_instances
+        .extracted
+        .drain(..)
+        .filter_map(|(entity, aabb, transform, mesh, material, visibility)| {
+            match (meshes.get(&mesh), materials.get(&material)) {
+                (Some(mesh), Some(material)) => {
+                    Some((entity, aabb, transform, mesh, material, visibility))
+                }
+                _ => {
+                    prepare_next_frame.push((entity, aabb, transform, mesh, material, visibility));
+                    None
+                }
+            }
+        })
     {
-        let material = HandleUntyped::weak(material.id);
         let transform = transform.compute_matrix();
         let center = transform.transform_point3a(aabb.center);
         let vertices: Vec<_> = (0..8i32)
@@ -268,10 +295,11 @@ fn prepare_instances(
         min += center;
         max += center;
 
-        // Note that here the `GpuInstance` is partially constructed
+        // Note that the `GpuInstance` is partially constructed:
+        // since node index is unknown at this point.
         let min = Vec3::from(min);
         let max = Vec3::from(max);
-        instances.insert(
+        collection.insert(
             entity,
             (
                 GpuInstance {
@@ -279,14 +307,20 @@ fn prepare_instances(
                     max,
                     transform,
                     inverse_transpose_model: transform.inverse().transpose(),
+                    mesh: mesh.1,
+                    material: material.1,
                     ..Default::default()
                 },
-                mesh,
-                material,
+                mesh.0.clone(),
+                material.0.clone(),
                 visibility,
             ),
         );
     }
+
+    extracted_instances
+        .extracted
+        .append(&mut prepare_next_frame);
 
     // Since entities are cleared every frame, this should always be called.
     let mut add_instance_indices = |instances: &Instances| {
@@ -308,64 +342,82 @@ fn prepare_instances(
 
     if instance_changed || meshes.is_changed() || materials.is_changed() {
         // Important: update mesh and material info for every instance
-        emissives.clear();
-        instances.retain(|_, (instance, mesh, material, visibility)| {
-            if !visibility.is_visible_in_hierarchy() {
-                return false;
-            }
-            if let (Some(mesh), Some(material)) = (meshes.get(mesh), materials.get(material)) {
-                instance.mesh = mesh.1;
-                instance.material = material.1;
-                true
-            } else {
-                false
-            }
-        });
+        let mut emissives = vec![];
+        let mut alias_table = vec![];
 
-        let mut values: Vec<_> = instances
+        collection.retain(|_, (_, _, _, visibility)| visibility.is_visible_in_hierarchy());
+
+        let mut instances: Vec<_> = collection
             .values()
             .map(|(instance, _, _, _)| instance)
             .cloned()
             .collect();
 
-        let nodes = if !instances.is_empty() {
-            let bvh = BVH::build(&mut values);
-            bvh.flatten_custom(&GpuNode::pack)
-        } else {
-            Vec::new()
+        let instance_nodes = match collection.is_empty() {
+            true => vec![],
+            false => {
+                let bvh = BVH::build(&mut instances);
+                bvh.flatten_custom(&GpuNode::pack)
+            }
         };
 
-        for (instance, value) in instances.values_mut().zip_eq(values.iter()) {
-            instance.0 = *value;
+        for ((instance, _, _, _), value) in collection.values_mut().zip_eq(instances.iter()) {
+            // Assign the computed BVH node index, and mesh/material indices.
+            *instance = value.clone();
         }
 
-        add_instance_indices(&instances);
+        add_instance_indices(&collection);
 
-        for (id, (entity, (instance, _, material, _))) in instances.iter().enumerate() {
-            if let Some(material) = materials.get(material) {
-                // Add it to the light source list if it's emissive.
-                let emissive = material.0.emissive;
-                if emissive.w * emissive.xyz().length() > 0.0 {
-                    let position = 0.5 * (instance.max + instance.min);
-                    let radius = 0.5 * (instance.max - instance.min).length();
-                    emissives.insert(
-                        *entity,
-                        GpuEmissive {
-                            emissive,
-                            position,
-                            radius,
-                            instance: id as u32,
-                        },
-                    );
-                }
+        for (id, (_, (instance, mesh, material, _))) in collection.iter().enumerate() {
+            let emissive = material.emissive;
+            let intensity = 255.0 * emissive.w * emissive.xyz().length();
+            if intensity > 0.0 {
+                // Compute alias table for light sampling
+                let alias_table = {
+                    let mut instance_table = mesh.build_alias_table(instance.transform);
+                    let index = UVec2::new(alias_table.len() as u32, instance_table.len() as u32);
+                    alias_table.append(&mut instance_table);
+                    index
+                };
+
+                let surface_area = mesh
+                    .transformed_primitive_areas(instance.transform)
+                    .iter()
+                    .sum();
+
+                // Add to emissive list.
+                let position = 0.5 * (instance.max + instance.min);
+                let radius = 0.5 * (instance.max - instance.min).length() + intensity.sqrt();
+                emissives.push(GpuEmissive {
+                    emissive,
+                    position,
+                    radius,
+                    instance: id as u32,
+                    alias_table,
+                    surface_area,
+                    node_index: 0,
+                });
             }
         }
-        let emissives = emissives.values().cloned().collect();
 
-        render_assets.set(values, nodes, emissives);
+        let emissive_nodes = match emissives.is_empty() {
+            true => vec![],
+            false => {
+                let bvh = BVH::build(&mut emissives);
+                bvh.flatten_custom(&GpuNode::pack)
+            }
+        };
+
+        render_assets.set(
+            instances,
+            instance_nodes,
+            emissives,
+            emissive_nodes,
+            alias_table,
+        );
         render_assets.write_buffer(&render_device, &render_queue);
     } else {
-        add_instance_indices(&instances);
+        add_instance_indices(&collection);
         render_assets
             .instance_indices
             .write_buffer(&render_device, &render_queue);

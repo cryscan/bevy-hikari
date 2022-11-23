@@ -29,6 +29,7 @@ use serde::Serialize;
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const VARIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub const DEBUG_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -224,6 +225,17 @@ fn prepare_light_pipeline(
                 },
                 count: None,
             },
+            // Debug Texture
+            BindGroupLayoutEntry {
+                binding: 3,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: StorageTextureAccess::ReadWrite,
+                    format: DEBUG_TEXTURE_FORMAT,
+                    view_dimension: TextureViewDimension::D2,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -294,6 +306,7 @@ pub struct LightTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
     pub albedo: TextureView,
+    pub debug: TextureView,
     pub variance: [TextureView; 3],
     pub render: [TextureView; 3],
 }
@@ -369,6 +382,7 @@ fn prepare_light_textures(
             commands.entity(entity).insert(LightTextures {
                 head: counter.0 % 2,
                 albedo: create_texture(ALBEDO_TEXTURE_FORMAT),
+                debug: create_texture(DEBUG_TEXTURE_FORMAT),
                 variance,
                 render,
             });
@@ -506,6 +520,10 @@ fn queue_light_bind_groups(
                         BindGroupEntry {
                             binding: 2,
                             resource: BindingResource::TextureView(render),
+                        },
+                        BindGroupEntry {
+                            binding: 3,
+                            resource: BindingResource::TextureView(&light.debug),
                         },
                     ],
                 })

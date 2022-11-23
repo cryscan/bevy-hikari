@@ -17,4 +17,6 @@ var<storage> instance_node_buffer: Nodes;
 @group(2) @binding(6)
 var<storage> material_buffer: Materials;
 @group(2) @binding(7)
+var<storage> emissive_node_buffer: Nodes;
+@group(2) @binding(8)
 var<storage> emissive_buffer: Emissives;
