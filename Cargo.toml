@@ -44,4 +44,3 @@ bevy_mod_raycast = "0.7"
 
 [patch.crates-io]
 bevy = { git = "https://github.com/bevyengine/bevy.git", branch = "main" }
-smooth-bevy-cameras = { git = "https://github.com/bonsairobo/smooth-bevy-cameras", rev = "1388352469519b1451cd85482c46c8a4252440e7" }
