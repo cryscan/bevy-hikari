@@ -50,6 +50,7 @@ let GOLDEN_RATIO: f32 = 1.618033989;
 let POSITION_MISS_THRESHOLD: f32 = 0.5;
 let MAX_VARIANCE: f32 = 10.0;
 
+let DONT_EXCLUDE: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
@@ -253,7 +254,7 @@ fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, mesh: MeshIndex, early_dis
     return intersected;
 }
 
-fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
+fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32, exclude_instance: u32) -> Hit {
     var hit: Hit;
     hit.intersection.distance = max_distance;
     hit.instance_index = U32_MAX;
@@ -270,7 +271,7 @@ fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
             aabb.min = instance.min;
             aabb.max = instance.max;
 
-            if intersects_aabb(ray, aabb) < hit.intersection.distance {
+            if instance_index != exclude_instance && intersects_aabb(ray, aabb) < hit.intersection.distance {
                 var r: Ray;
                 r.origin = instance_position_world_to_local(instance, ray.origin);
                 r.direction = instance_direction_world_to_local(instance, ray.direction);
@@ -299,6 +300,13 @@ fn traverse_top(ray: Ray, max_distance: f32, early_distance: f32) -> Hit {
     return hit;
 }
 
+fn empty_hit_info() -> HitInfo {
+    var info: HitInfo;
+    info.instance_index = U32_MAX;
+    info.material_index = U32_MAX;
+    return info;
+}
+
 fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
     var info: HitInfo;
     info.instance_index = hit.instance_index;
@@ -323,6 +331,19 @@ fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
     }
 
     return info;
+}
+
+// Use this only if the ray is a shadow ray, i.e., call after `select_light_candidate`.
+fn shadow_hit_info(ray: Ray, hit: Hit, sample_directional: bool, info: ptr<function, HitInfo>) {
+    if !sample_directional {
+        // This ray selects an emissive. Update the hit info if it's shadowed.
+        if hit.instance_index != U32_MAX {
+            (*info).instance_index = hit.instance_index;
+            (*info).position = vec4<f32>(ray.origin + ray.direction * hit.intersection.distance, 1.0);
+        }
+    } else {
+        *info = hit_info(ray, hit);
+    }
 }
 
 fn sample_uniform_disk(rand: vec2<f32>) -> vec2<f32> {
@@ -408,6 +429,7 @@ fn select_light_candidate(
     position: vec3<f32>,
     normal: vec3<f32>,
     instance: u32,
+    info: ptr<function, HitInfo>,
 ) -> LightCandidate {
     var candidate: LightCandidate;
     candidate.max_distance = F32_MAX;
@@ -419,6 +441,7 @@ fn select_light_candidate(
     var rand_sample = sample_uniform_cone(rand.zw, cone.w);
     candidate.direction = normal_basis(cone.xyz) * rand_sample.xyz;
     candidate.p = 1.0;
+    *info = empty_hit_info();
 
     if instance == DONT_SAMPLE_EMISSIVE {
         return candidate;
@@ -486,11 +509,11 @@ fn select_light_candidate(
 
         candidate.direction = ray.direction;
         if dot(candidate.direction, normal) > 0.0 && traverse_bottom(&hit, r, instance.mesh, 0.0) {
-            let info = hit_info(ray, hit);
-            candidate.max_distance = hit.intersection.distance + 0.1;
+            *info = hit_info(ray, hit);
+            candidate.max_distance = hit.intersection.distance;
             candidate.min_distance = hit.intersection.distance - 0.1;
-            let delta = info.position.xyz - position;
-            candidate.p = dot(delta, delta) / (abs(dot(ray.direction, info.normal) * emissive.surface_area));
+            let delta = (*info).position.xyz - position;
+            candidate.p = dot(delta, delta) / (abs(dot(ray.direction, (*info).normal) * emissive.surface_area));
         } else {
             candidate.emissive_instance = DONT_SAMPLE_EMISSIVE;
             candidate.p = 0.0;
@@ -650,7 +673,7 @@ fn input_radiance(
         }
     } else {
         // Input radiance is emissive, but bounced radiance is not added here
-        if sample_emissive == SAMPLE_ALL_EMISSIVE || sample_emissive == info.instance_index {
+        if sample_emissive == info.instance_index {
             let emissive = retreive_emissive(info.material_index, info.uv);
             radiance = compute_emissive_radiance(emissive);
         }
@@ -846,7 +869,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var ray: Ray;
     var hit: Hit;
-    var info: HitInfo;
+    var info = empty_hit_info();
 
     let previous_uv = uv - velocity_uv.xy;
     var r = load_previous_reservoir(previous_uv, size);
@@ -859,9 +882,11 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 #ifdef INCLUDE_EMISSIVE
     let validate_interval = frame.emissive_validate_interval;
     let select_light_instance = instance_material.x;
+    let sample_directional = false;
 #else
     let validate_interval = frame.direct_validate_interval;
     let select_light_instance = DONT_SAMPLE_EMISSIVE;
+    let sample_directional = true;
 #endif
 
     // Non-validation frame, or sample count too low
@@ -870,7 +895,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             s.random,
             s.visible_position.xyz,
             s.visible_normal,
-            select_light_instance
+            select_light_instance,
+            &info
         );
 
 #ifdef INCLUDE_EMISSIVE
@@ -888,9 +914,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         trace_condition = trace_condition && candidate.emissive_instance != DONT_SAMPLE_EMISSIVE;
 #endif
 
-        if trace_condition {
-            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-            info = hit_info(ray, hit);
+        if trace_condition {            
+            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
+            shadow_hit_info(ray, hit, sample_directional, &info);
 
             s.sample_position = info.position;
             s.sample_normal = info.normal;
@@ -924,7 +950,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             r.s.random,
             r.s.visible_position.xyz,
             r.s.visible_normal,
-            select_light_instance
+            select_light_instance,
+            &info
         );
 
         ray.origin = s.visible_position.xyz + s.visible_normal * RAY_BIAS;
@@ -942,8 +969,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         var validate_radiance: vec4<f32>;
 
         if trace_condition {
-            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-            info = hit_info(ray, hit);
+            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
+            // info = hit_info(ray, hit);
+            shadow_hit_info(ray, hit, sample_directional, &info);
 
             validate_position = info.position;
             validate_normal = info.normal;
@@ -1073,7 +1101,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     var ray: Ray;
     var hit: Hit;
-    var info: HitInfo;
+    var info = empty_hit_info();
     var pdf: f32;
     var surface: Surface;
 
@@ -1087,7 +1115,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         ray.direction = normal_basis(bounce_sample.visible_normal) * rand_sample.xyz;
         ray.inv_direction = 1.0 / ray.direction;
 
-        hit = traverse_top(ray, F32_MAX, 0.0);
+        hit = traverse_top(ray, F32_MAX, 0.0, DONT_EXCLUDE);
         info = hit_info(ray, hit);
 
         if n == 0u {
@@ -1103,25 +1131,27 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         if hit.instance_index != U32_MAX {
             var out_radiance = vec3<f32>(0.0);
 
+            surface = retreive_surface(info.material_index, info.uv);
+            surface.roughness = 1.0;
+
             let candidate = select_light_candidate(
                 bounce_sample.random,
                 bounce_sample.sample_position.xyz,
                 bounce_sample.sample_normal,
-                info.instance_index
+                info.instance_index,
+                &info
             );
             let sample_directional = (candidate.emissive_instance == DONT_SAMPLE_EMISSIVE);
             let bounce_view_direction = normalize(bounce_sample.visible_position.xyz - bounce_sample.sample_position.xyz);
-
-            surface = retreive_surface(info.material_index, info.uv);
-            surface.roughness = 1.0;
 
             if dot(candidate.direction, bounce_sample.sample_normal) > 0.0 && candidate.p > 0.0 {
                 ray.origin = bounce_sample.sample_position.xyz + bounce_sample.sample_normal * RAY_BIAS;
                 ray.direction = candidate.direction;
                 ray.inv_direction = 1.0 / ray.direction;
 
-                hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-                info = hit_info(ray, hit);
+                hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
+                // info = hit_info(ray, hit);
+                shadow_hit_info(ray, hit, sample_directional, &info);
 
                 var in_radiance = input_radiance(ray, info, sample_directional, candidate.emissive_instance, false);
                 in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
@@ -1167,7 +1197,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     ray.direction = normal_basis(s.visible_normal) * rand_sample.xyz;
     ray.inv_direction = 1.0 / ray.direction;
 
-    hit = traverse_top(ray, F32_MAX, 0.0);
+    hit = traverse_top(ray, F32_MAX, 0.0, DONT_EXCLUDE);
     info = hit_info(ray, hit);
 
     s.sample_position = info.position;
@@ -1177,24 +1207,26 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     if hit.instance_index != U32_MAX {
         var out_radiance = vec3<f32>(0.0);
 
+        surface = retreive_surface(info.material_index, info.uv);
+        surface.roughness = 1.0;
+
         let candidate = select_light_candidate(
             s.random,
             s.sample_position.xyz,
             s.sample_normal,
-            info.instance_index
+            info.instance_index,
+            &info
         );
         let sample_directional = (candidate.emissive_instance == DONT_SAMPLE_EMISSIVE);
-
-        surface = retreive_surface(info.material_index, info.uv);
-        surface.roughness = 1.0;
 
         if dot(candidate.direction, s.sample_normal) > 0.0 && candidate.p > 0.0 {
             ray.origin = s.sample_position.xyz + s.sample_normal * RAY_BIAS;
             ray.direction = candidate.direction;
             ray.inv_direction = 1.0 / ray.direction;
 
-            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance);
-            info = hit_info(ray, hit);
+            hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
+            // info = hit_info(ray, hit);
+            shadow_hit_info(ray, hit, sample_directional, &info);
 
             var in_radiance = input_radiance(ray, info, sample_directional, candidate.emissive_instance, false);
             in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
