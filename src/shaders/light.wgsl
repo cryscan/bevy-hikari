@@ -484,7 +484,7 @@ fn select_light_candidate(
         r.inv_direction = 1.0 / r.direction;
 
         candidate.direction = ray.direction;
-        if traverse_bottom(&hit, r, instance.mesh, 0.0) {
+        if dot(candidate.direction, normal) > 0.0 && traverse_bottom(&hit, r, instance.mesh, 0.0) {
             let info = hit_info(ray, hit);
             candidate.max_distance = hit.intersection.distance + 0.1;
             candidate.min_distance = hit.intersection.distance - 0.1;
