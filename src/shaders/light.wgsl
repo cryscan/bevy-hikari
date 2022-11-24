@@ -48,6 +48,7 @@ let DISTANCE_MAX: f32 = 65535.0;
 let NOISE_TEXTURE_COUNT: u32 = 16u;
 let GOLDEN_RATIO: f32 = 1.618033989;
 let POSITION_MISS_THRESHOLD: f32 = 0.5;
+let MAX_VARIANCE: f32 = 10.0;
 
 let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
@@ -989,7 +990,8 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     r.lifetime += 1.0;
 
     var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
-    variance = select(variance / r.count, 0.0, r.count < 0.0001);
+    variance = select(variance / r.count, variance, r.count < 1.0);
+    variance = min(variance, MAX_VARIANCE);
     textureStore(variance_texture, coords, vec4<f32>(variance));
 
     if frame.enable_temporal_reuse > 0u {
@@ -1235,7 +1237,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     r.lifetime += 1.0;
 
     var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
-    variance = select(variance / r.count, 0.0, r.count < 0.0001);
+    variance = select(variance / r.count, variance, r.count < 1.0);
+    variance = min(variance, MAX_VARIANCE);
     textureStore(variance_texture, coords, vec4<f32>(variance));
 
     if frame.enable_temporal_reuse > 0u {
@@ -1399,7 +1402,8 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     if use_spatial_variance {
         var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);
-        variance = select(variance / r.count, 0.0, r.count < 0.0001);
+        variance = select(variance / r.count, variance, r.count < 1.0);
+        variance = min(variance, MAX_VARIANCE);
         textureStore(variance_texture, coords, vec4<f32>(variance));
     }
 
