@@ -814,7 +814,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
 #ifdef INCLUDE_EMISSIVE
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
-        textureStore(debug_texture, coords, vec4<f32>(0.0));
+        // textureStore(debug_texture, coords, vec4<f32>(0.0));
 #endif
         textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
@@ -873,7 +873,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         );
 
 #ifdef INCLUDE_EMISSIVE
-        textureStore(debug_texture, coords, vec4<f32>(candidate.direction, candidate.p));
+        // textureStore(debug_texture, coords, vec4<f32>(candidate.direction, candidate.p));
 #endif
 
         // Direct light sampling

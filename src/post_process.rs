@@ -645,9 +645,11 @@ pub struct PostProcessTextures {
     pub head: usize,
     pub nearest_sampler: Sampler,
     pub linear_sampler: Sampler,
+    pub fallback: TextureView,
     pub denoise_internal: [TextureView; 3],
     pub denoise_internal_variance: TextureView,
-    pub denoise_render: [TextureView; 9],
+    pub denoise_radiance: [TextureView; 6],
+    pub denoise_render: [TextureView; 3],
     pub tone_mapping_output: [TextureView; 2],
     pub taa_output: [TextureView; 2],
     pub upscale_output: [TextureView; 2],
@@ -732,7 +734,8 @@ fn prepare_post_process_textures(
 
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
             let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
-            let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 9];
+            let denoise_radiance = create_texture_array![HDR_TEXTURE_FORMAT, scale; 6];
+            let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
 
             let tone_mapping_output = create_texture_array![HDR_TEXTURE_FORMAT, scale; 2];
 
@@ -756,8 +759,10 @@ fn prepare_post_process_textures(
                 head: counter.0 % 2,
                 nearest_sampler,
                 linear_sampler,
+                fallback: fallback.clone(),
                 denoise_internal,
                 denoise_internal_variance,
+                denoise_radiance,
                 denoise_render,
                 tone_mapping_output,
                 taa_output,
@@ -824,7 +829,7 @@ pub struct PostProcessBindGroup {
     pub deferred: BindGroup,
     pub sampler: BindGroup,
     pub denoise_internal: BindGroup,
-    pub denoise_render: [BindGroup; 3],
+    pub denoise_render: Vec<BindGroup>,
     pub tone_mapping: BindGroup,
     pub tone_mapping_output: BindGroup,
     pub smaa: BindGroup,
@@ -913,53 +918,64 @@ fn queue_post_process_bind_groups(
                 },
             ],
         });
-        let denoise_render = [0, 1, 2].map(|id| {
-            render_device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.denoise_render_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&light.albedo),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::TextureView(&light.variance[id]),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::TextureView(
-                            &post_process.denoise_render[previous + 3 * id],
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 3,
-                        resource: BindingResource::TextureView(&light.render[id]),
-                    },
-                    BindGroupEntry {
-                        binding: 4,
-                        resource: BindingResource::TextureView(
-                            &post_process.denoise_render[current + 3 * id],
-                        ),
-                    },
-                    BindGroupEntry {
-                        binding: 5,
-                        resource: BindingResource::TextureView(
-                            &post_process.denoise_render[2 + 3 * id],
-                        ),
-                    },
-                ],
-            })
-        });
 
-        let (direct_render, emissive_render, indirect_render) = match settings.denoise {
+        let mut denoise_render = [0, 1, 2]
+            .map(|id| {
+                render_device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.denoise_render_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&light.albedo),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::TextureView(&light.variance[id]),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: BindingResource::TextureView(
+                                &post_process.denoise_radiance[previous + 2 * id],
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 3,
+                            resource: BindingResource::TextureView(&light.render[id]),
+                        },
+                        BindGroupEntry {
+                            binding: 4,
+                            resource: BindingResource::TextureView(
+                                &post_process.denoise_radiance[current + 2 * id],
+                            ),
+                        },
+                        BindGroupEntry {
+                            binding: 5,
+                            resource: BindingResource::TextureView(
+                                &post_process.denoise_render[id],
+                            ),
+                        },
+                    ],
+                })
+            })
+            .to_vec();
+
+        let (direct_render, emissive_render, mut indirect_render) = match settings.denoise {
             false => (&light.render[0], &light.render[1], &light.render[2]),
             true => (
+                &post_process.denoise_render[0],
+                &post_process.denoise_render[1],
                 &post_process.denoise_render[2],
-                &post_process.denoise_render[5],
-                &post_process.denoise_render[8],
             ),
         };
+
+        if settings.indirect_bounces == 0 {
+            // Do not denoise when there is no indirect rendering pass.
+            denoise_render.pop();
+            // Use fallback texture when there is no indirect denoise pass.
+            indirect_render = &post_process.fallback;
+        }
+
         let tone_mapping = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
             layout: &pipeline.tone_mapping_layout,
