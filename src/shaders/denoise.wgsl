@@ -168,10 +168,12 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let lum = luminance(irradiance);
 
+#ifdef FIREFLY_FILTERING
 #ifdef DENOISE_LEVEL_0
     var ff_sum_luminance = 0.0;
     var ff_sum_luminance_2 = 0.0;
     var ff_count = 0.0;
+#endif
 #endif
 
     for (var i = 0; i < 9; i += 1) {
@@ -207,23 +209,26 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         sum_irradiance += irradiance * w;
         sum_w += w;
 
+#ifdef FIREFLY_FILTERING
 #ifdef DENOISE_LEVEL_0
         ff_sum_luminance += sample_luminance;
         ff_sum_luminance_2 += sample_luminance * sample_luminance;
         ff_count += 1.0;
 #endif
+#endif
     }
 
     irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
 
+#ifdef FIREFLY_FILTERING
 #ifdef DENOISE_LEVEL_0
-    // Firefly filtering
     let ff_mean = ff_sum_luminance / ff_count;
     let ff_var = ff_sum_luminance_2 / ff_count - ff_mean * ff_mean;
-    
+
     if lum > ff_mean + 3.0 * sqrt(ff_var) {
         irradiance = ff_mean / lum * irradiance;
     }
+#endif
 #endif
 
     var color = vec4<f32>(irradiance, 1.0);

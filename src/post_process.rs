@@ -387,8 +387,9 @@ pub enum PostProcessEntryPoint {
 bitflags::bitflags! {
     #[repr(transparent)]
     pub struct PostProcessPipelineKey: u32 {
-        const ENTRY_POINT_BITS = PostProcessPipelineKey::ENTRY_POINT_MASK_BITS;
-        const DENOISE_LEVEL_BITS = PostProcessPipelineKey::DENOISE_LEVEL_MASK_BITS << PostProcessPipelineKey::DENOISE_LEVEL_SHIFT_BITS;
+        const ENTRY_POINT_BITS          = PostProcessPipelineKey::ENTRY_POINT_MASK_BITS;
+        const FIREFLY_FILTERING_BITS    = 1 << PostProcessPipelineKey::FIREFLY_FILTERING_SHIFT_BITS;
+        const DENOISE_LEVEL_BITS        = PostProcessPipelineKey::DENOISE_LEVEL_MASK_BITS << PostProcessPipelineKey::DENOISE_LEVEL_SHIFT_BITS;
     }
 }
 
@@ -396,6 +397,7 @@ impl PostProcessPipelineKey {
     const ENTRY_POINT_MASK_BITS: u32 = 0xF;
     const DENOISE_LEVEL_MASK_BITS: u32 = 0b11;
     const DENOISE_LEVEL_SHIFT_BITS: u32 = 32 - 2;
+    const FIREFLY_FILTERING_SHIFT_BITS: u32 = 8;
 
     pub fn from_entry_point(entry_point: PostProcessEntryPoint) -> Self {
         let entry_point_bits = (entry_point as u32) & Self::ENTRY_POINT_MASK_BITS;
@@ -431,6 +433,10 @@ impl SpecializedComputePipeline for PostProcessPipeline {
             "MAX_DIRECTIONAL_LIGHTS".into(),
             MAX_DIRECTIONAL_LIGHTS as i32,
         ));
+
+        if key.contains(PostProcessPipelineKey::FIREFLY_FILTERING_BITS) {
+            shader_defs.push("FIREFLY_FILTERING".into());
+        }
 
         let (layout, shader) = match key.entry_point() {
             PostProcessEntryPoint::Denoise => {
@@ -774,7 +780,7 @@ fn prepare_post_process_textures(
 
 #[derive(Resource)]
 pub struct CachedPostProcessPipelines {
-    denoise: [CachedComputePipelineId; 4],
+    denoise: Vec<[CachedComputePipelineId; 4]>,
     tone_mapping: CachedComputePipelineId,
     taa_jasmine: CachedComputePipelineId,
     smaa_tu4x: CachedComputePipelineId,
@@ -792,6 +798,13 @@ fn queue_post_process_pipelines(
     let denoise = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    });
+
+    let denoise_indirect = [0, 1, 2, 3].map(|level| {
+        let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
+        key |= PostProcessPipelineKey::from_denoise_level(level);
+        key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS;
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
 
@@ -814,7 +827,7 @@ fn queue_post_process_pipelines(
     let upscale_sharpen = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     commands.insert_resource(CachedPostProcessPipelines {
-        denoise,
+        denoise: vec![denoise, denoise, denoise_indirect],
         tone_mapping,
         taa_jasmine,
         smaa_tu4x,
@@ -1230,11 +1243,14 @@ impl Node for PostProcessNode {
         if settings.denoise {
             pass.set_bind_group(3, &post_process_bind_group.denoise_internal, &[]);
 
-            for render_bind_group in &post_process_bind_group.denoise_render {
+            for (render_bind_group, denoise) in post_process_bind_group
+                .denoise_render
+                .iter()
+                .zip(pipelines.denoise.iter())
+            {
                 pass.set_bind_group(4, render_bind_group, &[]);
 
-                for pipeline in pipelines
-                    .denoise
+                for pipeline in denoise
                     .iter()
                     .filter_map(|pipeline| pipeline_cache.get_compute_pipeline(*pipeline))
                 {
