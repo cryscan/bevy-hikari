@@ -238,26 +238,26 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_uv = uv - velocity;
     var previous_color = color;
 
-    for (var i = 0; i < 1; i += 1) {
-        let sample_uv = previous_uv;
+    // for (var i = 0; i < 1; i += 1) {
+    //     let sample_uv = previous_uv;
 
-        let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
-        let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
-        if previous_depth == 0.0 {
-            continue;
-        }
-        let depth_ratio = depth / previous_depth;
-        let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
+    //     let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
+    //     let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
+    //     if previous_depth == 0.0 {
+    //         continue;
+    //     }
+    //     let depth_ratio = depth / previous_depth;
+    //     let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
 
-        let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
-        let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
+    //     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
+    //     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
-        if depth_miss && velocity_miss {
-            continue;
-        }
+    //     if depth_miss && velocity_miss {
+    //         continue;
+    //     }
 
-        previous_color = textureSampleLevel(previous_radiance_texture, nearest_sampler, sample_uv, 0.0);
-    }
+    //     previous_color = textureSampleLevel(previous_radiance_texture, nearest_sampler, sample_uv, 0.0);
+    // }
 
     let mixed_color = mix(color, previous_color, 0.5);
     color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
