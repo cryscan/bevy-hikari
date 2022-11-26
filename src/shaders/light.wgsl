@@ -1091,7 +1091,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     var color_transport = vec3<f32>(1.0);
 
     for (var n = 0u; n < frame.indirect_bounces && any(color_transport > vec3<f32>(0.01)); n += 1u) {
-        var rand_sample = sample_cosine_hemisphere(bounce_sample.random.xy);
+        // var rand_sample = sample_cosine_hemisphere(bounce_sample.random.xy);
+        var rand_sample = sample_uniform_cone(bounce_sample.random.xy, 0.0);
         ray.origin = bounce_sample.visible_position.xyz + bounce_sample.visible_normal * RAY_BIAS;
         ray.direction = normal_basis(bounce_sample.visible_normal) * rand_sample.xyz;
         ray.inv_direction = 1.0 / ray.direction;
@@ -1173,7 +1174,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         }
     }
 #else
-    var rand_sample = sample_cosine_hemisphere(s.random.xy);
+    // var rand_sample = sample_cosine_hemisphere(s.random.xy);
+    var rand_sample = sample_uniform_cone(s.random.xy, 0.0);
     ray.origin = s.visible_position.xyz + s.visible_normal * RAY_BIAS;
     ray.direction = normal_basis(s.visible_normal) * rand_sample.xyz;
     ray.inv_direction = 1.0 / ray.direction;
