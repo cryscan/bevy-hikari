@@ -182,6 +182,24 @@ fn setup(
         EmissiveSphere,
         Name::new("Emissive Sphere"),
     ));
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::UVSphere {
+                radius: 0.5,
+                ..Default::default()
+            })),
+            material: materials.add(StandardMaterial {
+                base_color_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+                emissive: Color::rgba(1.0, 1.0, 1.0, 0.1),
+                emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
+                ..Default::default()
+            }),
+            transform: Transform::from_xyz(-2.0, 1.0, 0.0),
+            ..Default::default()
+        },
+        EmissiveSphere,
+        Name::new("Emissive Sphere"),
+    ));
 
     // Model
     let scene = asset_server.load("models/extinguisher.glb#Scene0");
