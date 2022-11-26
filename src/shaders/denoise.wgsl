@@ -220,8 +220,9 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Firefly filtering
     let ff_mean = ff_sum_luminance / ff_count;
     let ff_var = ff_sum_luminance_2 / ff_count - ff_mean * ff_mean;
-    if luminance(irradiance) > ff_mean + 3.0 * sqrt(ff_var) {
-        irradiance = vec3<f32>(0.0);
+    
+    if lum > ff_mean + 3.0 * sqrt(ff_var) {
+        irradiance = ff_mean / lum * irradiance;
     }
 #endif
 
