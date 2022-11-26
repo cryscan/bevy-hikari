@@ -157,16 +157,22 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
 #endif
 
-    irradiance = select(irradiance, vec3<f32>(0.0), irradiance > vec3<f32>(F32_MAX));
-    let lum = luminance(irradiance);
-
     var sum_irradiance = irradiance;
     var sum_w = 1.0;
 
     if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
-        sum_irradiance = irradiance;
+        irradiance = vec3<f32>(0.0);
+        sum_irradiance = vec3<f32>(0.0);
         sum_w = 0.0;
     }
+
+    let lum = luminance(irradiance);
+
+#ifdef DENOISE_LEVEL_0
+    var ff_sum_luminance = 0.0;
+    var ff_sum_luminance_2 = 0.0;
+    var ff_count = 0.0;
+#endif
 
     for (var i = 0; i < 9; i += 1) {
         let x = i % 3 - 1;
@@ -200,9 +206,25 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let w = clamp(w_normal * w_depth * w_instance * w_luminance, 0.0, 1.0) * frame.kernel[y + 1][x + 1];
         sum_irradiance += irradiance * w;
         sum_w += w;
+
+#ifdef DENOISE_LEVEL_0
+        ff_sum_luminance += sample_luminance;
+        ff_sum_luminance_2 += sample_luminance * sample_luminance;
+        ff_count += 1.0;
+#endif
     }
 
     irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
+
+#ifdef DENOISE_LEVEL_0
+    // Firefly filtering
+    let ff_mean = ff_sum_luminance / ff_count;
+    let ff_var = ff_sum_luminance_2 / ff_count - ff_mean * ff_mean;
+    if luminance(irradiance) > ff_mean + 3.0 * sqrt(ff_var) {
+        irradiance = vec3<f32>(0.0);
+    }
+#endif
+
     var color = vec4<f32>(irradiance, 1.0);
 
 #ifdef DENOISE_LEVEL_3
@@ -227,7 +249,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         if depth_miss && velocity_miss {
             continue;
         }
-        
+
         previous_color = textureSampleLevel(previous_radiance_texture, nearest_sampler, sample_uv, 0.0);
     }
 
