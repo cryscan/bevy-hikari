@@ -40,6 +40,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.world_position = mesh_position_local_to_world(model, vertex_position);
     out.previous_world_position = mesh_position_local_to_world(previous_mesh.model, vertex_position);
 
+#ifdef TEMPORAL_ANTI_ALIASING
+    jitter = 2.0 * (frame_jitter(frame.number, 13u) - 0.5) * texel_size;
+#endif // TEMPORAL_ANTI_ALIASING
 #ifdef SMAA_TU4X
     // +-+-+
     // |0| |
@@ -49,11 +52,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // From the SMAA slides: dynamic sub-pixel jittering
     // let velocity = clip_to_uv(view.view_proj * out.world_position) - clip_to_uv(previous_view.view_proj * out.previous_world_position);
     // let jitter_scale = 0.5 + 0.5 * cos(PI / (0.5 * pixel_size) * velocity);
-    jitter += select(0.5, -0.5, frame.number % 2u == 0u) * texel_size;
-#else  // SMAA_TU_4X
-#ifdef TEMPORAL_ANTI_ALIASING
-    jitter = 2.0 * (frame_jitter(frame.number, 12u) - 0.5) * texel_size;
-#endif // TEMPORAL_ANTI_ALIASING
+    jitter = 0.5 * jitter + select(0.5, -0.5, frame.number % 2u == 0u) * texel_size;
 #endif // SMAA_TU_4X
 
     if projection[3].w != 1.0 {
