@@ -88,13 +88,8 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
 
-    var previous_depth = 0.0;
-    for (var i = 0u; i < 4u; i += 1u) {
-        let offset = vec2<f32>(f32(i / 2u), f32(i % 2u)) * texel_size;
-        let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv + offset);
-        previous_depth = max(previous_depth, max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w)));
-    }
-
+    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
+    let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
     let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
@@ -102,7 +97,7 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
-    if depth_miss && velocity_miss {
+    if current_depth == 0.0 || (depth_miss && velocity_miss) {
         // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
         let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
         let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
