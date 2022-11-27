@@ -14,6 +14,8 @@ var internal_texture_1: texture_storage_2d<rgba16float, read_write>;
 @group(3) @binding(2)
 var internal_texture_2: texture_storage_2d<rgba16float, read_write>;
 @group(3) @binding(3)
+var internal_texture_3: texture_storage_2d<rgba16float, read_write>;
+@group(3) @binding(4)
 var internal_variance: texture_storage_2d<r32float, read_write>;
 
 @group(4) @binding(0)
@@ -59,28 +61,28 @@ fn instance_weight(i0: u32, i1: u32) -> f32 {
 
 fn load_input(coords: vec2<i32>) -> vec4<f32> {
 #ifdef DENOISE_LEVEL_0
-    return textureLoad(render_texture, coords, 0);
-#endif
-#ifdef DENOISE_LEVEL_1
     return textureLoad(internal_texture_0, coords);
 #endif
-#ifdef DENOISE_LEVEL_2
+#ifdef DENOISE_LEVEL_1
     return textureLoad(internal_texture_1, coords);
 #endif
-#ifdef DENOISE_LEVEL_3
+#ifdef DENOISE_LEVEL_2
     return textureLoad(internal_texture_2, coords);
+#endif
+#ifdef DENOISE_LEVEL_3
+    return textureLoad(internal_texture_3, coords);
 #endif
 }
 
 fn store_output(coords: vec2<i32>, value: vec4<f32>) {
 #ifdef DENOISE_LEVEL_0
-    textureStore(internal_texture_0, coords, value);
-#endif
-#ifdef DENOISE_LEVEL_1
     textureStore(internal_texture_1, coords, value);
 #endif
-#ifdef DENOISE_LEVEL_2
+#ifdef DENOISE_LEVEL_1
     textureStore(internal_texture_2, coords, value);
+#endif
+#ifdef DENOISE_LEVEL_2
+    textureStore(internal_texture_3, coords, value);
 #endif
 #ifdef DENOISE_LEVEL_3
     textureStore(output_texture, coords, value);
@@ -131,6 +133,20 @@ fn step_size() -> i32 {
 }
 
 @compute @workgroup_size(8, 8, 1)
+fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let size = textureDimensions(output_texture);
+    let coords = vec2<i32>(invocation_id.xy);
+    let uv = coords_to_uv(coords, size);
+
+    let albedo = textureSampleLevel(albedo_texture, nearest_sampler, uv, 0.0).rgb;
+    var irradiance = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
+    irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
+    
+    let color = vec4<f32>(irradiance, 1.0);
+    textureStore(internal_texture_0, coords, color);
+}
+
+@compute @workgroup_size(8, 8, 1)
 fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let size = textureDimensions(output_texture);
     let coords = vec2<i32>(invocation_id.xy);
@@ -150,12 +166,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     let variance = load_cache_variance(coords, size);
-
     var irradiance = load_input(coords).rgb;
-#ifdef DENOISE_LEVEL_0
-    let albedo = textureLoad(albedo_texture, coords, 0).rgb;
-    irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
-#endif
 
     var sum_irradiance = irradiance;
     var sum_w = 1.0;
@@ -169,11 +180,9 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let lum = luminance(irradiance);
 
 #ifdef FIREFLY_FILTERING
-#ifdef DENOISE_LEVEL_0
     var ff_sum_luminance = 0.0;
     var ff_sum_luminance_2 = 0.0;
     var ff_count = 0.0;
-#endif
 #endif
 
     for (var i = 0; i < 9; i += 1) {
@@ -187,10 +196,6 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         }
 
         irradiance = load_input(sample_coords).rgb;
-#ifdef DENOISE_LEVEL_0
-        let albedo = textureLoad(albedo_texture, coords, 0).rgb;
-        irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
-#endif
         if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
             continue;
         }
@@ -210,25 +215,21 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         sum_w += w;
 
 #ifdef FIREFLY_FILTERING
-#ifdef DENOISE_LEVEL_0
         ff_sum_luminance += sample_luminance;
         ff_sum_luminance_2 += sample_luminance * sample_luminance;
         ff_count += 1.0;
-#endif
 #endif
     }
 
     irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
 
 #ifdef FIREFLY_FILTERING
-#ifdef DENOISE_LEVEL_0
     let ff_mean = ff_sum_luminance / ff_count;
     let ff_var = ff_sum_luminance_2 / ff_count - ff_mean * ff_mean;
 
     if lum > ff_mean + 3.0 * sqrt(ff_var) {
         irradiance = ff_mean / lum * irradiance;
     }
-#endif
 #endif
 
     var color = vec4<f32>(irradiance, 1.0);

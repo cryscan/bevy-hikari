@@ -122,9 +122,20 @@ impl FromWorld for PostProcessPipeline {
                         },
                         count: None,
                     },
-                    // Internal Variance
+                    // Internal 3
                     BindGroupLayoutEntry {
                         binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::StorageTexture {
+                            access: StorageTextureAccess::ReadWrite,
+                            format: HDR_TEXTURE_FORMAT,
+                            view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    // Internal Variance
+                    BindGroupLayoutEntry {
+                        binding: 4,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
@@ -375,13 +386,14 @@ impl FromWorld for PostProcessPipeline {
 #[serde(rename_all = "snake_case")]
 pub enum PostProcessEntryPoint {
     #[default]
-    Denoise = 0,
-    ToneMapping = 1,
-    JasmineTaa = 2,
-    SmaaTu4x = 3,
-    SmaaTu4xExtrapolate = 4,
-    Upscale = 5,
-    UpscaleSharpen = 6,
+    Demodulation = 0,
+    Denoise = 1,
+    ToneMapping = 2,
+    JasmineTaa = 3,
+    SmaaTu4x = 4,
+    SmaaTu4xExtrapolate = 5,
+    Upscale = 6,
+    UpscaleSharpen = 7,
 }
 
 bitflags::bitflags! {
@@ -439,7 +451,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
         }
 
         let (layout, shader) = match key.entry_point() {
-            PostProcessEntryPoint::Denoise => {
+            PostProcessEntryPoint::Demodulation | PostProcessEntryPoint::Denoise => {
                 let layout = vec![
                     self.view_layout.clone(),
                     self.deferred_layout.clone(),
@@ -652,7 +664,7 @@ pub struct PostProcessTextures {
     pub nearest_sampler: Sampler,
     pub linear_sampler: Sampler,
     pub fallback: TextureView,
-    pub denoise_internal: [TextureView; 3],
+    pub denoise_internal: [TextureView; 4],
     pub denoise_internal_variance: TextureView,
     pub denoise_radiance: [TextureView; 6],
     pub denoise_render: [TextureView; 3],
@@ -739,7 +751,7 @@ fn prepare_post_process_textures(
             let mut scale = settings.upscale.ratio().recip();
 
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
-            let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
+            let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 4];
             let denoise_radiance = create_texture_array![HDR_TEXTURE_FORMAT, scale; 6];
             let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
 
@@ -780,7 +792,9 @@ fn prepare_post_process_textures(
 
 #[derive(Resource)]
 pub struct CachedPostProcessPipelines {
-    denoise: Vec<[CachedComputePipelineId; 4]>,
+    demodulation: CachedComputePipelineId,
+    denoise: [CachedComputePipelineId; 4],
+    denoise_indirect: [CachedComputePipelineId; 4],
     tone_mapping: CachedComputePipelineId,
     taa_jasmine: CachedComputePipelineId,
     smaa_tu4x: CachedComputePipelineId,
@@ -795,6 +809,9 @@ fn queue_post_process_pipelines(
     mut pipelines: ResMut<SpecializedComputePipelines<PostProcessPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
+    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Demodulation);
+    let demodulation = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+
     let denoise = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
@@ -804,7 +821,9 @@ fn queue_post_process_pipelines(
     let denoise_indirect = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
-        key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS;
+        if level == 0 {
+            key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS;
+        }
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
 
@@ -827,7 +846,9 @@ fn queue_post_process_pipelines(
     let upscale_sharpen = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
     commands.insert_resource(CachedPostProcessPipelines {
-        denoise: vec![denoise, denoise, denoise_indirect],
+        demodulation,
+        denoise,
+        denoise_indirect,
         tone_mapping,
         taa_jasmine,
         smaa_tu4x,
@@ -927,6 +948,10 @@ fn queue_post_process_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 3,
+                    resource: BindingResource::TextureView(&post_process.denoise_internal[3]),
+                },
+                BindGroupEntry {
+                    binding: 4,
                     resource: BindingResource::TextureView(&post_process.denoise_internal_variance),
                 },
             ],
@@ -1243,12 +1268,26 @@ impl Node for PostProcessNode {
         if settings.denoise {
             pass.set_bind_group(3, &post_process_bind_group.denoise_internal, &[]);
 
+            let denoise_pipelines = [
+                pipelines.denoise,
+                pipelines.denoise,
+                pipelines.denoise_indirect,
+            ];
+
             for (render_bind_group, denoise) in post_process_bind_group
                 .denoise_render
                 .iter()
-                .zip(pipelines.denoise.iter())
+                .zip(denoise_pipelines.iter())
             {
                 pass.set_bind_group(4, render_bind_group, &[]);
+
+                if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.demodulation)
+                {
+                    pass.set_pipeline(pipeline);
+
+                    let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    pass.dispatch_workgroups(count.x, count.y, 1);
+                }
 
                 for pipeline in denoise
                     .iter()
