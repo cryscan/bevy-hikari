@@ -118,7 +118,7 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Ghost fading by luminance difference
     let current_lum = luminance(current_color);
     let previous_lum = luminance(previous_color);
-    let delta_lum = clamp(abs(current_lum - previous_lum), 0.0, 1.0);
+    let delta_lum = pow(clamp(abs(current_lum - previous_lum), 0.0, 1.0), 0.5);
     let factor = select(0.1, mix(0.1, 0.9, delta_lum), velocity_miss);
 
     // Blend current and past sample
