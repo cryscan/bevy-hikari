@@ -90,35 +90,39 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
     // let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
-    let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    // let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     // let depth_ratio = current_depth / max(previous_depth, 0.0001);
     // let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
-    let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
+    let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
 
-    if current_depth == 0.0 || velocity_miss {
-        // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
-        let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
-        let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
-        let s_tr = sample_render_texture(uv + texel_size);
-        let s_ml = sample_render_texture(uv - vec2<f32>(texel_size.x, 0.0));
-        let s_mm = RGB_to_YCoCg(current_color);
-        let s_mr = sample_render_texture(uv + vec2<f32>(texel_size.x, 0.0));
-        let s_bl = sample_render_texture(uv - texel_size);
-        let s_bm = sample_render_texture(uv - vec2<f32>(0.0, texel_size.y));
-        let s_br = sample_render_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
-        let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
-        let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
-        let mean = moment_1 / 9.0;
-        let variance = sqrt((moment_2 / 9.0) - (mean * mean));
-        previous_color = RGB_to_YCoCg(previous_color);
-        previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
-        previous_color = YCoCg_to_RGB(previous_color);
-    }
+    // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
+    // let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
+    // let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
+    // let s_tr = sample_render_texture(uv + texel_size);
+    // let s_ml = sample_render_texture(uv - vec2<f32>(texel_size.x, 0.0));
+    // let s_mm = RGB_to_YCoCg(current_color);
+    // let s_mr = sample_render_texture(uv + vec2<f32>(texel_size.x, 0.0));
+    // let s_bl = sample_render_texture(uv - texel_size);
+    // let s_bm = sample_render_texture(uv - vec2<f32>(0.0, texel_size.y));
+    // let s_br = sample_render_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
+    // let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
+    // let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
+    // let mean = moment_1 / 9.0;
+    // let variance = sqrt((moment_2 / 9.0) - (mean * mean));
+    // previous_color = RGB_to_YCoCg(previous_color);
+    // previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
+    // previous_color = YCoCg_to_RGB(previous_color);
+
+    // Ghost fading by luminance difference
+    let current_lum = luminance(current_color);
+    let previous_lum = luminance(previous_color);
+    let delta_lum = clamp(abs(current_lum - previous_lum), 0.0, 1.0);
+    let factor = select(0.1, mix(0.1, 0.9, delta_lum), velocity_miss);
 
     // Blend current and past sample
-    let output = mix(previous_color, current_color, 0.1);
+    let output = mix(previous_color, current_color, factor);
 
     // return vec4<f32>(output, original_color.a);
     // textureStore(accumulation_texture, coords, vec4<f32>(output, original_color.a));
