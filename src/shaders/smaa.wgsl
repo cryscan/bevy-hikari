@@ -57,7 +57,7 @@ fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
 fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
     let coords = vec2<i32>(invocation_id.xy);
-    let uv = coords_to_uv(coords, input_size);
+    var uv = coords_to_uv(coords, input_size);
 
     // In this implementation, a thread computes 4 output pixels in a quad.
     // One of the pixel (c) on the diagonal can be fetched from render_texture,
@@ -82,19 +82,19 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     //  2 |  |cs|  |  |
     //    +--+--+--+--+
 
-    let frame_index = frame.number % 2u;
-
-    // Fetch the current sample
-    let current_output_coords = 2 * coords + select(1, 0, frame_index == 0u);
-    let original_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0);
-    let current_color = original_color.rgb;
-
     // Reproject to find the equivalent sample from the past, using 5-tap Catmull-Rom filtering
     // from https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
     let size = vec2<f32>(input_size);
     let texel_size = 1.0 / size;
+
+    let frame_index = frame.number % 2u;
     let previous_output_coords = 2 * coords + select(0, 1, frame_index == 0u);
+
+    // Fetch the current sample
+    let current_output_coords = 2 * coords + select(1, 0, frame_index == 0u);
+    let original_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0);
+    let current_color = original_color.rgb;
 
     let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).xy;
     let previous_uv = uv - velocity;
@@ -117,8 +117,11 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_12.y)) * w12.x * w12.y;
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
+    // var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_uv, 0.0).rgb;
 
-    let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    let current_depths = textureGather(3, position_texture, linear_sampler, uv);
+    let current_depth = min(min(current_depths.x, current_depths.y), min(current_depths.z, current_depths.w));
+    // let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
     let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
