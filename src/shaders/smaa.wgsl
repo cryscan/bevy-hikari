@@ -11,8 +11,6 @@ var linear_sampler: sampler;
 var previous_render_texture: texture_2d<f32>;
 @group(3) @binding(1)
 var render_texture: texture_2d<f32>;
-@group(3) @binding(2)
-var upscaled_texture: texture_2d<f32>;
 
 @group(4) @binding(0)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
@@ -56,8 +54,9 @@ fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
 @compute @workgroup_size(8, 8, 1)
 fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
+    let output_size = textureDimensions(output_texture);
     let coords = vec2<i32>(invocation_id.xy);
-    var uv = coords_to_uv(coords, input_size);
+    let uv = coords_to_uv(coords, input_size);
 
     // In this implementation, a thread computes 4 output pixels in a quad.
     // One of the pixel (c) on the diagonal can be fetched from render_texture,
@@ -90,6 +89,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let frame_index = frame.number % 2u;
     let previous_output_coords = 2 * coords + select(0, 1, frame_index == 0u);
+    let previous_output_uv = coords_to_uv(previous_output_coords, output_size);
 
     // Fetch the current sample
     let current_output_coords = 2 * coords + select(1, 0, frame_index == 0u);
@@ -119,9 +119,9 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
     // var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_uv, 0.0).rgb;
 
-    let current_depths = textureGather(3, position_texture, linear_sampler, uv);
-    let current_depth = min(min(current_depths.x, current_depths.y), min(current_depths.z, current_depths.w));
-    // let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    // let current_depths = textureGather(3, position_texture, linear_sampler, uv);
+    // let current_depth = min(min(current_depths.x, current_depths.y), min(current_depths.z, current_depths.w));
+    let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
     let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
@@ -130,8 +130,9 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
-    if depth_miss && velocity_miss {
+    if previous_depth != 0.0 && depth_miss && velocity_miss {
         // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
+        let uv = coords_to_uv(current_output_coords, output_size);
         let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
         let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
         let s_tr = sample_render_texture(uv + texel_size);
@@ -209,19 +210,19 @@ fn smaa_tu4x_extrapolate(@builtin(global_invocation_id) invocation_id: vec3<u32>
     //  2 |  |s |  |  |
     //    +--+--+--+--+
 
-    let t_color = textureLoad(upscaled_texture, 2 * coords, 0);
-    let b_color = textureLoad(upscaled_texture, 2 * coords + vec2<i32>(1, 1), 0);
-    let n_color = textureLoad(upscaled_texture, 2 * coords + vec2<i32>(1, -1), 0);
-    let e_color = textureLoad(upscaled_texture, 2 * coords + vec2<i32>(2, 0), 0);
-    let s_color = textureLoad(upscaled_texture, 2 * coords + vec2<i32>(0, 2), 0);
-    let w_color = textureLoad(upscaled_texture, 2 * coords + vec2<i32>(-1, 1), 0);
+    let t_color = textureLoad(output_texture, 2 * coords);
+    let b_color = textureLoad(output_texture, 2 * coords + vec2<i32>(1, 1));
+    let n_color = textureLoad(output_texture, 2 * coords + vec2<i32>(1, -1));
+    let e_color = textureLoad(output_texture, 2 * coords + vec2<i32>(2, 0));
+    let s_color = textureLoad(output_texture, 2 * coords + vec2<i32>(0, 2));
+    let w_color = textureLoad(output_texture, 2 * coords + vec2<i32>(-1, 1));
 
     let factor = differential_blend_factor(t_color, b_color, n_color, e_color, s_color, w_color);
     let x_color = differential_blend(t_color, s_color, w_color, b_color, factor);
     let y_color = differential_blend(n_color, b_color, t_color, e_color, factor);
 
-    textureStore(output_texture, 2 * coords, t_color);
-    textureStore(output_texture, 2 * coords + vec2<i32>(1, 1), b_color);
+    // textureStore(output_texture, 2 * coords, t_color);
+    // textureStore(output_texture, 2 * coords + vec2<i32>(1, 1), b_color);
     textureStore(output_texture, 2 * coords + vec2<i32>(0, 1), x_color);
     textureStore(output_texture, 2 * coords + vec2<i32>(1, 0), y_color);
 }

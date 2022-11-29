@@ -226,7 +226,7 @@ fn queue_overlay_bind_groups(
 
         let input_texture = match (settings.upscale, settings.taa) {
             (Upscale::Fsr1 { .. }, _) => &post_process.upscale_output[1],
-            (Upscale::SmaaTu4x { .. }, Taa::None) => &post_process.upscale_output[1],
+            (Upscale::SmaaTu4x { .. }, Taa::None) => &post_process.upscale_output[0],
             (Upscale::SmaaTu4x { .. }, Taa::Jasmine) => &post_process.taa_output[current],
             (Upscale::None, Taa::Jasmine) => &post_process.taa_output[current],
             (Upscale::None, Taa::None) => &post_process.tone_mapping_output[current],

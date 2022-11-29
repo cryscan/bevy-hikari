@@ -284,17 +284,6 @@ impl FromWorld for PostProcessPipeline {
                     },
                     count: None,
                 },
-                // Upscale
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
             ],
         });
 
@@ -821,8 +810,9 @@ fn queue_post_process_pipelines(
     let denoise_indirect = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
-        if level == 0 {
-            key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS;
+        match level {
+            0 | 1 | 2 => key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS,
+            _ => {}
         }
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
@@ -867,7 +857,7 @@ pub struct PostProcessBindGroup {
     pub tone_mapping: BindGroup,
     pub tone_mapping_output: BindGroup,
     pub smaa: BindGroup,
-    pub smaa_extrapolate: BindGroup,
+    pub smaa_output: BindGroup,
     pub taa: BindGroup,
     pub taa_output: BindGroup,
     pub upscale: BindGroup,
@@ -1057,37 +1047,19 @@ fn queue_post_process_bind_groups(
                         &post_process.tone_mapping_output[current],
                     ),
                 },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(&post_process.upscale_output[1]),
-                },
             ],
         });
-        let smaa_extrapolate = render_device.create_bind_group(&BindGroupDescriptor {
+        let smaa_output = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
-            layout: &pipeline.smaa_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(
-                        &post_process.tone_mapping_output[previous],
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(
-                        &post_process.tone_mapping_output[current],
-                    ),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(&post_process.upscale_output[0]),
-                },
-            ],
+            layout: &pipeline.output_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&post_process.upscale_output[0]),
+            }],
         });
 
         let taa_input_texture = match settings.upscale {
-            Upscale::SmaaTu4x { .. } => &post_process.upscale_output[1],
+            Upscale::SmaaTu4x { .. } => &post_process.upscale_output[0],
             _ => &post_process.tone_mapping_output[current],
         };
         let taa = render_device.create_bind_group(&BindGroupDescriptor {
@@ -1172,7 +1144,7 @@ fn queue_post_process_bind_groups(
             tone_mapping,
             tone_mapping_output,
             smaa,
-            smaa_extrapolate,
+            smaa_output,
             taa,
             taa_output,
             upscale,
@@ -1313,7 +1285,7 @@ impl Node for PostProcessNode {
 
         if matches!(settings.upscale, Upscale::SmaaTu4x { .. }) {
             pass.set_bind_group(3, &post_process_bind_group.smaa, &[]);
-            pass.set_bind_group(4, &post_process_bind_group.upscale_output, &[]);
+            pass.set_bind_group(4, &post_process_bind_group.smaa_output, &[]);
 
             if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.smaa_tu4x) {
                 pass.set_pipeline(pipeline);
@@ -1321,9 +1293,6 @@ impl Node for PostProcessNode {
                 let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
                 pass.dispatch_workgroups(count.x, count.y, 1);
             }
-
-            pass.set_bind_group(3, &post_process_bind_group.smaa_extrapolate, &[]);
-            pass.set_bind_group(4, &post_process_bind_group.upscale_sharpen_output, &[]);
 
             if let Some(pipeline) =
                 pipeline_cache.get_compute_pipeline(pipelines.smaa_tu4x_extrapolate)
