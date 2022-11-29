@@ -32,7 +32,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var model = mesh.model;
     let vertex_position = vec4<f32>(vertex.position, 1.0);
 
-    var projection = view.projection;
     var jitter = vec2<f32>(0.0);
     let texel_size = frame.upscale_ratio / view.viewport.zw;
 
@@ -52,23 +51,14 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // From the SMAA slides: dynamic sub-pixel jittering
     // let velocity = clip_to_uv(view.view_proj * out.world_position) - clip_to_uv(previous_view.view_proj * out.previous_world_position);
     // let jitter_scale = 0.5 + 0.5 * cos(PI / (0.5 * pixel_size) * velocity);
-    jitter = 0.5 * jitter + select(0.5, -0.5, frame.number % 2u == 0u) * texel_size;
+    jitter = 0.5 * jitter + select(-0.5, 0.5, frame.number % 2u == 0u) * texel_size;
 #endif // SMAA_TU_4X
 
-    if projection[3].w != 1.0 {
-        // Perspective
-        projection[2][0] += jitter.x;
-        projection[2][1] -= jitter.y;
-    }
-
     out.world_normal = mesh_normal_local_to_world(vertex.normal);
-    out.clip_position = projection * view.inverse_view * out.world_position;
+    out.clip_position = view.view_proj * out.world_position;
     out.uv = vertex.uv;
 
-    if projection[3].w == 1.0 {
-        // Orthogonal
-        out.clip_position += vec4<f32>(jitter, 0.0, 0.0);
-    }
+    out.clip_position += vec4<f32>(jitter.x, -jitter.y, 0.0, 0.0) * out.clip_position.w;
 
     return out;
 }
