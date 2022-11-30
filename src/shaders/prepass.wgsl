@@ -33,7 +33,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let vertex_position = vec4<f32>(vertex.position, 1.0);
 
     var jitter = vec2<f32>(0.0);
-    let texel_size = frame.upscale_ratio / view.viewport.zw;
+    let texel_size = 1.0 / view.viewport.zw;
 
     var out: VertexOutput;
     out.world_position = mesh_position_local_to_world(model, vertex_position);
@@ -52,7 +52,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // let velocity = clip_to_uv(view.view_proj * out.world_position) - clip_to_uv(previous_view.view_proj * out.previous_world_position);
     // let jitter_scale = 0.5 + 0.5 * cos(PI / (0.25 * texel_size) * velocity);
     // jitter = 0.5 * jitter + select(-0.5, 0.5, frame.number % 2u == 0u) * texel_size;
-    jitter = 0.5 * jitter;
 #endif // SMAA_TU_4X
 
     out.world_normal = mesh_normal_local_to_world(vertex.normal);

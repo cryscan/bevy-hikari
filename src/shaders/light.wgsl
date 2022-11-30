@@ -534,7 +534,7 @@ fn calculate_view(
     return V;
 }
 
-#ifdef NO_TEXTURE
+#if TEXTURE_COUNT == 0
 fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
     var surface: Surface;
     let material = material_buffer[material_index];
