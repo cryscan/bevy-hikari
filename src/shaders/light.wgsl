@@ -9,7 +9,7 @@
 
 #import bevy_hikari::reservoir_functions
 
-#ifdef NO_TEXTURE
+#if TEXTURE_COUNT == 0
 @group(3) @binding(0)
 var textures: texture_2d<f32>;
 @group(3) @binding(1)
@@ -810,13 +810,14 @@ fn compute_jacobian(q: Sample, r: Sample) -> f32 {
 
 @compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let size = textureDimensions(render_texture);
+    let render_size = textureDimensions(render_texture);
+    let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
-    let uv = coords_to_uv(coords, size);
+    let uv = coords_to_uv(coords, render_size);
 
-    var s = empty_sample();
+    var s: Sample = empty_sample();
 
-    let deferred_coords = vec2<i32>(uv * vec2<f32>(textureDimensions(position_texture)));
+    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
@@ -824,9 +825,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     if depth < F32_EPSILON {
         var r: Reservoir;
         set_reservoir(&r, s, 0.0);
-        store_reservoir(coords.x + size.x * coords.y, r);
-        store_spatial_reservoir(coords.x + size.x * coords.y, r);
-        store_previous_spatial_reservoir(coords.x + size.x * coords.y, r);
+        store_reservoir(coords.x + render_size.x * coords.y, r);
+        store_spatial_reservoir(coords.x + render_size.x * coords.y, r);
+        store_previous_spatial_reservoir(coords.x + render_size.x * coords.y, r);
 
 #ifdef INCLUDE_EMISSIVE
         textureStore(albedo_texture, coords, vec4<f32>(0.0));
@@ -863,12 +864,12 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var hit: Hit;
     var info: HitInfo;
 
-    let previous_uv = uv - velocity_uv.xy;
-    var r = load_previous_reservoir(previous_uv, size);
+    let previous_uv = uv_to_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
+    var r = load_previous_reservoir(previous_uv, render_size);
 
     if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
-        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(size));
-        store_previous_spatial_reservoir(previous_coords.x + size.x * previous_coords.y, r);
+        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
+        store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
 
 #ifdef INCLUDE_EMISSIVE
@@ -1004,7 +1005,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     textureStore(variance_texture, coords, vec4<f32>(variance));
 
     if frame.enable_temporal_reuse > 0u {
-        store_reservoir(coords.x + size.x * coords.y, r);
+        store_reservoir(coords.x + render_size.x * coords.y, r);
     }
 
 #ifdef INCLUDE_EMISSIVE
@@ -1043,23 +1044,22 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let render_size = textureDimensions(render_texture);
-    let reservoir_size = render_size;
 
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, render_size);
-    let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
+    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
 
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
 
-    var s = empty_sample();
-    var r = empty_reservoir();
+    var s: Sample = empty_sample();
+    var r: Reservoir = empty_reservoir();
 
     if frame.indirect_bounces == 0u || depth < F32_EPSILON {
-        store_reservoir(coords.x + reservoir_size.x * coords.y, r);
-        store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
-        store_previous_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
+        store_reservoir(coords.x + render_size.x * coords.y, r);
+        store_spatial_reservoir(coords.x + render_size.x * coords.y, r);
+        store_previous_spatial_reservoir(coords.x + render_size.x * coords.y, r);
 
         textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
@@ -1230,12 +1230,12 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 #endif
 
     // ReSTIR: Temporal
-    let previous_uv = uv - velocity_uv.xy;
-    r = load_previous_reservoir(previous_uv, reservoir_size);
+    let previous_uv = uv_to_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
+    r = load_previous_reservoir(previous_uv, render_size);
 
     if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
-        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(reservoir_size));
-        store_previous_spatial_reservoir(previous_coords.x + reservoir_size.x * previous_coords.y, r);
+        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
+        store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
 
     let w_new = select(luminance(s.radiance.rgb) / pdf, 0.0, pdf < 0.0001);
@@ -1255,7 +1255,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     textureStore(variance_texture, coords, vec4<f32>(variance));
 
     if frame.enable_temporal_reuse > 0u {
-        store_reservoir(coords.x + reservoir_size.x * coords.y, r);
+        store_reservoir(coords.x + render_size.x * coords.y, r);
     }
 
     if frame.enable_spatial_reuse == 0u {
@@ -1278,20 +1278,19 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let render_size = textureDimensions(render_texture);
-    let reservoir_size = render_size;
 
-    let uv = (vec2<f32>(invocation_id.xy) + 0.5) / vec2<f32>(render_size);
     let coords = vec2<i32>(invocation_id.xy);
-    let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
+    let uv = coords_to_uv(coords, render_size);
+    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
 
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
 
-    var r = load_reservoir(coords.x + reservoir_size.x * coords.y);
+    var r: Reservoir = load_reservoir(coords.x + render_size.x * coords.y);
 
     if depth < F32_EPSILON {
-        store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
+        store_spatial_reservoir(coords.x + render_size.x * coords.y, r);
         textureStore(render_texture, coords, vec4<f32>(0.0));
         return;
     }
@@ -1304,13 +1303,13 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let use_spatial_variance = r.count <= f32(SPATIAL_VARIANCE_SAMPLE_THRESHOLD);
 
     // ReSTIR: Spatial
-    let previous_uv = uv - velocity_uv.xy;
+    let previous_uv = uv_to_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
 
     var q = r;
     let s = q.s;
 
     if r.lifetime <= reservoir_lifetime(r) {
-        r = load_previous_spatial_reservoir(previous_uv, reservoir_size);
+        r = load_previous_spatial_reservoir(previous_uv, render_size);
     }
 
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
@@ -1334,18 +1333,20 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         );
         let offset = polar_offset.y * vec2<f32>(cos(polar_offset.x), sin(polar_offset.x));
 
-        let sample_coords = coords + vec2<i32>(offset);
-        if any(sample_coords < vec2<i32>(0)) || any(sample_coords > reservoir_size) {
+        let sample_coords = vec2<i32>(offset + vec2<f32>(coords));
+        let sample_uv = coords_to_uv(sample_coords, render_size);
+        let sample_deferred_coords: vec2<i32> = uv_to_deferred_coords(sample_uv, deferred_size, render_size, frame.number);
+        if any(sample_uv < vec2<i32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
             continue;
         }
 
-        let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
+        let sample_depth = textureLoad(position_texture, sample_deferred_coords, 0).w;
         let depth_ratio = depth / sample_depth;
         if depth_ratio < 0.9 || depth_ratio > 1.1 {
             continue;
         }
 
-        q = load_reservoir(sample_coords.x + reservoir_size.x * sample_coords.y);
+        q = load_reservoir(sample_coords.x + render_size.x * sample_coords.y);
         let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.866;
         if q.count < F32_EPSILON || normal_miss {
             continue;
@@ -1365,8 +1366,8 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             let tap_offset = tap_dist * normalize(offset);
 
             let tap_uv = uv + tap_offset / vec2<f32>(render_size);
-            let tap_coords = vec2<i32>(tap_uv * vec2<f32>(deferred_size));
-            let tap_depth = textureLoad(position_texture, tap_coords, 0).w;
+            let tap_deferred_coords = uv_to_deferred_coords(tap_uv, deferred_size, render_size, frame.number);
+            let tap_depth = textureLoad(position_texture, tap_deferred_coords, 0).w;
 
             let ref_depth = mix(depth, sample_depth, f32(j) / f32(tap_count + 1u));
             if tap_depth > ref_depth + 0.00001 {
@@ -1411,7 +1412,7 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     r.lifetime += 1.0;
 
-    store_spatial_reservoir(coords.x + reservoir_size.x * coords.y, r);
+    store_spatial_reservoir(coords.x + render_size.x * coords.y, r);
 
     if use_spatial_variance {
         var variance = r.w2_sum / r.count - pow(r.w_sum / r.count, 2.0);

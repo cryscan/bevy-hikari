@@ -114,9 +114,11 @@ fn step_size() -> i32 {
 @compute @workgroup_size(8, 8, 1)
 fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
-    let size = textureDimensions(output_texture);
+    let output_size = textureDimensions(output_texture);
+    let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
-    let uv = coords_to_uv(coords, size);
+    let uv = coords_to_uv(coords, output_size);
+    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, output_size, frame.number);
 
     let albedo = textureSampleLevel(albedo_texture, nearest_sampler, uv, 0.0).rgb;
     var irradiance = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
@@ -147,74 +149,17 @@ fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn denoise_upscale(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let size = textureDimensions(output_texture);
-    let coords = vec2<i32>(invocation_id.xy);
-    let uv = coords_to_uv(coords, size);
-
-    let depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
-    let depth_gradient = textureSampleLevel(depth_gradient_texture, nearest_sampler, uv, 0.0).xy;
-    let normal = normalize(textureSampleLevel(normal_texture, nearest_sampler, uv, 0.0).xyz);
-
-    if depth < F32_EPSILON {
-        store_output(coords, vec4<f32>(0.0));
-        return;
-    }
-
-    var irradiance = load_input(coords).rgb;
-
-    var sum_irradiance = irradiance;
-    var sum_w = 1.0;
-
-    let rand = random_float((invocation_id.y << 16u) + invocation_id.x + frame.number);
-    for (var i = 1u; i <= 6u; i += 1u) {
-        // Fibonacci spiral: http://extremelearning.com.au/how-to-evenly-distribute-points-on-a-sphere-more-effectively-than-the-canonical-fibonacci-lattice/
-        let polar_offset = vec2<f32>(
-            TAU * fract(f32(i) * GOLDEN_RATIO + rand),
-            sqrt(f32(i) / f32(6)) * 4.0
-        );
-        let offset = polar_offset.y * vec2<f32>(cos(polar_offset.x), sin(polar_offset.x));
-
-        let sample_coords = vec2<i32>(coords + vec2<i32>(offset));
-        if any(sample_coords < vec2<i32>(0)) || any(sample_coords >= size) {
-            continue;
-        }
-
-        irradiance = load_input(sample_coords).rgb;
-        if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
-            continue;
-        }
-
-        let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
-        let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-
-        let w_normal = normal_weight(normal, sample_normal);
-        let w_depth = depth_weight(depth, sample_depth, depth_gradient, vec2<f32>(offset));
-        let w_position = position_weight(vec2<f32>(0.0), offset);
-
-        let w = clamp(w_depth * w_normal * w_position, 0.0, 1.0);
-        sum_irradiance += irradiance * w;
-        sum_w += w;
-    }
-
-    irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
-
-    var color = vec4<f32>(irradiance, 1.0);
-    store_output(coords, color);
-}
-
-@compute @workgroup_size(8, 8, 1)
 fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let size = textureDimensions(output_texture);
-    let coords = vec2<i32>(invocation_id.xy);
-    let uv = coords_to_uv(coords, size);
-
+    let input_size = textureDimensions(render_texture);
+    let output_size = textureDimensions(output_texture);
     let deferred_size = textureDimensions(position_texture);
-    let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
+    let coords = vec2<i32>(invocation_id.xy);
+    let uv = coords_to_uv(coords, output_size);
+    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, output_size, frame.number);
 
-    let depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
-    let depth_gradient = textureSampleLevel(depth_gradient_texture, nearest_sampler, uv, 0.0).xy;
-    let normal = normalize(textureSampleLevel(normal_texture, nearest_sampler, uv, 0.0).xyz);
+    let depth = textureLoad(position_texture, deferred_coords, 0).w;
+    let depth_gradient = textureLoad(depth_gradient_texture, deferred_coords, 0).xy;
+    let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
     let instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
 
     if depth < F32_EPSILON {
@@ -248,7 +193,9 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         let offset = vec2<i32>(x, y);
         let sample_coords = coords + offset * step_size();
-        if all(offset == vec2<i32>(0)) || any(sample_coords < vec2<i32>(0)) || any(sample_coords >= size) {
+        let sample_uv = coords_to_uv(sample_coords, output_size);
+        let sample_deferred_coords: vec2<i32> = uv_to_deferred_coords(sample_uv, deferred_size, output_size, frame.number);
+        if all(offset == vec2<i32>(0)) || any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
             continue;
         }
 
@@ -257,9 +204,9 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             continue;
         }
 
-        let sample_normal = textureLoad(normal_texture, sample_coords, 0).xyz;
-        let sample_depth = textureLoad(position_texture, sample_coords, 0).w;
-        let sample_instance = textureLoad(instance_material_texture, sample_coords, 0).x;
+        let sample_normal = textureLoad(normal_texture, sample_deferred_coords, 0).xyz;
+        let sample_depth = textureLoad(position_texture, sample_deferred_coords, 0).w;
+        let sample_instance = textureLoad(instance_material_texture, sample_deferred_coords, 0).x;
         let sample_luminance = luminance(irradiance);
 
         let w_normal = normal_weight(normal, sample_normal);
@@ -292,7 +239,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var color = vec4<f32>(irradiance, 1.0);
 
 #ifdef DENOISE_LEVEL_3
-    let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).xy;
+    let velocity = textureLoad(velocity_uv_texture, deferred_coords, 0).xy;
     let previous_uv = uv - velocity;
     var previous_color = color;
 

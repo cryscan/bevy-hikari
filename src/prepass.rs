@@ -364,10 +364,10 @@ fn prepass_textures_system(
         Query<&mut PrepassTextures>,
     )>,
 ) {
-    for (entity, camera, settings) in &queries.p0() {
+    for (entity, camera, _settings) in &queries.p0() {
         if let Some(size) = camera.physical_target_size() {
-            let scale = settings.upscale.ratio().recip();
-            let size = (scale * size.as_vec2()).ceil().as_uvec2();
+            // let scale = settings.upscale.ratio().recip();
+            let size = size.as_vec2().ceil().as_uvec2();
             let size = Extent3d {
                 width: size.x,
                 height: size.y,

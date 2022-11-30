@@ -140,10 +140,10 @@ impl SpecializedComputePipeline for LightPipeline {
             "MAX_DIRECTIONAL_LIGHTS".into(),
             MAX_DIRECTIONAL_LIGHTS as i32,
         ));
-
-        if key.texture_count() == 0 {
-            shader_defs.push("NO_TEXTURE".into());
-        }
+        shader_defs.push(ShaderDefVal::Int(
+            "TEXTURE_COUNT".into(),
+            key.texture_count() as i32,
+        ));
         if key.contains(LightPipelineKey::INCLUDE_EMISSIVE_BIT) {
             shader_defs.push("INCLUDE_EMISSIVE".into());
         }

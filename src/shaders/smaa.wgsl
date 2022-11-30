@@ -55,8 +55,10 @@ fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
 fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
     let output_size = textureDimensions(output_texture);
+    let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, input_size);
+    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, input_size, frame.number);
 
     // In this implementation, a thread computes 4 output pixels in a quad.
     // One of the pixel (c) on the diagonal can be fetched from render_texture,
@@ -96,7 +98,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let original_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0);
     let current_color = original_color.rgb;
 
-    let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).xy;
+    let velocity = textureLoad(velocity_uv_texture, deferred_coords, 0).xy;
     let previous_uv = uv - velocity;
 
     let sample_position = previous_uv * size;
@@ -119,9 +121,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
     // var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_uv, 0.0).rgb;
 
-    // let current_depths = textureGather(3, position_texture, linear_sampler, uv);
-    // let current_depth = min(min(current_depths.x, current_depths.y), min(current_depths.z, current_depths.w));
-    let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    let current_depth = textureLoad(position_texture, deferred_coords, 0).w;
     let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
     let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
@@ -130,22 +130,39 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
-    if previous_depth != 0.0 && depth_miss && velocity_miss {
+    if depth_miss && velocity_miss {
         // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
-        let uv = coords_to_uv(current_output_coords, output_size);
-        let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
-        let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
-        let s_tr = sample_render_texture(uv + texel_size);
-        let s_ml = sample_render_texture(uv - vec2<f32>(texel_size.x, 0.0));
+        // let uv = coords_to_uv(current_output_coords, output_size);
+        // let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
+        // let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
+        // let s_tr = sample_render_texture(uv + texel_size);
+        // let s_ml = sample_render_texture(uv - vec2<f32>(texel_size.x, 0.0));
+        // let s_mm = RGB_to_YCoCg(current_color);
+        // let s_mr = sample_render_texture(uv + vec2<f32>(texel_size.x, 0.0));
+        // let s_bl = sample_render_texture(uv - texel_size);
+        // let s_bm = sample_render_texture(uv - vec2<f32>(0.0, texel_size.y));
+        // let s_br = sample_render_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
+        // let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
+        // let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
+        // let mean = moment_1 / 9.0;
+        // let variance = sqrt((moment_2 / 9.0) - (mean * mean));
+        // previous_color = RGB_to_YCoCg(previous_color);
+        // previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
+        // previous_color = YCoCg_to_RGB(previous_color);
+        
+        // Constrain past sample with 2x2 YCoCg variance clipping to handle disocclusion
+        let cr = textureGather(0, render_texture, linear_sampler, uv);
+        let cg = textureGather(1, render_texture, linear_sampler, uv);
+        let cb = textureGather(2, render_texture, linear_sampler, uv);
+        let s1 = RGB_to_YCoCg(vec3<f32>(cr.x, cg.x, cb.x));
+        let s2 = RGB_to_YCoCg(vec3<f32>(cr.y, cg.y, cb.y));
+        let s3 = RGB_to_YCoCg(vec3<f32>(cr.z, cg.z, cb.z));
+        let s4 = RGB_to_YCoCg(vec3<f32>(cr.w, cg.w, cb.w));
         let s_mm = RGB_to_YCoCg(current_color);
-        let s_mr = sample_render_texture(uv + vec2<f32>(texel_size.x, 0.0));
-        let s_bl = sample_render_texture(uv - texel_size);
-        let s_bm = sample_render_texture(uv - vec2<f32>(0.0, texel_size.y));
-        let s_br = sample_render_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
-        let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
-        let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
-        let mean = moment_1 / 9.0;
-        let variance = sqrt((moment_2 / 9.0) - (mean * mean));
+        let moment_1 = s1 + s2 + s3 + s4;
+        let moment_2 = s1 * s1 + s2 * s2 + s3 * s3 + s4 * s4;
+        let mean = moment_1 / 4.0;
+        let variance = sqrt((moment_2 / 4.0) - (mean * mean));
         previous_color = RGB_to_YCoCg(previous_color);
         previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
         previous_color = YCoCg_to_RGB(previous_color);

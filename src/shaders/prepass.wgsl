@@ -50,8 +50,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     // From the SMAA slides: dynamic sub-pixel jittering
     // let velocity = clip_to_uv(view.view_proj * out.world_position) - clip_to_uv(previous_view.view_proj * out.previous_world_position);
-    // let jitter_scale = 0.5 + 0.5 * cos(PI / (0.5 * pixel_size) * velocity);
-    jitter = 0.5 * jitter + select(-0.5, 0.5, frame.number % 2u == 0u) * texel_size;
+    // let jitter_scale = 0.5 + 0.5 * cos(PI / (0.25 * texel_size) * velocity);
+    // jitter = 0.5 * jitter + select(-0.5, 0.5, frame.number % 2u == 0u) * texel_size;
+    jitter = 0.5 * jitter;
 #endif // SMAA_TU_4X
 
     out.world_normal = mesh_normal_local_to_world(vertex.normal);
