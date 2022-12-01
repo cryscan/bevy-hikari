@@ -1,11 +1,11 @@
 use bevy::{
-    // core_pipeline::bloom::BloomSettings,
+    core_pipeline::bloom::BloomSettings,
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
     render::camera::CameraRenderGraph,
 };
 use bevy_hikari::prelude::*;
-// use bevy_inspector_egui::WorldInspectorPlugin;
+use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_mod_raycast::{
     DefaultRaycastingPlugin, Intersection, RaycastMesh, RaycastMethod, RaycastSource, RaycastSystem,
 };
@@ -27,7 +27,7 @@ fn main() {
             // },
             ..Default::default()
         }))
-        // .add_plugin(WorldInspectorPlugin::new())
+        .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
@@ -122,7 +122,7 @@ fn setup(
                 transform: Transform::from_xyz(-20.0, 10.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
                 ..Default::default()
             },
-            // BloomSettings::default(),
+            BloomSettings::default(),
             HikariSettings {
                 upscale: Upscale::SmaaTu4x { ratio: 2.0 },
                 ..Default::default()

@@ -4,7 +4,7 @@ use bevy::{
     render::camera::CameraRenderGraph,
 };
 use bevy_hikari::prelude::*;
-// use bevy_inspector_egui::WorldInspectorPlugin;
+use bevy_inspector_egui::WorldInspectorPlugin;
 use smooth_bevy_cameras::{
     controllers::orbit::{
         ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
@@ -23,7 +23,7 @@ fn main() {
             // },
             ..Default::default()
         }))
-        // .add_plugin(WorldInspectorPlugin::new())
+        .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(HikariPlugin)

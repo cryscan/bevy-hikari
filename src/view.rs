@@ -79,10 +79,9 @@ pub struct FrameCounter(pub usize);
 impl ExtractComponent for FrameCounter {
     type Query = &'static Self;
     type Filter = ();
-    type Out = Self;
 
-    fn extract_component(item: QueryItem<Self::Query>) -> Option<Self::Out> {
-        Some(*item)
+    fn extract_component(item: QueryItem<Self::Query>) -> Self {
+        *item
     }
 }
 
@@ -124,9 +123,8 @@ pub struct FrameUniform {
 impl ExtractComponent for FrameUniform {
     type Query = (&'static HikariSettings, &'static FrameCounter);
     type Filter = ();
-    type Out = Self;
 
-    fn extract_component((settings, counter): QueryItem<Self::Query>) -> Option<Self> {
+    fn extract_component((settings, counter): QueryItem<Self::Query>) -> Self {
         let HikariSettings {
             direct_validate_interval,
             emissive_validate_interval,
@@ -158,7 +156,7 @@ impl ExtractComponent for FrameUniform {
         let enable_spatial_reuse = spatial_reuse.into();
         let upscale_ratio = settings.upscale.ratio();
 
-        Some(Self {
+        Self {
             kernel,
             clear_color,
             number,
@@ -173,6 +171,6 @@ impl ExtractComponent for FrameUniform {
             solar_angle,
             max_indirect_luminance,
             upscale_ratio,
-        })
+        }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
 };
 use bevy::{
     ecs::query::QueryItem,
-    pbr::{ViewLightsUniformOffset, MAX_DIRECTIONAL_LIGHTS},
+    pbr::ViewLightsUniformOffset,
     prelude::*,
     render::{
         camera::ExtractedCamera,
@@ -430,11 +430,6 @@ impl SpecializedComputePipeline for PostProcessPipeline {
             .into();
 
         let mut shader_defs: Vec<_> = vec![];
-        shader_defs.push(ShaderDefVal::Int(
-            "MAX_DIRECTIONAL_LIGHTS".into(),
-            MAX_DIRECTIONAL_LIGHTS as i32,
-        ));
-
         if key.contains(PostProcessPipelineKey::FIREFLY_FILTERING_BITS) {
             shader_defs.push("FIREFLY_FILTERING".into());
         }
@@ -448,7 +443,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.denoise_internal_layout.clone(),
                     self.denoise_render_layout.clone(),
                 ];
-                shader_defs.push(format!("DENOISE_LEVEL_{}", key.denoise_level()).into());
+                shader_defs.push(format!("DENOISE_LEVEL_{}", key.denoise_level()));
                 let shader = DENOISE_SHADER_HANDLE.typed();
                 (layout, shader)
             }
@@ -546,19 +541,18 @@ pub struct FsrConstantsUniform {
 impl ExtractComponent for FsrConstantsUniform {
     type Query = (&'static Camera, &'static HikariSettings);
     type Filter = ();
-    type Out = Self;
 
-    fn extract_component((camera, settings): QueryItem<Self::Query>) -> Option<Self::Out> {
+    fn extract_component((camera, settings): QueryItem<Self::Query>) -> Self {
         let size = camera.physical_target_size().unwrap_or_default();
         let scale = settings.upscale.ratio().recip();
         let scaled_size = (scale * size.as_vec2()).ceil();
-        Some(Self {
+        Self {
             input_viewport_in_pixels: scaled_size,
             input_size_in_pixels: scaled_size,
             output_size_in_pixels: size.as_vec2(),
             sharpness: settings.upscale.sharpness(),
             hdr: 0,
-        })
+        }
     }
 }
 

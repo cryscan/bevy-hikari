@@ -9,7 +9,7 @@
 
 #import bevy_hikari::reservoir_functions
 
-#if TEXTURE_COUNT == 0
+#ifdef NO_TEXTURE
 @group(3) @binding(0)
 var textures: texture_2d<f32>;
 @group(3) @binding(1)
@@ -534,7 +534,7 @@ fn calculate_view(
     return V;
 }
 
-#if TEXTURE_COUNT == 0
+#ifdef NO_TEXTURE
 fn retreive_surface(material_index: u32, uv: vec2<f32>) -> Surface {
     var surface: Surface;
     let material = material_buffer[material_index];
@@ -817,7 +817,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var s: Sample = empty_sample();
 
-    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
+    let deferred_coords = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
@@ -865,7 +865,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var info: HitInfo;
 
     let previous_uv = uv_to_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
-    var r = load_previous_reservoir(previous_uv, render_size);
+    var r: Reservoir = load_previous_reservoir(previous_uv, render_size);
 
     if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
         let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
@@ -1047,7 +1047,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, render_size);
-    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
+    let deferred_coords = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
 
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
@@ -1281,7 +1281,7 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, render_size);
-    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
+    let deferred_coords = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
 
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
@@ -1335,7 +1335,7 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         let sample_coords = vec2<i32>(offset + vec2<f32>(coords));
         let sample_uv = coords_to_uv(sample_coords, render_size);
-        let sample_deferred_coords: vec2<i32> = uv_to_deferred_coords(sample_uv, deferred_size, render_size, frame.number);
+        let sample_deferred_coords = uv_to_deferred_coords(sample_uv, deferred_size, render_size, frame.number);
         if any(sample_uv < vec2<i32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
             continue;
         }

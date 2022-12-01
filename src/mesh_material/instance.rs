@@ -116,14 +116,13 @@ pub struct PreviousMeshUniform {
 impl ExtractComponent for PreviousMeshUniform {
     type Query = &'static GlobalTransformQueue;
     type Filter = With<Handle<Mesh>>;
-    type Out = Self;
 
-    fn extract_component(queue: QueryItem<Self::Query>) -> Option<Self::Out> {
+    fn extract_component(queue: QueryItem<Self::Query>) -> Self {
         let transform = queue[1];
-        Some(PreviousMeshUniform {
+        PreviousMeshUniform {
             transform,
             inverse_transpose_model: transform.inverse().transpose(),
-        })
+        }
     }
 }
 
