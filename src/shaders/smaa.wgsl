@@ -8,7 +8,7 @@ var nearest_sampler: sampler;
 var linear_sampler: sampler;
 
 @group(3) @binding(0)
-var previous_render_texture: texture_2d<f32>;
+var previous_upscaled_texture: texture_2d<f32>;
 @group(3) @binding(1)
 var render_texture: texture_2d<f32>;
 
@@ -41,8 +41,8 @@ fn clip_towards_aabb_center(previous_color: vec3<f32>, current_color: vec3<f32>,
     return select(previous_color, p_clip + v_clip / ma_unit, ma_unit > 1.0);
 }
 
-fn sample_previous_render_texture(uv: vec2<f32>) -> vec3<f32> {
-    let c = textureSampleLevel(previous_render_texture, linear_sampler, uv, 0.0).rgb;
+fn sample_previous_texture(uv: vec2<f32>) -> vec3<f32> {
+    let c = textureSampleLevel(previous_upscaled_texture, linear_sampler, uv, 0.0).rgb;
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
@@ -58,11 +58,10 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, input_size);
-    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, input_size, frame.number);
 
     // In this implementation, a thread computes 4 output pixels in a quad.
     // One of the pixel (c) on the diagonal can be fetched from render_texture,
-    // the other (p) is reprojected from previous_render_texture.
+    // the other (p) is reprojected from previous_upscaled_texture.
     // The two left (p', c') are extrapolated using differential blend method.
 
     // Odd frame:
@@ -98,10 +97,12 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let original_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0);
     let current_color = original_color.rgb;
 
+    // Fetch the previous sample
+    let deferred_coords: vec2<i32> = uv_to_deferred_coords(previous_output_uv, deferred_size, input_size, frame.number);
     let velocity = textureLoad(velocity_uv_texture, deferred_coords, 0).xy;
-    let previous_uv = uv - velocity;
+    let previous_input_uv = previous_output_uv - velocity;
 
-    let sample_position = previous_uv * size;
+    let sample_position = previous_input_uv * size;
     let texel_position_1 = floor(sample_position - 0.5) + 0.5;
     let f = sample_position - texel_position_1;
     let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
@@ -114,20 +115,20 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let texel_position_3 = (texel_position_1 + 2.0) * texel_size;
     let texel_position_12 = (texel_position_1 + offset12) * texel_size;
     var previous_color = vec3<f32>(0.0);
-    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_0.y)) * w12.x * w0.y;
-    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_0.x, texel_position_12.y)) * w0.x * w12.y;
-    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_12.y)) * w12.x * w12.y;
-    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
-    previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
-    // var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_uv, 0.0).rgb;
+    previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_0.y)) * w12.x * w0.y;
+    previous_color += sample_previous_texture(vec2<f32>(texel_position_0.x, texel_position_12.y)) * w0.x * w12.y;
+    previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_12.y)) * w12.x * w12.y;
+    previous_color += sample_previous_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
+    previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
+    // var previous_color = textureSampleLevel(previous_upscaled_texture, nearest_sampler, previous_input_uv, 0.0).rgb;
 
     let current_depth = textureLoad(position_texture, deferred_coords, 0).w;
-    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
+    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_input_uv);
     let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
     let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
 
-    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
+    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_input_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
     if depth_miss && velocity_miss {
