@@ -52,7 +52,7 @@ fn depth_weight(d0: f32, d1: f32, gradient: vec2<f32>, offset: vec2<f32>) -> f32
 
 // Luminance-weighting function (4.4.3)
 fn luminance_weight(l0: f32, l1: f32, variance: f32) -> f32 {
-    let strictness = 16.0;
+    let strictness = 4.0;
     let exponent = 0.25;
     let eps = 0.001;
     return exp((-abs(l0 - l1)) / (strictness * pow(variance, exponent) + eps));
@@ -111,6 +111,25 @@ fn step_size() -> i32 {
 #endif
 }
 
+fn accumulate_variance(
+    uv: vec2<f32>,
+    input_size: vec2<i32>,
+    offset: vec2<i32>,
+    sum_variance: ptr<function, f32>,
+) {
+    let sample_uv = uv + vec2<f32>(offset) / vec2<f32>(input_size);
+    if any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
+        return;
+    }
+
+    let variance = textureSampleLevel(variance_texture, nearest_sampler, sample_uv, 0.0).x;
+    if variance > F32_MAX {
+        return;
+    }
+
+    *sum_variance += frame.kernel[offset.y + 1][offset.x + 1] * max(variance, 0.0);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
@@ -128,24 +147,68 @@ fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     textureStore(internal_texture_0, coords, color);
 
     var sum_variance = 0.0;
-    for (var i = 0; i < 9; i += 1) {
-        let x = i % 3 - 1;
-        let y = i / 3 - 1;
-
-        let offset = vec2<i32>(x, y);
-        let sample_uv = uv + vec2<f32>(offset) / vec2<f32>(input_size);
-        if any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
-            continue;
-        }
-
-        let variance = textureSampleLevel(variance_texture, nearest_sampler, sample_uv, 0.0).x;
-        if variance > F32_MAX {
-            continue;
-        }
-
-        sum_variance += frame.kernel[y + 1][x + 1] * max(variance, 0.0);
-    }
+    accumulate_variance(uv, input_size, vec2<i32>(-1, -1), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(-1, 0), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(-1, 1), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(0, -1), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(0, 0), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(0, 1), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(1, -1), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(1, 0), &sum_variance);
+    accumulate_variance(uv, input_size, vec2<i32>(1, 1), &sum_variance);
     textureStore(internal_variance, coords, vec4<f32>(sum_variance));
+}
+
+fn accumulate_irradiance(
+    deferred_size: vec2<i32>,
+    output_size: vec2<i32>,
+    coords: vec2<i32>,
+    offset: vec2<i32>,
+    normal: vec3<f32>,
+    depth: f32,
+    depth_gradient: vec2<f32>,
+    instance: u32,
+    lum: f32,
+    variance: f32,
+    sum_irradiance: ptr<function, vec3<f32>>,
+    sum_w: ptr<function, f32>,
+#ifdef FIREFLY_FILTERING
+    ff_moment_1: ptr<function, f32>,
+    ff_moment_2: ptr<function, f32>,
+    ff_count: ptr<function, f32>,
+#endif
+) {
+    let sample_coords = coords + offset * step_size();
+    let sample_uv = coords_to_uv(sample_coords, output_size);
+    let sample_deferred_coords: vec2<i32> = uv_to_deferred_coords(sample_uv, deferred_size, output_size, frame.number);
+    if any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
+        return;
+    }
+
+    let irradiance = load_input(sample_coords).rgb;
+    if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
+        return;
+    }
+
+    let sample_normal = textureLoad(normal_texture, sample_deferred_coords, 0).xyz;
+    let sample_depth = textureLoad(position_texture, sample_deferred_coords, 0).w;
+    let sample_instance = textureLoad(instance_material_texture, sample_deferred_coords, 0).x;
+    let sample_luminance = luminance(irradiance);
+
+    let w_normal = normal_weight(normal, sample_normal);
+    let w_depth = depth_weight(depth, sample_depth, depth_gradient, vec2<f32>(offset));
+    let w_instance = instance_weight(instance, sample_instance);
+    let w_luminance = luminance_weight(lum, sample_luminance, variance);
+
+    let w = clamp(w_normal * w_depth * w_instance * w_luminance, 0.0, 1.0) * frame.kernel[offset.y + 1][offset.x + 1];
+    *sum_irradiance += irradiance * w;
+    *sum_w += w;
+
+#ifdef FIREFLY_FILTERING
+    *ff_moment_1 += sample_luminance;
+    *ff_moment_2 += sample_luminance * sample_luminance;
+    *ff_count += 1.0;
+#endif
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -170,8 +233,8 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let variance = textureLoad(internal_variance, coords).x;
     var irradiance = load_input(coords).rgb;
 
-    var sum_irradiance = irradiance;
-    var sum_w = 1.0;
+    var sum_irradiance = irradiance * frame.kernel[1][1];
+    var sum_w = frame.kernel[1][1];
 
     if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
         irradiance = vec3<f32>(0.0);
@@ -182,54 +245,169 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let lum = luminance(irradiance);
 
 #ifdef FIREFLY_FILTERING
-    var ff_sum_luminance = 0.0;
-    var ff_sum_luminance_2 = 0.0;
+    var ff_moment_1 = 0.0;
+    var ff_moment_2 = 0.0;
     var ff_count = 0.0;
 #endif
 
-    for (var i = 0; i < 9; i += 1) {
-        let x = i % 3 - 1;
-        let y = i / 3 - 1;
-
-        let offset = vec2<i32>(x, y);
-        let sample_coords = coords + offset * step_size();
-        let sample_uv = coords_to_uv(sample_coords, output_size);
-        let sample_deferred_coords: vec2<i32> = uv_to_deferred_coords(sample_uv, deferred_size, output_size, frame.number);
-        if all(offset == vec2<i32>(0)) || any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
-            continue;
-        }
-
-        irradiance = load_input(sample_coords).rgb;
-        if any_is_nan_vec3(irradiance) || any(irradiance > vec3<f32>(F32_MAX)) {
-            continue;
-        }
-
-        let sample_normal = textureLoad(normal_texture, sample_deferred_coords, 0).xyz;
-        let sample_depth = textureLoad(position_texture, sample_deferred_coords, 0).w;
-        let sample_instance = textureLoad(instance_material_texture, sample_deferred_coords, 0).x;
-        let sample_luminance = luminance(irradiance);
-
-        let w_normal = normal_weight(normal, sample_normal);
-        let w_depth = depth_weight(depth, sample_depth, depth_gradient, vec2<f32>(offset));
-        let w_instance = instance_weight(instance, sample_instance);
-        let w_luminance = luminance_weight(lum, sample_luminance, variance);
-
-        let w = clamp(w_normal * w_depth * w_instance * w_luminance, 0.0, 1.0) * frame.kernel[y + 1][x + 1];
-        sum_irradiance += irradiance * w;
-        sum_w += w;
-
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(-1, -1),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
 #ifdef FIREFLY_FILTERING
-        ff_sum_luminance += sample_luminance;
-        ff_sum_luminance_2 += sample_luminance * sample_luminance;
-        ff_count += 1.0;
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
 #endif
-    }
+    );
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(0, -1),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
+#ifdef FIREFLY_FILTERING
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
+#endif
+    );
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(1, -1),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
+#ifdef FIREFLY_FILTERING
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
+#endif
+    );
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(-1, 0),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
+#ifdef FIREFLY_FILTERING
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
+#endif
+    );
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(1, 0),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
+#ifdef FIREFLY_FILTERING
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
+#endif
+    );
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(-1, 1),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
+#ifdef FIREFLY_FILTERING
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
+#endif
+    );
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(0, 1),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
+#ifdef FIREFLY_FILTERING
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
+#endif
+    );
+    accumulate_irradiance(
+        deferred_size,
+        output_size,
+        coords,
+        vec2<i32>(1, 1),
+        normal,
+        depth,
+        depth_gradient,
+        instance,
+        lum,
+        variance,
+        &sum_irradiance,
+        &sum_w,
+#ifdef FIREFLY_FILTERING
+        &ff_moment_1,
+        &ff_moment_2,
+        &ff_count
+#endif
+    );
 
     irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
 
 #ifdef FIREFLY_FILTERING
-    let ff_mean = ff_sum_luminance / ff_count;
-    let ff_var = ff_sum_luminance_2 / ff_count - ff_mean * ff_mean;
+    let ff_mean = ff_moment_1 / ff_count;
+    let ff_var = ff_moment_2 / ff_count - ff_mean * ff_mean;
 
     if lum > ff_mean + 3.0 * sqrt(ff_var) {
         irradiance = ff_mean / lum * irradiance;

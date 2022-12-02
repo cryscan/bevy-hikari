@@ -804,10 +804,7 @@ fn queue_post_process_pipelines(
     let denoise_indirect = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
-        match level {
-            0 | 1 | 2 => key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS,
-            _ => {}
-        }
+        key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS;
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
 
