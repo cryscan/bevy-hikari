@@ -1328,7 +1328,7 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     for (var i = 1u; i <= SPATIAL_REUSE_COUNT; i += 1u) {
         // Fibonacci spiral: http://extremelearning.com.au/how-to-evenly-distribute-points-on-a-sphere-more-effectively-than-the-canonical-fibonacci-lattice/
         let polar_offset = vec2<f32>(
-            TAU * fract(f32(i) * GOLDEN_RATIO + dot(s.random, vec4<f32>(1.0))),
+            TAU * fract(f32(i) * GOLDEN_RATIO + dot(s.random, vec4<f32>(1.0)) + random_float(frame.number)),
             sqrt(f32(i) / f32(SPATIAL_REUSE_COUNT)) * SPATIAL_REUSE_RANGE
         );
         let offset = polar_offset.y * vec2<f32>(cos(polar_offset.x), sin(polar_offset.x));
