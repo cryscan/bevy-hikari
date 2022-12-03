@@ -776,8 +776,8 @@ fn prepare_post_process_textures(
 #[derive(Resource)]
 pub struct CachedPostProcessPipelines {
     demodulation: CachedComputePipelineId,
+    denoise_direct: [CachedComputePipelineId; 4],
     denoise: [CachedComputePipelineId; 4],
-    denoise_indirect: [CachedComputePipelineId; 4],
     tone_mapping: CachedComputePipelineId,
     taa_jasmine: CachedComputePipelineId,
     smaa_tu4x: CachedComputePipelineId,
@@ -795,13 +795,13 @@ fn queue_post_process_pipelines(
     let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Demodulation);
     let demodulation = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
 
-    let denoise = [0, 1, 2, 3].map(|level| {
+    let denoise_direct = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
 
-    let denoise_indirect = [0, 1, 2, 3].map(|level| {
+    let denoise = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
         key |= PostProcessPipelineKey::FIREFLY_FILTERING_BITS;
@@ -828,8 +828,8 @@ fn queue_post_process_pipelines(
 
     commands.insert_resource(CachedPostProcessPipelines {
         demodulation,
+        denoise_direct,
         denoise,
-        denoise_indirect,
         tone_mapping,
         taa_jasmine,
         smaa_tu4x,
@@ -1230,9 +1230,9 @@ impl Node for PostProcessNode {
             pass.set_bind_group(3, &post_process_bind_group.denoise_internal, &[]);
 
             let denoise_pipelines = [
+                pipelines.denoise_direct,
                 pipelines.denoise,
                 pipelines.denoise,
-                pipelines.denoise_indirect,
             ];
 
             for (render_bind_group, denoise) in post_process_bind_group

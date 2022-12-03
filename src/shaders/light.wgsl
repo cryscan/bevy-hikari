@@ -935,6 +935,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     // Validation frame
+    var flush_reservoir = false;
     if frame.number % validate_interval == 0u {
         let candidate = select_light_candidate(
             r.s.random,
@@ -988,6 +989,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             // );
             let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
             set_reservoir(&r, s, w_new);
+            flush_reservoir = true;
         }
     }
 
@@ -1008,6 +1010,11 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_reservoir(coords.x + render_size.x * coords.y, r);
     }
 
+    if flush_reservoir {
+        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
+        store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
+    }
+
 #ifdef INCLUDE_EMISSIVE
     if frame.enable_spatial_reuse == 0u {
         var out_radiance = shading(
@@ -1018,9 +1025,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             r.s.radiance
         );
         out_radiance *= r.w;
-
-        var out_color = out_radiance;
-        out_color += compute_emissive_radiance(surface.emissive);
+        let out_color = out_radiance;
         textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
     }
 #else
@@ -1035,7 +1040,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         r.s.radiance
     );
     out_radiance *= r.w;
-    let out_color = out_radiance;
+    let out_color = out_radiance + compute_emissive_radiance(surface.emissive);
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 #endif
 }
@@ -1421,9 +1426,10 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         textureStore(variance_texture, coords, vec4<f32>(variance));
     }
 
-    var out_color = r.w * out_radiance;
 #ifdef INCLUDE_EMISSIVE
-    out_color += compute_emissive_radiance(surface.emissive);
+    let out_color = r.w * out_radiance;
+#else
+    let out_color = r.w * out_radiance + compute_emissive_radiance(surface.emissive);
 #endif
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
