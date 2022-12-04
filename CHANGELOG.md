@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5] - 2022-12-4
+### Changed
+- Do TAA color clipping on instance miss. ([b736703](https://github.com/cryscan/bevy-hikari/tree/b73670378dab3103e4e5603e5d7e60af76188906))
+
+### Fixed
+- Suppress bloom fireflies. ([252ee68](https://github.com/cryscan/bevy-hikari/tree/252ee68964e97574c6c43f5ca7b215697e515546))
+
 ## [0.3.4] - 2022-12-2
 ### Changed
 - Apply firefly filtering to emissive lighting. ([e7c8c52](https://github.com/cryscan/bevy-hikari/tree/e7c8c52526404724d8a2d6d55e22bc62f0e9ae02))
@@ -29,6 +36,7 @@
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
+[0.3.5]: https://github.com/cryscan/bevy-hikari/commits/v0.3.5
 [0.3.4]: https://github.com/cryscan/bevy-hikari/commits/v0.3.4
 [0.3.3]: https://github.com/cryscan/bevy-hikari/commits/v0.3.3
 [0.3.2]: https://github.com/cryscan/bevy-hikari/commits/v0.3.2
