@@ -1,5 +1,5 @@
 use bevy::{
-    core_pipeline::bloom::BloomSettings,
+    // core_pipeline::bloom::BloomSettings,
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
     render::camera::CameraRenderGraph,
@@ -122,7 +122,7 @@ fn setup(
                 transform: Transform::from_xyz(-20.0, 10.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
                 ..Default::default()
             },
-            BloomSettings::default(),
+            // BloomSettings::default(),
             HikariSettings {
                 upscale: Upscale::SmaaTu4x { ratio: 2.0 },
                 ..Default::default()
