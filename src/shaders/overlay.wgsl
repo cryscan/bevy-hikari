@@ -26,8 +26,8 @@ struct FragmentOutput {
 }
 
 fn inverse_reintard_luminance(color: vec3<f32>) -> vec3<f32> {
-    let l_old = tonemapping_luminance(color);
-    let l_new = l_old / max(1.0 - l_old, 0.000015);
+    let l_old = clamp(tonemapping_luminance(color), 0.0005, 0.995);
+    let l_new = l_old / (1.0 - l_old);
     return tonemapping_change_luminance(color, l_new);
 }
 
