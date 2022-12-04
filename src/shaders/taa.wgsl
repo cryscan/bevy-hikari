@@ -51,6 +51,16 @@ fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
     return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
+fn max_velocity(
+    coords: vec2<i32>,
+    offset: vec2<i32>,
+    velocity: ptr<function, vec2<f32>>,
+) {
+    let v = textureLoad(velocity_uv_texture, coords + offset, 0).xy;
+    let d = vec2<f32>(1.0);
+    *velocity = select(*velocity, v, dot(abs(*velocity), d) < dot(abs(v), d));
+}
+
 fn compare_instance(
     previous_coords: vec2<i32>,
     offset: vec2<i32>,
@@ -78,7 +88,12 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Reproject to find the equivalent sample from the past, using 5-tap Catmull-Rom filtering
     // from https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
-    let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).rg;
+    var velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).rg;
+    let current_coords = uv_to_deferred_coords(uv, deferred_size, output_size, frame.number);
+    max_velocity(current_coords, vec2<i32>(-1, -1), &velocity);
+    max_velocity(current_coords, vec2<i32>(1, -1), &velocity);
+    max_velocity(current_coords, vec2<i32>(-1, 1), &velocity);
+    max_velocity(current_coords, vec2<i32>(1, 1), &velocity);
     let previous_uv = uv - velocity;
 
     let sample_position = (uv - velocity) * size;
@@ -107,15 +122,14 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
     let is_background = current_depth == 0.0;
 
-    let current_coords = uv_to_deferred_coords(uv, deferred_size, output_size, frame.number);
     let previous_coords = uv_to_deferred_coords(previous_uv, deferred_size, output_size, frame.number);
     let current_instance = textureLoad(instance_material_texture, coords, 0).x;
     var instance_miss = false;
-    compare_instance(previous_coords, vec2<i32>(-2, -2), current_instance, &instance_miss);
-    compare_instance(previous_coords, vec2<i32>(2, -2), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(-1, -1), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(1, -1), current_instance, &instance_miss);
     compare_instance(previous_coords, vec2<i32>(0, 0), current_instance, &instance_miss);
-    compare_instance(previous_coords, vec2<i32>(-2, 2), current_instance, &instance_miss);
-    compare_instance(previous_coords, vec2<i32>(2, 2), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(-1, 1), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(1, 1), current_instance, &instance_miss);
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
