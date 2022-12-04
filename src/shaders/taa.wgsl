@@ -51,9 +51,21 @@ fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
     return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
+fn compare_instance(
+    previous_coords: vec2<i32>,
+    offset: vec2<i32>,
+    current_instance: u32,
+    instance_miss: ptr<function, bool>
+) {
+    let previous_instance = textureLoad(previous_instance_material_texture, previous_coords + offset, 0).x;
+    *instance_miss = *instance_miss || (current_instance != previous_instance);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let size = vec2<f32>(textureDimensions(output_texture));
+    let output_size = textureDimensions(output_texture);
+    let deferred_size = textureDimensions(position_texture);
+    let size = vec2<f32>(output_size);
     let texel_size = 1.0 / size;
 
     let coords = vec2<i32>(invocation_id.xy);
@@ -90,30 +102,43 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
     // let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
-    // let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     // let depth_ratio = current_depth / max(previous_depth, 0.0001);
     // let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
+    let is_background = current_depth == 0.0;
+
+    let current_coords = uv_to_deferred_coords(uv, deferred_size, output_size, frame.number);
+    let previous_coords = uv_to_deferred_coords(previous_uv, deferred_size, output_size, frame.number);
+    let current_instance = textureLoad(instance_material_texture, coords, 0).x;
+    var instance_miss = false;
+    compare_instance(previous_coords, vec2<i32>(-2, -2), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(2, -2), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(0, 0), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(-2, 2), current_instance, &instance_miss);
+    compare_instance(previous_coords, vec2<i32>(2, 2), current_instance, &instance_miss);
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
 
-    // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
-    // let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
-    // let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
-    // let s_tr = sample_render_texture(uv + texel_size);
-    // let s_ml = sample_render_texture(uv - vec2<f32>(texel_size.x, 0.0));
-    // let s_mm = RGB_to_YCoCg(current_color);
-    // let s_mr = sample_render_texture(uv + vec2<f32>(texel_size.x, 0.0));
-    // let s_bl = sample_render_texture(uv - texel_size);
-    // let s_bm = sample_render_texture(uv - vec2<f32>(0.0, texel_size.y));
-    // let s_br = sample_render_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
-    // let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
-    // let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
-    // let mean = moment_1 / 9.0;
-    // let variance = sqrt((moment_2 / 9.0) - (mean * mean));
-    // previous_color = RGB_to_YCoCg(previous_color);
-    // previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
-    // previous_color = YCoCg_to_RGB(previous_color);
+    if is_background || (instance_miss && velocity_miss) {
+        // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
+        let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
+        let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
+        let s_tr = sample_render_texture(uv + texel_size);
+        let s_ml = sample_render_texture(uv - vec2<f32>(texel_size.x, 0.0));
+        let s_mm = RGB_to_YCoCg(current_color);
+        let s_mr = sample_render_texture(uv + vec2<f32>(texel_size.x, 0.0));
+        let s_bl = sample_render_texture(uv - texel_size);
+        let s_bm = sample_render_texture(uv - vec2<f32>(0.0, texel_size.y));
+        let s_br = sample_render_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
+        let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
+        let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
+        let mean = moment_1 / 9.0;
+        let variance = sqrt((moment_2 / 9.0) - (mean * mean));
+        previous_color = RGB_to_YCoCg(previous_color);
+        previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
+        previous_color = YCoCg_to_RGB(previous_color);
+    }
 
     // Ghost fading by luminance difference
     let current_lum = luminance(current_color);
