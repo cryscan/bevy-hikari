@@ -137,7 +137,6 @@ fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, output_size);
-    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, output_size, frame.number);
 
     let albedo = textureSampleLevel(albedo_texture, nearest_sampler, uv, 0.0).rgb;
     var irradiance = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
@@ -180,7 +179,7 @@ fn accumulate_irradiance(
 ) {
     let sample_coords = coords + offset * step_size();
     let sample_uv = coords_to_uv(sample_coords, output_size);
-    let sample_deferred_coords: vec2<i32> = uv_to_deferred_coords(sample_uv, deferred_size, output_size, frame.number);
+    let sample_deferred_coords: vec2<i32> = jittered_deferred_coords(sample_uv, deferred_size, output_size, frame.number);
     if any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
         return;
     }
@@ -218,7 +217,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, output_size);
-    let deferred_coords: vec2<i32> = uv_to_deferred_coords(uv, deferred_size, output_size, frame.number);
+    let deferred_coords: vec2<i32> = jittered_deferred_coords(uv, deferred_size, output_size, frame.number);
 
     let depth = textureLoad(position_texture, deferred_coords, 0).w;
     let depth_gradient = textureLoad(depth_gradient_texture, deferred_coords, 0).xy;
@@ -417,9 +416,9 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var color = vec4<f32>(irradiance, 1.0);
 
 #ifdef DENOISE_LEVEL_3
-    let velocity = textureLoad(velocity_uv_texture, deferred_coords, 0).xy;
-    let previous_uv = uv - velocity;
-    var previous_color = color;
+    // let velocity = textureLoad(velocity_uv_texture, deferred_coords, 0).xy;
+    // let previous_uv = uv - velocity;
+    // var previous_color = color;
 
     // for (var i = 0; i < 1; i += 1) {
     //     let sample_uv = previous_uv;
@@ -442,9 +441,9 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     //     previous_color = textureSampleLevel(previous_radiance_texture, nearest_sampler, sample_uv, 0.0);
     // }
 
-    let mixed_color = mix(color, previous_color, 0.5);
-    color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
-    textureStore(radiance_texture, coords, color);
+    // let mixed_color = mix(color, previous_color, 0.5);
+    // color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
+    // textureStore(radiance_texture, coords, color);
 
     let albedo = textureLoad(albedo_texture, coords, 0);
     color *= albedo;

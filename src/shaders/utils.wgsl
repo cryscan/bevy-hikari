@@ -38,13 +38,21 @@ fn coords_to_uv(coords: vec2<i32>, size: vec2<i32>) -> vec2<f32> {
     return (vec2<f32>(coords) + 0.5) / vec2<f32>(size);
 }
 
-fn uv_to_deferred_uv(uv: vec2<f32>, scaled_size: vec2<i32>, frame_number: u32) -> vec2<f32> {
+fn current_smaa_jitter(frame_number: u32) -> i32 {
+    return select(1, 0, frame_number % 2u == 0u);
+}
+
+fn previous_smaa_jitter(frame_number: u32) -> i32 {
+    return select(0, 1, frame_number % 2u == 0u);
+}
+
+fn jittered_deferred_uv(uv: vec2<f32>, scaled_size: vec2<i32>, frame_number: u32) -> vec2<f32> {
     let texel_size = 1.0 / vec2<f32>(scaled_size);
     return uv + select(0.25, -0.25, frame_number % 2u == 0u) * texel_size;
 }
 
-fn uv_to_deferred_coords(uv: vec2<f32>, deferred_size: vec2<i32>, scaled_size: vec2<i32>, frame_number: u32) -> vec2<i32> {
-    let deferred_uv = uv_to_deferred_uv(uv, scaled_size, frame_number);
+fn jittered_deferred_coords(uv: vec2<f32>, deferred_size: vec2<i32>, scaled_size: vec2<i32>, frame_number: u32) -> vec2<i32> {
+    let deferred_uv = jittered_deferred_uv(uv, scaled_size, frame_number);
     return vec2<i32>(deferred_uv * vec2<f32>(deferred_size));
 }
 

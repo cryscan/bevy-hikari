@@ -816,7 +816,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var s: Sample = empty_sample();
 
-    let deferred_coords = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
+    let deferred_coords = jittered_deferred_coords(uv, deferred_size, render_size, frame.number);
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
@@ -863,7 +863,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var hit: Hit;
     var info: HitInfo;
 
-    let previous_uv = uv_to_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
+    let previous_uv = jittered_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
     var r: Reservoir = load_previous_reservoir(previous_uv, render_size);
 
     if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
@@ -1051,7 +1051,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, render_size);
-    let deferred_coords = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
+    let deferred_coords = jittered_deferred_coords(uv, deferred_size, render_size, frame.number);
 
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
@@ -1234,7 +1234,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 #endif
 
     // ReSTIR: Temporal
-    let previous_uv = uv_to_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
+    let previous_uv = jittered_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, render_size);
 
     if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
@@ -1292,7 +1292,7 @@ fn spatial_reuse(
 
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, render_size);
-    let deferred_coords = uv_to_deferred_coords(uv, deferred_size, render_size, frame.number);
+    let deferred_coords = jittered_deferred_coords(uv, deferred_size, render_size, frame.number);
 
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
@@ -1318,7 +1318,7 @@ fn spatial_reuse(
     let use_spatial_variance = r.count <= f32(SPATIAL_VARIANCE_SAMPLE_THRESHOLD);
 
     // ReSTIR: Spatial
-    let previous_uv = uv_to_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
+    let previous_uv = jittered_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
 
     var q = r;
     let s = q.s;
@@ -1350,7 +1350,7 @@ fn spatial_reuse(
 
         let sample_coords = vec2<i32>(offset + vec2<f32>(coords));
         let sample_uv = coords_to_uv(sample_coords, render_size);
-        let sample_deferred_coords = uv_to_deferred_coords(sample_uv, deferred_size, render_size, frame.number);
+        let sample_deferred_coords = jittered_deferred_coords(sample_uv, deferred_size, render_size, frame.number);
         if any(sample_uv < vec2<i32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
             continue;
         }
@@ -1391,7 +1391,7 @@ fn spatial_reuse(
             let tap_offset = tap_dist * normalize(offset);
 
             let tap_uv = uv + tap_offset / vec2<f32>(render_size);
-            let tap_deferred_coords = uv_to_deferred_coords(tap_uv, deferred_size, render_size, frame.number);
+            let tap_deferred_coords = jittered_deferred_coords(tap_uv, deferred_size, render_size, frame.number);
             let tap_depth = textureLoad(position_texture, tap_deferred_coords, 0).w;
 
             let ref_depth = mix(depth, sample_depth, f32(j) / f32(tap_count + 1u));

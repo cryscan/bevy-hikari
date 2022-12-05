@@ -1028,7 +1028,9 @@ fn queue_post_process_bind_groups(
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&post_process.upscale_output[previous]),
+                    resource: BindingResource::TextureView(
+                        &post_process.tone_mapping_output[previous],
+                    ),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -1043,12 +1045,12 @@ fn queue_post_process_bind_groups(
             layout: &pipeline.output_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: BindingResource::TextureView(&post_process.upscale_output[current]),
+                resource: BindingResource::TextureView(&post_process.upscale_output[0]),
             }],
         });
 
         let taa_input_texture = match settings.upscale {
-            Upscale::SmaaTu4x { .. } => &post_process.upscale_output[current],
+            Upscale::SmaaTu4x { .. } => &post_process.upscale_output[0],
             _ => &post_process.tone_mapping_output[current],
         };
         let taa = render_device.create_bind_group(&BindGroupDescriptor {
