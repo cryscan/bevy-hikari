@@ -1275,8 +1275,15 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     }
 }
 
+var<workgroup> shared_reservoir: array<array<Reservoir, 8u>, 8u>;
+var<workgroup> shared_depth: array<array<f32, 8u>, 8u>;
+
 @compute @workgroup_size(8, 8, 1)
-fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+fn spatial_reuse(
+    @builtin(global_invocation_id) invocation_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+) {
     let deferred_size = textureDimensions(position_texture);
     let render_size = textureDimensions(render_texture);
 
@@ -1289,6 +1296,10 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let depth = position_depth.w;
 
     var r: Reservoir = load_reservoir(coords.x + render_size.x * coords.y);
+
+    shared_depth[local_id.y][local_id.x] = depth;
+    shared_reservoir[local_id.y][local_id.x] = r;
+    workgroupBarrier();
 
     if depth < F32_EPSILON {
         store_spatial_reservoir(coords.x + render_size.x * coords.y, r);
@@ -1341,13 +1352,23 @@ fn spatial_reuse(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             continue;
         }
 
-        let sample_depth = textureLoad(position_texture, sample_deferred_coords, 0).w;
+        var sample_depth: f32;
+
+        // Check if the sample location is in the shared memory
+        if all(sample_coords / 8 == vec2<i32>(workgroup_id.xy)) {
+            let local_sample_coords = sample_coords % 8;
+            sample_depth = shared_depth[local_sample_coords.y][local_sample_coords.x];
+            q = shared_reservoir[local_sample_coords.y][local_sample_coords.x];
+        } else {
+            sample_depth = textureLoad(position_texture, sample_deferred_coords, 0).w;
+            q = load_reservoir(sample_coords.x + render_size.x * sample_coords.y);
+        }
+
         let depth_ratio = depth / sample_depth;
         if depth_ratio < 0.9 || depth_ratio > 1.1 {
             continue;
         }
 
-        q = load_reservoir(sample_coords.x + render_size.x * sample_coords.y);
         let normal_miss = dot(s.visible_normal, q.s.visible_normal) < 0.866;
         if q.count < F32_EPSILON || normal_miss {
             continue;
