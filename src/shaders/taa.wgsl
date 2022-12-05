@@ -89,10 +89,6 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // from https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
     var velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).rg;
-    max_velocity(coords, vec2<i32>(-1, -1), &velocity);
-    max_velocity(coords, vec2<i32>(1, -1), &velocity);
-    max_velocity(coords, vec2<i32>(-1, 1), &velocity);
-    max_velocity(coords, vec2<i32>(1, 1), &velocity);
     let previous_uv = uv - velocity;
 
     let sample_position = (uv - velocity) * size;
@@ -121,8 +117,9 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
     let is_background = current_depth == 0.0;
 
+    let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
     let previous_coords = vec2<i32>(previous_uv * vec2<f32>(deferred_size));
-    let current_instance = textureLoad(instance_material_texture, coords, 0).x;
+    let current_instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
     var instance_miss = false;
     compare_instance(previous_coords, vec2<i32>(-1, -1), current_instance, &instance_miss);
     compare_instance(previous_coords, vec2<i32>(1, -1), current_instance, &instance_miss);
