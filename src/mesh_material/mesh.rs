@@ -1,6 +1,6 @@
 use super::{
-    GpuMesh, GpuMeshIndex, GpuNode, GpuNodeBuffer, GpuPrimitive, GpuPrimitiveBuffer, GpuVertex,
-    GpuVertexBuffer, MeshMaterialSystems,
+    GpuMesh, GpuMeshIndex, GpuNode, GpuNodeBuffer, GpuPrimitive, GpuPrimitiveBuffer,
+    GpuPrimitiveCompact, GpuVertex, GpuVertexBuffer, MeshMaterialSystems,
 };
 use bevy::{
     prelude::*,
@@ -45,7 +45,10 @@ impl MeshRenderAssets {
         nodes: Vec<GpuNode>,
     ) {
         self.vertex_buffer.get_mut().data = vertices;
-        self.primitive_buffer.get_mut().data = primitives;
+        self.primitive_buffer.get_mut().data = primitives
+            .into_iter()
+            .map(GpuPrimitiveCompact::from)
+            .collect();
 
         self.node_buffer.get_mut().count = nodes.len() as u32;
         self.node_buffer.get_mut().data = nodes;

@@ -6,10 +6,13 @@ struct Vertex {
     uv: vec2<f32>,
 };
 
+struct PrimitiveVertex {
+    position: vec3<f32>,
+    index: u32,
+};
+
 struct Primitive {
-    vertices: array<vec3<f32>, 3>,
-    indices: array<u32, 3>,
-    node_index: u32,
+    vertices: array<PrimitiveVertex, 3>,
 };
 
 struct MeshIndex {

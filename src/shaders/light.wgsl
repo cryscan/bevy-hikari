@@ -172,16 +172,12 @@ fn intersects_aabb(ray: Ray, aabb: Aabb) -> f32 {
     return t;
 }
 
-fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
+fn intersects_triangle(ray: Ray, tri: array<PrimitiveVertex, 3>) -> Intersection {
     var result: Intersection;
     result.distance = F32_MAX;
 
-    // let a = tri[0];
-    // let b = tri[1];
-    // let c = tri[2];
-
-    let ab = tri[1] - tri[0];
-    let ac = tri[2] - tri[0];
+    let ab = tri[1].position - tri[0].position;
+    let ac = tri[2].position - tri[0].position;
 
     let u_vec = cross(ray.direction, ac);
     let det = dot(ab, u_vec);
@@ -190,7 +186,7 @@ fn intersects_triangle(ray: Ray, tri: array<vec3<f32>, 3>) -> Intersection {
     }
 
     let inv_det = 1.0 / det;
-    let ao = ray.origin - tri[0];
+    let ao = ray.origin - tri[0].position;
     let u = dot(ao, u_vec) * inv_det;
     if u < 0.0 || u > 1.0 {
         result.uv = vec2<f32>(u, 0.0);
@@ -223,8 +219,8 @@ fn traverse_bottom(hit: ptr<function, Hit>, ray: Ray, mesh: MeshIndex, early_dis
             let primitive_index = mesh.primitive + node.entry_index - BVH_LEAF_FLAG;
             let vertices = primitive_buffer[primitive_index].vertices;
 
-            aabb.min = min(vertices[0], min(vertices[1], vertices[2]));
-            aabb.max = max(vertices[0], max(vertices[1], vertices[2]));
+            aabb.min = min(vertices[0].position, min(vertices[1].position, vertices[2].position));
+            aabb.max = max(vertices[0].position, max(vertices[1].position, vertices[2].position));
 
             if intersects_aabb(ray, aabb) < (*hit).intersection.distance {
                 let intersection = intersects_triangle(ray, vertices);
@@ -315,11 +311,11 @@ fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
 
     if hit.instance_index != U32_MAX {
         let instance = instance_buffer[hit.instance_index];
-        let indices = primitive_buffer[hit.primitive_index].indices;
+        let vertices = primitive_buffer[hit.primitive_index].vertices;
 
-        let v0 = vertex_buffer[(instance.mesh.vertex + indices[0])];
-        let v1 = vertex_buffer[(instance.mesh.vertex + indices[1])];
-        let v2 = vertex_buffer[(instance.mesh.vertex + indices[2])];
+        let v0 = vertex_buffer[(instance.mesh.vertex + vertices[0].index)];
+        let v1 = vertex_buffer[(instance.mesh.vertex + vertices[1].index)];
+        let v2 = vertex_buffer[(instance.mesh.vertex + vertices[2].index)];
         let uv = hit.intersection.uv;
         info.uv = v0.uv + uv.x * (v1.uv - v0.uv) + uv.y * (v2.uv - v0.uv);
         info.normal = v0.normal + uv.x * (v1.normal - v0.normal) + uv.y * (v2.normal - v0.normal);
@@ -476,7 +472,7 @@ fn select_light_candidate(
         let emissive_instance = instance_buffer[candidate.emissive_instance];
         let v = primitive_buffer[emissive_instance.mesh.primitive + primitive_index].vertices;
         let b = sample_uniform_triangle_barycentric(rand.zw);
-        let p = instance_position_local_to_world(emissive_instance, b.x * v[0] + b.y * v[1] + (1.0 - b.x - b.y) * v[2]);
+        let p = instance_position_local_to_world(emissive_instance, b.x * v[0].position + b.y * v[1].position + (1.0 - b.x - b.y) * v[2].position);
 
         // Cast a ray on the instance to find the hit
         var hit: Hit;

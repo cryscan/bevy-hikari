@@ -93,6 +93,38 @@ impl BHShape for GpuPrimitive {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuPrimitiveVertex {
+    pub position: Vec3,
+    pub index: u32,
+}
+
+#[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuPrimitiveCompact {
+    pub vertices: [GpuPrimitiveVertex; 3],
+}
+
+impl From<GpuPrimitive> for GpuPrimitiveCompact {
+    fn from(primitive: GpuPrimitive) -> Self {
+        Self {
+            vertices: [
+                GpuPrimitiveVertex {
+                    position: primitive.vertices[0],
+                    index: primitive.indices[0],
+                },
+                GpuPrimitiveVertex {
+                    position: primitive.vertices[1],
+                    index: primitive.indices[1],
+                },
+                GpuPrimitiveVertex {
+                    position: primitive.vertices[2],
+                    index: primitive.indices[2],
+                },
+            ],
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, ShaderType)]
 pub struct GpuInstance {
     pub min: Vec3,
@@ -213,7 +245,7 @@ pub struct GpuVertexBuffer {
 #[derive(Default, ShaderType)]
 pub struct GpuPrimitiveBuffer {
     #[size(runtime)]
-    pub data: Vec<GpuPrimitive>,
+    pub data: Vec<GpuPrimitiveCompact>,
 }
 
 #[derive(Default, ShaderType)]
