@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.6] - 2022-12-5
+This is mainly a bug-fix and performance upgrade.
+
+### Changed
+- Optimize data structures and bandwidth usage.
+
+### Fixed
+- Fix SMAA previous color re-projection to get less aliasing when moving.
+
 ## [0.3.5] - 2022-12-4
 ### Changed
 - Do TAA color clipping on instance miss. ([b736703](https://github.com/cryscan/bevy-hikari/tree/b73670378dab3103e4e5603e5d7e60af76188906))
@@ -36,6 +45,7 @@
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
+[0.3.6]: https://github.com/cryscan/bevy-hikari/commits/v0.3.6
 [0.3.5]: https://github.com/cryscan/bevy-hikari/commits/v0.3.5
 [0.3.4]: https://github.com/cryscan/bevy-hikari/commits/v0.3.4
 [0.3.3]: https://github.com/cryscan/bevy-hikari/commits/v0.3.3
