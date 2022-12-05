@@ -8,12 +8,14 @@ var nearest_sampler: sampler;
 var linear_sampler: sampler;
 
 @group(3) @binding(0)
-var previous_upscaled_texture: texture_2d<f32>;
+var previous_output_texture: texture_2d<f32>;
 @group(3) @binding(1)
 var render_texture: texture_2d<f32>;
 
 @group(4) @binding(0)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
+
+let INV_TAU: f32 = 0.159154943;
 
 // The following 3 functions are from Playdead
 // https://github.com/playdeadgames/temporal/blob/master/Assets/Shaders/TemporalReprojection.shader
@@ -42,7 +44,7 @@ fn clip_towards_aabb_center(previous_color: vec3<f32>, current_color: vec3<f32>,
 }
 
 fn sample_previous_texture(uv: vec2<f32>) -> vec3<f32> {
-    let c = textureSampleLevel(previous_upscaled_texture, linear_sampler, uv, 0.0).rgb;
+    let c = textureSampleLevel(previous_output_texture, linear_sampler, uv, 0.0).rgb;
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
@@ -61,7 +63,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // In this implementation, a thread computes 4 output pixels in a quad.
     // One of the pixel (c) on the diagonal can be fetched from render_texture,
-    // the other (p) is reprojected from previous_upscaled_texture.
+    // the other (p) is reprojected from previous_output_texture.
     // The two left (p', c') are extrapolated using differential blend method.
 
     // Odd frame:
@@ -85,8 +87,8 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Reproject to find the equivalent sample from the past, using 5-tap Catmull-Rom filtering
     // from https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
-    let size = vec2<f32>(input_size);
-    let texel_size = 1.0 / size;
+    let texel_size = 1.0 / vec2<f32>(output_size);
+    let tile_size = 1.0 / vec2<f32>(input_size);
 
     let frame_index = frame.number % 2u;
     let previous_output_coords = 2 * coords + select(0, 1, frame_index == 0u);
@@ -94,15 +96,15 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // Fetch the current sample
     let current_output_coords = 2 * coords + select(1, 0, frame_index == 0u);
+    let current_output_uv = coords_to_uv(current_output_coords, output_size);
     let original_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0);
     let current_color = original_color.rgb;
 
     // Fetch the previous sample
-    let deferred_coords: vec2<i32> = uv_to_deferred_coords(previous_output_uv, deferred_size, input_size, frame.number);
-    let velocity = textureLoad(velocity_uv_texture, deferred_coords, 0).xy;
-    let previous_input_uv = previous_output_uv - velocity;
+    let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, previous_output_uv, 0.0).xy;
+    let previous_reprojected_uv = previous_output_uv - velocity;
 
-    let sample_position = previous_input_uv * size;
+    let sample_position = previous_reprojected_uv * vec2<f32>(output_size);
     let texel_position_1 = floor(sample_position - 0.5) + 0.5;
     let f = sample_position - texel_position_1;
     let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
@@ -120,15 +122,15 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_12.y)) * w12.x * w12.y;
     previous_color += sample_previous_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
     previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
-    // var previous_color = textureSampleLevel(previous_upscaled_texture, nearest_sampler, previous_input_uv, 0.0).rgb;
+    // var previous_color = textureSampleLevel(previous_output_texture, nearest_sampler, previous_reprojected_uv, 0.0).rgb;
 
-    let current_depth = textureLoad(position_texture, deferred_coords, 0).w;
-    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_input_uv);
+    let current_depth = textureSampleLevel(position_texture, nearest_sampler, current_output_uv, 0.0).w;
+    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv);
     let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
     let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
 
-    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_input_uv, 0.0).xy;
+    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_reprojected_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
     if depth_miss && velocity_miss {
@@ -168,6 +170,12 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
         previous_color = YCoCg_to_RGB(previous_color);
     }
+
+    // Get the subpixel velocity, and blend the previous sample with current to get better edges
+    let subpixel_velocity = fract(velocity / tile_size + 1.0);
+    var blend_factor = vec2<f32>(cos(subpixel_velocity.x * INV_TAU), cos(subpixel_velocity.y) * INV_TAU);
+    blend_factor = max(vec2<f32>(0.0), -blend_factor);
+    previous_color = mix(previous_color, current_color, 0.5 * (blend_factor.x + blend_factor.y));
 
     textureStore(output_texture, current_output_coords, vec4<f32>(current_color, 1.0));
     textureStore(output_texture, previous_output_coords, vec4<f32>(previous_color, 1.0));
