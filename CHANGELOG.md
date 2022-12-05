@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.6] - 2022-12-5
+## [0.3.7] - 2022-12-5
 This is mainly a bug-fix and performance upgrade.
 
 ### Changed
@@ -8,6 +8,7 @@ This is mainly a bug-fix and performance upgrade.
 
 ### Fixed
 - Fix SMAA previous color re-projection to get less aliasing when moving.
+- Fix TAA when the upscaling ratio is 1.0.
 
 ## [0.3.5] - 2022-12-4
 ### Changed
@@ -45,7 +46,7 @@ This is mainly a bug-fix and performance upgrade.
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
-[0.3.6]: https://github.com/cryscan/bevy-hikari/commits/v0.3.6
+[0.3.7]: https://github.com/cryscan/bevy-hikari/commits/v0.3.7
 [0.3.5]: https://github.com/cryscan/bevy-hikari/commits/v0.3.5
 [0.3.4]: https://github.com/cryscan/bevy-hikari/commits/v0.3.4
 [0.3.3]: https://github.com/cryscan/bevy-hikari/commits/v0.3.3
