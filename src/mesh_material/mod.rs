@@ -57,7 +57,7 @@ impl Plugin for MeshMaterialPlugin {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, ShaderType)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct GpuVertex {
     pub position: Vec3,
     pub normal: Vec3,
@@ -65,6 +65,25 @@ pub struct GpuVertex {
 }
 
 #[derive(Debug, Default, Clone, Copy, ShaderType)]
+pub struct GpuVertexCompact {
+    pub position: Vec3,
+    pub u: f32,
+    pub normal: Vec3,
+    pub v: f32,
+}
+
+impl From<GpuVertex> for GpuVertexCompact {
+    fn from(vertex: GpuVertex) -> Self {
+        Self {
+            position: vertex.position,
+            normal: vertex.normal,
+            u: vertex.uv.x,
+            v: vertex.uv.y,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
 pub struct GpuPrimitive {
     /// Global positions of vertices.
     pub vertices: [Vec3; 3],
@@ -239,7 +258,7 @@ impl BHShape for GpuEmissive {
 #[derive(Default, ShaderType)]
 pub struct GpuVertexBuffer {
     #[size(runtime)]
-    pub data: Vec<GpuVertex>,
+    pub data: Vec<GpuVertexCompact>,
 }
 
 #[derive(Default, ShaderType)]

@@ -316,8 +316,11 @@ fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
         let v0 = vertex_buffer[(instance.mesh.vertex + vertices[0].index)];
         let v1 = vertex_buffer[(instance.mesh.vertex + vertices[1].index)];
         let v2 = vertex_buffer[(instance.mesh.vertex + vertices[2].index)];
+        let uv0 = vec2<f32>(v0.u, v0.v);
+        let uv1 = vec2<f32>(v1.u, v1.v);
+        let uv2 = vec2<f32>(v2.u, v2.v);
         let uv = hit.intersection.uv;
-        info.uv = v0.uv + uv.x * (v1.uv - v0.uv) + uv.y * (v2.uv - v0.uv);
+        info.uv = uv0 + uv.x * (uv1 - uv0) + uv.y * (uv2 - uv0);
         info.normal = v0.normal + uv.x * (v1.normal - v0.normal) + uv.y * (v2.normal - v0.normal);
         info.normal = instance_normal_local_to_world(instance, info.normal);
 
