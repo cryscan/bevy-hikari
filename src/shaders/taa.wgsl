@@ -51,24 +51,10 @@ fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
     return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
-fn max_velocity(
-    coords: vec2<i32>,
-    offset: vec2<i32>,
-    velocity: ptr<function, vec2<f32>>,
-) {
-    let v = textureLoad(velocity_uv_texture, coords + offset, 0).xy;
-    let d = vec2<f32>(1.0);
-    *velocity = select(*velocity, v, dot(abs(*velocity), d) < dot(abs(v), d));
-}
-
-fn compare_instance(
-    previous_coords: vec2<i32>,
-    offset: vec2<i32>,
-    current_instance: u32,
-    instance_miss: ptr<function, bool>
-) {
-    let previous_instance = textureLoad(previous_instance_material_texture, previous_coords + offset, 0).x;
-    *instance_miss = *instance_miss || (current_instance != previous_instance);
+fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
+    let size = vec2<f32>(textureDimensions(instance_material_texture));
+    let coords = vec2<i32>((uv + frame.upscale_ratio * offset) * size);
+    return textureLoad(previous_instance_material_texture, coords, 0).x;
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -118,14 +104,12 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let is_background = current_depth == 0.0;
 
     let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
-    let previous_coords = vec2<i32>(previous_uv * vec2<f32>(deferred_size));
     let current_instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
-    var instance_miss = false;
-    compare_instance(previous_coords, vec2<i32>(-1, -1), current_instance, &instance_miss);
-    compare_instance(previous_coords, vec2<i32>(1, -1), current_instance, &instance_miss);
-    compare_instance(previous_coords, vec2<i32>(0, 0), current_instance, &instance_miss);
-    compare_instance(previous_coords, vec2<i32>(-1, 1), current_instance, &instance_miss);
-    compare_instance(previous_coords, vec2<i32>(1, 1), current_instance, &instance_miss);
+    var instance_miss = current_instance != sample_instance(previous_uv, vec2<f32>(0.0));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_uv, vec2<f32>(-texel_size.x, -texel_size.y));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_uv, vec2<f32>(texel_size.x, -texel_size.y));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_uv, vec2<f32>(-texel_size.x, texel_size.y));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_uv, vec2<f32>(texel_size.x, texel_size.y));
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
@@ -149,6 +133,12 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
         previous_color = YCoCg_to_RGB(previous_color);
     }
+
+    // Ghost fading by luminance difference
+    let current_lum = luminance(current_color);
+    let previous_lum = luminance(previous_color);
+    let delta_lum = pow(clamp(abs(current_lum - previous_lum), 0.0, 1.0), 0.5);
+    let factor = select(0.1, mix(0.1, 0.5, delta_lum), velocity_miss);
 
     // Blend current and past sample
     let output = mix(previous_color, current_color, 0.1);
