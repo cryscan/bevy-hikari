@@ -48,6 +48,12 @@ fn sample_previous_texture(uv: vec2<f32>) -> vec3<f32> {
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
+    let size = vec2<f32>(textureDimensions(instance_material_texture));
+    let coords = vec2<i32>((uv + offset) * size);
+    return textureLoad(previous_instance_material_texture, coords, 0).x;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
@@ -117,15 +123,21 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_reprojected_uv, 0.0).rgb;
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
-    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv);
-    let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
+    let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_reprojected_uv, 0.0).w;
     let depth_ratio = current_depth / max(previous_depth, 0.0001);
-    let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
+    let depth_miss = current_depth == 0.0 || depth_ratio < 0.95 || depth_ratio > 1.05;
+
+    let current_instance = textureLoad(instance_material_texture, previous_output_coords, 0).x;
+    var instance_miss = current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(0.0));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(-tile_size.x, -tile_size.y));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(tile_size.x, -tile_size.y));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(-tile_size.x, tile_size.y));
+    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(tile_size.x, tile_size.y));
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_reprojected_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
-    if depth_miss && velocity_miss {
+    if (depth_miss || instance_miss) && velocity_miss {
         // Constrain past sample with 2x2 YCoCg variance clipping to handle disocclusion
         let cr = textureGather(0, render_texture, linear_sampler, previous_output_uv);
         let cg = textureGather(1, render_texture, linear_sampler, previous_output_uv);
