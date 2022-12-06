@@ -8,6 +8,11 @@
 After Bevy releasing 0.8, the plugin moves to deferred hybrid path tracing.
 For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-mapping, please check the `bevy-0.6` branch.
 
+:warning: **Notes:**
+- Please run examples with `--release` flag to avoid the texture non-uniform indexing error
+- Please compile this libaray in **release mode** when using as a dependency
+- Supported meshes must have these 3 vertex attributes: position, normal and uv
+
 ## Bevy Version Support
 | `bevy` | `bevy-hikari` |
 | ------ | ------------- |
@@ -74,10 +79,6 @@ pub struct HikariSettings {
 ```
 
 If you are unsure about some terms in these options, you could check [render passes](#render-passes) for details.
-
-Notes:
-- Please run with `--release` flag to avoid the texture non-uniform indexing error
-- Supported meshes must have these 3 vertex attributes: position, normal and uv 
 
 ```rust
 use bevy::prelude::*;
