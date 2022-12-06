@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8] - 2022-12-6
+### Added
+- Added type `HikariUniversalSettings` for disabling building of acceleration structures. ([#35](https://github.com/cryscan/bevy-hikari/issues/35))
+
+### Fixed
+- Fix more TAA ghosting for multiple upscaling ratios.
+
 ## [0.3.7] - 2022-12-5
 This is mainly a bug-fix and performance upgrade.
 
@@ -46,6 +53,7 @@ This is mainly a bug-fix and performance upgrade.
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
+[0.3.8]: https://github.com/cryscan/bevy-hikari/commits/v0.3.8
 [0.3.7]: https://github.com/cryscan/bevy-hikari/commits/v0.3.7
 [0.3.5]: https://github.com/cryscan/bevy-hikari/commits/v0.3.5
 [0.3.4]: https://github.com/cryscan/bevy-hikari/commits/v0.3.4
