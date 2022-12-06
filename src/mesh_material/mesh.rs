@@ -1,3 +1,5 @@
+use crate::HikariUniversalSettings;
+
 use super::{
     GpuMesh, GpuMeshIndex, GpuNode, GpuNodeBuffer, GpuPrimitive, GpuPrimitiveBuffer,
     GpuPrimitiveCompact, GpuVertex, GpuVertexBuffer, GpuVertexCompact, MeshMaterialSystems,
@@ -108,7 +110,12 @@ fn prepare_mesh_assets(
     mut render_assets: ResMut<MeshRenderAssets>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    universal_settings: Res<HikariUniversalSettings>,
 ) {
+    if !universal_settings.build_mesh_acceleration_structure {
+        return;
+    }
+
     if extracted_assets.removed.is_empty() && extracted_assets.extracted.is_empty() {
         return;
     }

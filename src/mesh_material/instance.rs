@@ -5,6 +5,7 @@ use super::{
 use crate::{
     mesh_material::{GpuInstance, GpuInstanceBuffer, GpuNode, GpuNodeBuffer},
     transform::GlobalTransformQueue,
+    HikariUniversalSettings,
 };
 use bevy::{
     asset::Asset,
@@ -248,7 +249,12 @@ fn prepare_instances(
     mut collection: Local<Instances>,
     meshes: Res<GpuMeshes>,
     materials: Res<GpuStandardMaterials>,
+    universal_settings: Res<HikariUniversalSettings>,
 ) {
+    if !universal_settings.build_instance_acceleration_structure {
+        return;
+    }
+
     let instance_changed =
         !extracted_instances.extracted.is_empty() || !extracted_instances.removed.is_empty();
 

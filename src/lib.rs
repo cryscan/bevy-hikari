@@ -236,10 +236,13 @@ impl Plugin for HikariPlugin {
             commands.insert_resource(NoiseTextures(handles));
         };
 
-        app.register_type::<HikariSettings>()
+        app.register_type::<HikariUniversalSettings>()
+            .register_type::<HikariSettings>()
             .register_type::<Taa>()
             .register_type::<Upscale>()
+            .init_resource::<HikariUniversalSettings>()
             .add_plugin(ExtractResourcePlugin::<NoiseTextures>::default())
+            .add_plugin(ExtractResourcePlugin::<HikariUniversalSettings>::default())
             .add_plugin(ExtractComponentPlugin::<HikariSettings>::default())
             .add_plugin(TransformPlugin)
             .add_plugin(ViewPlugin)
@@ -384,6 +387,34 @@ impl Plugin for HikariPlugin {
     }
 }
 
+/// Settings apply globally.
+#[derive(Debug, Clone, Resource, Reflect)]
+#[reflect(Resource)]
+pub struct HikariUniversalSettings {
+    /// Whether to build acceleration structure for mesh assets.
+    pub build_mesh_acceleration_structure: bool,
+    /// Whether to build acceleration structure for scene instances.
+    pub build_instance_acceleration_structure: bool,
+}
+
+impl Default for HikariUniversalSettings {
+    fn default() -> Self {
+        Self {
+            build_mesh_acceleration_structure: true,
+            build_instance_acceleration_structure: true,
+        }
+    }
+}
+
+impl ExtractResource for HikariUniversalSettings {
+    type Source = Self;
+
+    fn extract_resource(source: &Self::Source) -> Self {
+        source.clone()
+    }
+}
+
+/// Settings that must be attached on cameras with `bevy_hikari` render graph.
 #[derive(Debug, Clone, Component, Reflect)]
 #[reflect(Component)]
 pub struct HikariSettings {
