@@ -233,6 +233,6 @@ pub fn control_directional_light(
 
 fn sphere_rotate_system(time: Res<Time>, mut query: Query<(&mut Transform, &EmissiveSphere)>) {
     for (mut transform, emissive) in &mut query {
-        transform.rotate_y(emissive.speed * time.delta_seconds());
+        transform.rotate_local_z(emissive.speed * time.delta_seconds());
     }
 }
