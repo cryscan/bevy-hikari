@@ -22,8 +22,8 @@ fn main() {
         .register_type::<EmissiveSphere>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             // window: WindowDescriptor {
-            //     width: 400.0,
-            //     height: 300.0,
+            //     width: 800.0,
+            //     height: 600.0,
             //     ..Default::default()
             // },
             ..Default::default()
@@ -94,7 +94,11 @@ fn setup(
                 emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
                 ..Default::default()
             }),
-            transform: Transform::from_xyz(2.0, 2.0, 0.0),
+            transform: Transform {
+                translation: Vec3::new(2.0, 2.0, 0.0),
+                rotation: Quat::from_rotation_x(-PI / 2.0),
+                ..Default::default()
+            },
             ..Default::default()
         },
         EmissiveSphere { speed: 0.2 },

@@ -180,7 +180,11 @@ fn setup(
                 emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
                 ..Default::default()
             }),
-            transform: Transform::from_xyz(2.0, 1.0, 0.0),
+            transform: Transform {
+                translation: Vec3::new(2.0, 1.0, 0.0),
+                rotation: Quat::from_rotation_x(-PI / 2.0),
+                ..Default::default()
+            },
             ..Default::default()
         },
         EmissiveSphere { speed: 0.2 },
@@ -198,7 +202,11 @@ fn setup(
                 emissive_texture: Some(asset_server.load("models/Earth/earth_daymap.jpg")),
                 ..Default::default()
             }),
-            transform: Transform::from_xyz(-2.0, 1.0, 0.0),
+            transform: Transform {
+                translation: Vec3::new(-2.0, 1.0, 0.0),
+                rotation: Quat::from_rotation_x(-PI / 2.0),
+                ..Default::default()
+            },
             ..Default::default()
         },
         EmissiveSphere { speed: 0.2 },
