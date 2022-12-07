@@ -114,10 +114,9 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
 
     let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
-    let previous_depth = max(max(previous_depths.x, previous_depths.y), max(previous_depths.z, previous_depths.w));
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
-    let depth_ratio = current_depth / max(previous_depth, 0.0001);
-    let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
+    let depth_ratio = vec4<f32>(current_depth) / max(previous_depths, vec4<f32>(0.0001));
+    let depth_miss = any(depth_ratio < vec4<f32>(0.95)) || any(depth_ratio > vec4<f32>(1.05));
 
     let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
     let current_instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
