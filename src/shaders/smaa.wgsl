@@ -57,6 +57,23 @@ fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
     return textureLoad(previous_instance_material_texture, coords, 0).x;
 }
 
+fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
+    let texel_size = 1.0 / vec2<f32>(textureDimensions(render_texture));
+    var offset = vec2<f32>(0.0);
+    var depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+
+    var offset_next = vec2<f32>(texel_size.x, texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    offset_next = vec2<f32>(-texel_size.x, texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    offset_next = vec2<f32>(texel_size.x, -texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    offset_next = vec2<f32>(-texel_size.x, -texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+
+    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + offset, 0.0).xy;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
@@ -104,7 +121,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_output_coords = 2 * coords + previous_smaa_jitter(frame.number);
     let previous_output_uv = coords_to_uv(previous_output_coords, output_size);
     let previous_albedo = textureSampleLevel(albedo_texture, nearest_sampler, previous_output_uv, 0.0);
-    let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, previous_output_uv, 0.0).xy;
+    let velocity = nearest_velocity(previous_output_uv);
     let previous_reprojected_uv = previous_output_uv - velocity;
 
     // let sample_position = previous_reprojected_uv * vec2<f32>(input_size);

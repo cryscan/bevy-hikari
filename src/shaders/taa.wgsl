@@ -57,6 +57,23 @@ fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
     return textureLoad(previous_instance_material_texture, coords, 0).x;
 }
 
+fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
+    let texel_size = 1.0 / vec2<f32>(textureDimensions(render_texture));
+    var offset = vec2<f32>(0.0);
+    var depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+
+    var offset_next = vec2<f32>(texel_size.x, texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    offset_next = vec2<f32>(-texel_size.x, texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    offset_next = vec2<f32>(texel_size.x, -texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    offset_next = vec2<f32>(-texel_size.x, -texel_size.y);
+    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+
+    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + offset, 0.0).xy;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let output_size = textureDimensions(output_texture);
@@ -74,7 +91,7 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Reproject to find the equivalent sample from the past, using 5-tap Catmull-Rom filtering
     // from https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
-    var velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, uv, 0.0).rg;
+    var velocity = nearest_velocity(uv);
     let previous_uv = uv - velocity;
 
     let sample_position = (uv - velocity) * size;
