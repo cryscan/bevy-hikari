@@ -284,6 +284,17 @@ impl FromWorld for PostProcessPipeline {
                     },
                     count: None,
                 },
+                // Albedo
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -1037,6 +1048,10 @@ fn queue_post_process_bind_groups(
                     resource: BindingResource::TextureView(
                         &post_process.tone_mapping_output[current],
                     ),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&light.albedo),
                 },
             ],
         });

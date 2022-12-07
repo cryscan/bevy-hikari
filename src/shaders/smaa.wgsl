@@ -11,10 +11,13 @@ var linear_sampler: sampler;
 var previous_render_texture: texture_2d<f32>;
 @group(3) @binding(1)
 var render_texture: texture_2d<f32>;
+@group(3) @binding(2)
+var albedo_texture: texture_2d<f32>;
 
 @group(4) @binding(0)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
 
+let TAU: f32 = 6.283185307;
 let INV_TAU: f32 = 0.159154943;
 
 // The following 3 functions are from Playdead
@@ -93,12 +96,14 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // Fetch the current sample
     let current_output_coords = 2 * coords + current_smaa_jitter(frame.number);
-    let original_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0);
-    let current_color = original_color.rgb;
+    let current_output_uv = coords_to_uv(current_output_coords, output_size);
+    let current_albedo = textureSampleLevel(albedo_texture, nearest_sampler, current_output_uv, 0.0);
+    let current_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
 
     // Fetch the previous sample
     let previous_output_coords = 2 * coords + previous_smaa_jitter(frame.number);
     let previous_output_uv = coords_to_uv(previous_output_coords, output_size);
+    let previous_albedo = textureSampleLevel(albedo_texture, nearest_sampler, previous_output_uv, 0.0);
     let velocity = textureSampleLevel(velocity_uv_texture, nearest_sampler, previous_output_uv, 0.0).xy;
     let previous_reprojected_uv = previous_output_uv - velocity;
 
@@ -156,11 +161,18 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         previous_color = YCoCg_to_RGB(previous_color);
     }
 
-    // Get the subpixel velocity, and blend the previous sample with current to get better edges
+    // Get the subpixel velocity,
+    // And blend the previous sample with the approximated current to get better edges
     let subpixel_velocity = fract(velocity / tile_size);
-    var blend_factor = vec2<f32>(cos(subpixel_velocity.x * INV_TAU), cos(subpixel_velocity.y * INV_TAU));
+    var blend_factor = vec2<f32>(cos(subpixel_velocity.x * TAU), cos(subpixel_velocity.y * TAU));
     blend_factor = max(vec2<f32>(0.0), -blend_factor);
-    previous_color = mix(previous_color, current_color, 0.5 * (blend_factor.x + blend_factor.y));
+
+    var reprojected_color = current_color;
+    if current_albedo.a > 0.0 && previous_albedo.a > 0.0 {
+        reprojected_color *= select(vec3<f32>(1.0), previous_albedo.rgb / current_albedo.rgb, current_albedo.rgb < vec3<f32>(0.0001));
+    }
+    previous_color = mix(previous_color, reprojected_color, min(blend_factor.x + blend_factor.y, 1.0));
+    // previous_color = mix(previous_color, vec3<f32>(1.0, 0.0, 0.0), 0.5 * (blend_factor.x + blend_factor.y));
 
     textureStore(output_texture, current_output_coords, vec4<f32>(current_color, 1.0));
     textureStore(output_texture, previous_output_coords, vec4<f32>(previous_color, 1.0));

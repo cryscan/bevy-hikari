@@ -248,160 +248,25 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var ff_moment_1 = 0.0;
     var ff_moment_2 = 0.0;
     var ff_count = 0.0;
-#endif
 
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(-1, -1),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+#else
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
 #endif
-    );
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(0, -1),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
-#endif
-    );
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(1, -1),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
-#endif
-    );
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(-1, 0),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
-#endif
-    );
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(1, 0),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
-#endif
-    );
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(-1, 1),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
-#endif
-    );
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(0, 1),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
-#endif
-    );
-    accumulate_irradiance(
-        deferred_size,
-        output_size,
-        coords,
-        vec2<i32>(1, 1),
-        normal,
-        depth,
-        depth_gradient,
-        instance,
-        lum,
-        variance,
-        &sum_irradiance,
-        &sum_w,
-#ifdef FIREFLY_FILTERING
-        &ff_moment_1,
-        &ff_moment_2,
-        &ff_count
-#endif
-    );
 
     irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
 
@@ -444,7 +309,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // let mixed_color = mix(color, previous_color, 0.5);
     // color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
-    // textureStore(radiance_texture, coords, color);
+    textureStore(radiance_texture, coords, color);
 
     let albedo = textureLoad(albedo_texture, deferred_coords, 0);
     color *= albedo;
