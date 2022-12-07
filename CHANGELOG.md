@@ -59,6 +59,7 @@ This is mainly a bug-fix and performance upgrade.
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
+[0.3.9]: https://github.com/cryscan/bevy-hikari/commits/v0.3.9
 [0.3.8]: https://github.com/cryscan/bevy-hikari/commits/v0.3.8
 [0.3.7]: https://github.com/cryscan/bevy-hikari/commits/v0.3.7
 [0.3.5]: https://github.com/cryscan/bevy-hikari/commits/v0.3.5
