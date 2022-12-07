@@ -19,6 +19,7 @@ use std::f32::consts::PI;
 
 fn main() {
     App::new()
+        .register_type::<EmissiveSphere>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             // window: WindowDescriptor {
             //     width: 400.0,
@@ -33,6 +34,7 @@ fn main() {
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
+        .add_system(sphere_rotate_system)
         .add_system(camera_input_map)
         .add_system_to_stage(
             CoreStage::First,
@@ -43,8 +45,11 @@ fn main() {
 
 pub struct RaycastSet;
 
-#[derive(Component)]
-pub struct EmissiveSphere;
+#[derive(Default, Component, Reflect)]
+#[reflect(Component)]
+pub struct EmissiveSphere {
+    pub speed: f32,
+}
 
 fn setup(
     mut commands: Commands,
@@ -92,7 +97,7 @@ fn setup(
             transform: Transform::from_xyz(2.0, 2.0, 0.0),
             ..Default::default()
         },
-        EmissiveSphere,
+        EmissiveSphere { speed: 0.2 },
         Name::new("Emissive Sphere"),
     ));
 
@@ -219,5 +224,11 @@ pub fn control_directional_light(
         if let Ok(mut transform) = queries.p0().get_single_mut() {
             transform.look_at(*target, Vec3::Z);
         }
+    }
+}
+
+fn sphere_rotate_system(time: Res<Time>, mut query: Query<(&mut Transform, &EmissiveSphere)>) {
+    for (mut transform, emissive) in &mut query {
+        transform.rotate_y(emissive.speed * time.delta_seconds());
     }
 }

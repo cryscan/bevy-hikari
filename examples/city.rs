@@ -19,6 +19,7 @@ use std::f32::consts::PI;
 
 fn main() {
     App::new()
+        .register_type::<EmissiveSphere>()
         .insert_resource(LoadTimer(Timer::from_seconds(1.0, TimerMode::Repeating)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             // window: WindowDescriptor {
@@ -46,8 +47,11 @@ fn main() {
 
 pub struct RaycastSet;
 
-#[derive(Component)]
-pub struct EmissiveSphere;
+#[derive(Default, Component, Reflect)]
+#[reflect(Component)]
+pub struct EmissiveSphere {
+    pub speed: f32,
+}
 
 fn setup(
     mut commands: Commands,
@@ -89,7 +93,7 @@ fn setup(
             transform: Transform::from_xyz(0.0, 1.0, 0.0),
             ..Default::default()
         },
-        EmissiveSphere,
+        EmissiveSphere { speed: 0.2 },
         Name::new("Emissive Sphere"),
     ));
 
@@ -119,7 +123,10 @@ fn setup(
                 transform: Transform::from_xyz(0.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
                 ..Default::default()
             },
-            HikariSettings::default(),
+            HikariSettings {
+                upscale: Upscale::SmaaTu4x { ratio: 2.0 },
+                ..Default::default()
+            },
             BloomSettings::default(),
             RaycastSource::<RaycastSet>::default(),
         ))
@@ -279,8 +286,8 @@ pub fn control_directional_light(
     }
 }
 
-fn sphere_rotate_system(time: Res<Time>, mut query: Query<&mut Transform, With<EmissiveSphere>>) {
-    for mut transform in &mut query {
-        transform.rotate_y(0.1 * time.delta_seconds());
+fn sphere_rotate_system(time: Res<Time>, mut query: Query<(&mut Transform, &EmissiveSphere)>) {
+    for (mut transform, emissive) in &mut query {
+        transform.rotate_y(emissive.speed * time.delta_seconds());
     }
 }
