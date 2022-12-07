@@ -97,7 +97,8 @@ bitflags::bitflags! {
     #[repr(transparent)]
     pub struct LightPipelineKey: u32 {
         const ENTRY_POINT_BITS      = LightPipelineKey::ENTRY_POINT_MASK_BITS;
-        const INCLUDE_EMISSIVE_BIT  = 1 << LightPipelineKey::INCLUDE_EMISSIVE_SHIFT_BITS;
+        const EMISSIVE_LIT_BIT      = 1 << LightPipelineKey::EMISSIVE_LIT_SHIFT_BITS;
+        const RENDER_EMISSIVE_BIT   = 1 << LightPipelineKey::RENDER_EMISSIVE_SHIFT_BITS;
         const MULTIPLE_BOUNCES_BIT  = 1 << LightPipelineKey::MULTIPLE_BOUNCES_SHIFT_BITS;
         const TEXTURE_COUNT_BITS    = LightPipelineKey::TEXTURE_COUNT_MASK_BITS << LightPipelineKey::TEXTURE_COUNT_SHIFT_BITS;
     }
@@ -105,8 +106,9 @@ bitflags::bitflags! {
 
 impl LightPipelineKey {
     const ENTRY_POINT_MASK_BITS: u32 = 0xF;
-    const INCLUDE_EMISSIVE_SHIFT_BITS: u32 = 4;
-    const MULTIPLE_BOUNCES_SHIFT_BITS: u32 = 8;
+    const EMISSIVE_LIT_SHIFT_BITS: u32 = 4;
+    const RENDER_EMISSIVE_SHIFT_BITS: u32 = 5;
+    const MULTIPLE_BOUNCES_SHIFT_BITS: u32 = 6;
     const TEXTURE_COUNT_MASK_BITS: u32 = 0xFFFF;
     const TEXTURE_COUNT_SHIFT_BITS: u32 = 32 - 16;
 
@@ -139,8 +141,11 @@ impl SpecializedComputePipeline for LightPipeline {
         if key.texture_count() == 0 {
             shader_defs.push("NO_TEXTURE".into());
         }
-        if key.contains(LightPipelineKey::INCLUDE_EMISSIVE_BIT) {
-            shader_defs.push("INCLUDE_EMISSIVE".into());
+        if key.contains(LightPipelineKey::EMISSIVE_LIT_BIT) {
+            shader_defs.push("EMISSIVE_LIT".into());
+        }
+        if key.contains(LightPipelineKey::RENDER_EMISSIVE_BIT) {
+            shader_defs.push("RENDER_EMISSIVE".into());
         }
         if key.contains(LightPipelineKey::MULTIPLE_BOUNCES_BIT) {
             shader_defs.push("MULTIPLE_BOUNCES".into());
@@ -383,8 +388,7 @@ pub struct CachedLightPipelines {
     direct_emissive: CachedComputePipelineId,
     indirect: CachedComputePipelineId,
     indirect_multiple_bounces: CachedComputePipelineId,
-    emissive_spatial_reuse: CachedComputePipelineId,
-    indirect_spatial_reuse: CachedComputePipelineId,
+    spatial_reuse: CachedComputePipelineId,
 }
 
 fn queue_light_pipelines(
@@ -402,44 +406,44 @@ fn queue_light_pipelines(
 
     let (direct_lit, direct_emissive) = {
         let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::DirectLit);
-        let direct_lit = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-        let direct_emissive = pipelines.specialize(
-            &mut pipeline_cache,
-            &pipeline,
-            key | LightPipelineKey::INCLUDE_EMISSIVE_BIT,
-        );
-        (direct_lit, direct_emissive)
+        (
+            pipelines.specialize(
+                &mut pipeline_cache,
+                &pipeline,
+                key | LightPipelineKey::RENDER_EMISSIVE_BIT,
+            ),
+            pipelines.specialize(
+                &mut pipeline_cache,
+                &pipeline,
+                key | LightPipelineKey::EMISSIVE_LIT_BIT,
+            ),
+        )
     };
 
     let (indirect, indirect_multiple_bounces) = {
         let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::IndirectLitAmbient);
-        let indirect = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-        let indirect_multiple_bounces = pipelines.specialize(
-            &mut pipeline_cache,
-            &pipeline,
-            key | LightPipelineKey::MULTIPLE_BOUNCES_BIT,
-        );
-        (indirect, indirect_multiple_bounces)
+        (
+            pipelines.specialize(&mut pipeline_cache, &pipeline, key),
+            pipelines.specialize(
+                &mut pipeline_cache,
+                &pipeline,
+                key | LightPipelineKey::MULTIPLE_BOUNCES_BIT,
+            ),
+        )
     };
 
-    let (emissive_spatial_reuse, indirect_spatial_reuse) = {
+    let spatial_reuse = {
         let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::SpatialReuse);
-        let emissive_spatial_reuse = pipelines.specialize(
-            &mut pipeline_cache,
-            &pipeline,
-            key | LightPipelineKey::INCLUDE_EMISSIVE_BIT,
-        );
-        let indirect_spatial_reuse = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-        (emissive_spatial_reuse, indirect_spatial_reuse)
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     };
+
     commands.insert_resource(CachedLightPipelines {
         full_screen_albedo,
         direct_lit,
         direct_emissive,
         indirect,
         indirect_multiple_bounces,
-        emissive_spatial_reuse,
-        indirect_spatial_reuse,
+        spatial_reuse,
     })
 }
 
@@ -668,8 +672,8 @@ impl Node for LightNode {
             ],
             [
                 None,
-                Some(&pipelines.emissive_spatial_reuse),
-                Some(&pipelines.indirect_spatial_reuse),
+                Some(&pipelines.spatial_reuse),
+                Some(&pipelines.spatial_reuse),
             ],
         )) {
             pass.set_bind_group(5, render, &[]);

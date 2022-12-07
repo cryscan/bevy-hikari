@@ -53,7 +53,7 @@ let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
 let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
 let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
-#ifdef INCLUDE_EMISSIVE
+#ifdef EMISSIVE_LIT
 let SPATIAL_REUSE_COUNT: u32 = 8u;
 let SPATIAL_REUSE_RANGE: f32 = 10.0;
 #else
@@ -884,7 +884,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
 
-#ifdef INCLUDE_EMISSIVE
+#ifdef EMISSIVE_LIT
     let validate_interval = frame.emissive_validate_interval;
     let select_light_instance = instance_material.x;
     let sample_directional = false;
@@ -911,7 +911,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         var trace_condition = dot(candidate.direction, normal) > 0.0;
         trace_condition = trace_condition && candidate.p > 0.0;
-#ifdef INCLUDE_EMISSIVE
+#ifdef EMISSIVE_LIT
         trace_condition = trace_condition && candidate.emissive_instance != DONT_SAMPLE_EMISSIVE;
 #endif
 
@@ -919,7 +919,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
             shadow_hit_info(ray, hit, &info);
 
-#ifdef INCLUDE_EMISSIVE
+#ifdef EMISSIVE_LIT
             // Don't sample directional light, sample emissive only
             s.radiance = input_radiance(ray, info, false, candidate.emissive_instance, false);
 #else
@@ -961,7 +961,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         var trace_condition = dot(candidate.direction, r.s.visible_normal) > 0.0;
         trace_condition = trace_condition && candidate.p > 0.0;
-#ifdef INCLUDE_EMISSIVE
+#ifdef EMISSIVE_LIT
         trace_condition = trace_condition && candidate.emissive_instance != DONT_SAMPLE_EMISSIVE;
 #endif
 
@@ -970,7 +970,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             // info = hit_info(ray, hit);
             shadow_hit_info(ray, hit, &info);
 
-#ifdef INCLUDE_EMISSIVE
+#ifdef EMISSIVE_LIT
             validate_radiance = input_radiance(ray, info, false, candidate.emissive_instance, false);
 #else
             validate_radiance = input_radiance(ray, info, true, DONT_SAMPLE_EMISSIVE, false);
@@ -1026,7 +1026,18 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
-#ifdef INCLUDE_EMISSIVE
+#ifdef RENDER_EMISSIVE
+    var out_radiance = shading(
+        view_direction,
+        r.s.visible_normal,
+        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+        surface,
+        r.s.radiance
+    );
+    out_radiance *= r.w;
+    let out_color = out_radiance + compute_emissive_radiance(surface.emissive);
+    textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
+#else
     if frame.enable_spatial_reuse == 0u {
         var out_radiance = shading(
             view_direction,
@@ -1039,17 +1050,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         let out_color = out_radiance;
         textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
     }
-#else
-    var out_radiance = shading(
-        view_direction,
-        r.s.visible_normal,
-        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
-        surface,
-        r.s.radiance
-    );
-    out_radiance *= r.w;
-    let out_color = out_radiance + compute_emissive_radiance(surface.emissive);
-    textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 #endif
 }
 
@@ -1455,10 +1455,10 @@ fn spatial_reuse(
         textureStore(variance_texture, coords, vec4<f32>(variance));
     }
 
-#ifdef INCLUDE_EMISSIVE
-    let out_color = r.w * out_radiance;
-#else
+#ifdef RENDER_EMISSIVE
     let out_color = r.w * out_radiance + compute_emissive_radiance(surface.emissive);
+#else
+    let out_color = r.w * out_radiance;
 #endif
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 }
