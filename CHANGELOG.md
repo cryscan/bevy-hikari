@@ -1,8 +1,14 @@
 # Changelog
 
+## [0.3.9] - 2022-12-7
+### Changed
+- SMAA now rejects samples re-projected from the previous frame also by matching sub-pixel velocity with jittering.
+  This allows less aliasing for upscaled renderings in motion.
+- Use nearest velocity in both SMAA and TAA.
+
 ## [0.3.8] - 2022-12-6
 ### Added
-- Added type `HikariUniversalSettings` for disabling building of acceleration structures. ([#35](https://github.com/cryscan/bevy-hikari/issues/35))
+- Add type `HikariUniversalSettings` for disabling building of acceleration structures. ([#35](https://github.com/cryscan/bevy-hikari/issues/35))
 
 ### Fixed
 - Fix more TAA ghosting for multiple upscaling ratios.
