@@ -29,7 +29,6 @@ use serde::Serialize;
 pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const VARIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-pub const DEBUG_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -91,6 +90,7 @@ pub enum LightEntryPoint {
     DirectLit = 0,
     IndirectLitAmbient = 1,
     SpatialReuse = 2,
+    FullScreenAlbedo = 3,
 }
 
 bitflags::bitflags! {
@@ -104,7 +104,7 @@ bitflags::bitflags! {
 }
 
 impl LightPipelineKey {
-    const ENTRY_POINT_MASK_BITS: u32 = 0b11;
+    const ENTRY_POINT_MASK_BITS: u32 = 0xF;
     const INCLUDE_EMISSIVE_SHIFT_BITS: u32 = 4;
     const MULTIPLE_BOUNCES_SHIFT_BITS: u32 = 8;
     const TEXTURE_COUNT_MASK_BITS: u32 = 0xFFFF;
@@ -224,17 +224,6 @@ fn prepare_light_pipeline(
                 },
                 count: None,
             },
-            // Debug Texture
-            BindGroupLayoutEntry {
-                binding: 3,
-                visibility: ShaderStages::COMPUTE,
-                ty: BindingType::StorageTexture {
-                    access: StorageTextureAccess::ReadWrite,
-                    format: DEBUG_TEXTURE_FORMAT,
-                    view_dimension: TextureViewDimension::D2,
-                },
-                count: None,
-            },
         ],
     });
 
@@ -305,7 +294,6 @@ pub struct LightTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
     pub albedo: TextureView,
-    pub debug: TextureView,
     pub variance: [TextureView; 3],
     pub render: [TextureView; 3],
 }
@@ -323,8 +311,8 @@ fn prepare_light_textures(
         if let Some(size) = camera.physical_target_size {
             let texture_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
             let scale = settings.upscale.ratio().recip();
-            let size = (scale * size.as_vec2()).ceil().as_uvec2();
-            let mut create_texture = |texture_format| {
+            let scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
+            let mut create_texture = |texture_format, size: UVec2| {
                 let extent = Extent3d {
                     width: size.x,
                     height: size.y,
@@ -370,18 +358,17 @@ fn prepare_light_textures(
             }
 
             macro_rules! create_texture_array {
-                [$texture_format:ident; $count:literal] => {
-                    [(); $count].map(|_| create_texture($texture_format))
+                [$texture_format:ident, $size:ident; $count:literal] => {
+                    [(); $count].map(|_| create_texture($texture_format, $size))
                 };
             }
 
-            let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT; 3];
-            let render = create_texture_array![RENDER_TEXTURE_FORMAT; 3];
+            let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT, scaled_size; 3];
+            let render = create_texture_array![RENDER_TEXTURE_FORMAT, scaled_size; 3];
 
             commands.entity(entity).insert(LightTextures {
                 head: counter.0 % 2,
-                albedo: create_texture(ALBEDO_TEXTURE_FORMAT),
-                debug: create_texture(DEBUG_TEXTURE_FORMAT),
+                albedo: create_texture(ALBEDO_TEXTURE_FORMAT, size),
                 variance,
                 render,
             });
@@ -391,6 +378,7 @@ fn prepare_light_textures(
 
 #[derive(Resource)]
 pub struct CachedLightPipelines {
+    full_screen_albedo: CachedComputePipelineId,
     direct_lit: CachedComputePipelineId,
     direct_emissive: CachedComputePipelineId,
     indirect: CachedComputePipelineId,
@@ -406,6 +394,11 @@ fn queue_light_pipelines(
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
     let key = LightPipelineKey::from_texture_count(pipeline.texture_count);
+
+    let full_screen_albedo = {
+        let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::FullScreenAlbedo);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
 
     let (direct_lit, direct_emissive) = {
         let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::DirectLit);
@@ -440,6 +433,7 @@ fn queue_light_pipelines(
         (emissive_spatial_reuse, indirect_spatial_reuse)
     };
     commands.insert_resource(CachedLightPipelines {
+        full_screen_albedo,
         direct_lit,
         direct_emissive,
         indirect,
@@ -519,10 +513,6 @@ fn queue_light_bind_groups(
                         BindGroupEntry {
                             binding: 2,
                             resource: BindingResource::TextureView(render),
-                        },
-                        BindGroupEntry {
-                            binding: 3,
-                            resource: BindingResource::TextureView(&light.debug),
                         },
                     ],
                 })
@@ -654,18 +644,27 @@ impl Node for LightNode {
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &light_bind_group.noise, &[]);
 
-        let indirect_pipeline = match settings.indirect_bounces {
-            0 | 1 => &pipelines.indirect,
-            _ => &pipelines.indirect_multiple_bounces,
-        };
+        // Full screen albedo pass.
+        if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.full_screen_albedo) {
+            pass.set_bind_group(5, &light_bind_group.render[0], &[]);
+            pass.set_bind_group(6, &light_bind_group.reservoir[0], &[]);
+            pass.set_pipeline(pipeline);
 
+            let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            pass.dispatch_workgroups(count.x, count.y, 1);
+        }
+
+        // Direct, emissive and indirect passes.
         for (render, reservoir, temporal_pipeline, spatial_pipeline) in multizip((
             light_bind_group.render.iter(),
             light_bind_group.reservoir.iter(),
             [
                 &pipelines.direct_lit,
                 &pipelines.direct_emissive,
-                indirect_pipeline,
+                match settings.indirect_bounces {
+                    x if x < 2 => &pipelines.indirect,
+                    _ => &pipelines.indirect_multiple_bounces,
+                },
             ],
             [
                 None,

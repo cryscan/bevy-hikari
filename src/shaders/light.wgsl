@@ -32,8 +32,6 @@ var albedo_texture: texture_storage_2d<rgba16float, read_write>;
 var variance_texture: texture_storage_2d<r32float, read_write>;
 @group(5) @binding(2)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
-@group(5) @binding(3)
-var debug_texture: texture_storage_2d<rgba16float, read_write>;
 
 let TAU: f32 = 6.283185307;
 let INV_TAU: f32 = 0.159154943;
@@ -808,6 +806,32 @@ fn compute_jacobian(q: Sample, r: Sample) -> f32 {
 }
 
 @compute @workgroup_size(8, 8, 1)
+fn full_screen_albedo(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let render_size = textureDimensions(albedo_texture);
+    let deferred_size = textureDimensions(position_texture);
+    let coords = vec2<i32>(invocation_id.xy);
+    let uv = coords_to_uv(coords, render_size);
+
+    let deferred_coords = jittered_deferred_coords(uv, deferred_size, render_size, frame.number);
+    let position_depth = textureLoad(position_texture, deferred_coords, 0);
+    let position = vec4<f32>(position_depth.xyz, 1.0);
+    let depth = position_depth.w;
+
+    if depth < F32_EPSILON {
+        textureStore(albedo_texture, coords, vec4<f32>(0.0));
+        return;
+    }
+
+    let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
+    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
+    let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
+
+    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+    textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
+}
+
+@compute @workgroup_size(8, 8, 1)
 fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let render_size = textureDimensions(render_texture);
     let deferred_size = textureDimensions(position_texture);
@@ -828,10 +852,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_spatial_reservoir(coords.x + render_size.x * coords.y, r);
         store_previous_spatial_reservoir(coords.x + render_size.x * coords.y, r);
 
-#ifdef INCLUDE_EMISSIVE
-        textureStore(albedo_texture, coords, vec4<f32>(0.0));
-        textureStore(debug_texture, coords, vec4<f32>(0.0));
-#endif
         textureStore(variance_texture, coords, vec4<f32>(0.0));
         textureStore(render_texture, coords, vec4<f32>(0.0));
 
@@ -851,13 +871,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     s.visible_position = vec4<f32>(position.xyz, depth);
     s.visible_normal = normal;
     s.visible_instance = instance_material.x;
-
-#ifdef INCLUDE_EMISSIVE
-    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
-    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
-
-    textureStore(albedo_texture, coords, vec4<f32>(env_brdf(view_direction, normal, surface), 1.0));
-#endif
 
     var ray: Ray;
     var hit: Hit;
@@ -917,10 +930,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         s.sample_position = info.position;
         s.sample_normal = info.normal;
-
-// #ifdef INCLUDE_EMISSIVE
-//         textureStore(debug_texture, coords, vec4<f32>(f32(info.instance_index), f32(candidate.emissive_instance), f32(candidate_info_index), 0.0));
-// #endif
 
         // let sample_radiance = shading(
         //     view_direction,
@@ -1014,6 +1023,9 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
 
+    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+
 #ifdef INCLUDE_EMISSIVE
     if frame.enable_spatial_reuse == 0u {
         var out_radiance = shading(
@@ -1028,9 +1040,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
     }
 #else
-    let surface = retreive_surface(instance_material.y, velocity_uv.zw);
-    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
-
     var out_radiance = shading(
         view_direction,
         r.s.visible_normal,

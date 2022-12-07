@@ -137,8 +137,9 @@ fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, output_size);
+    let deferred_uv = jittered_deferred_uv(uv, output_size, frame.number);
 
-    let albedo = textureSampleLevel(albedo_texture, nearest_sampler, uv, 0.0).rgb;
+    let albedo = textureSampleLevel(albedo_texture, nearest_sampler, deferred_uv, 0.0).rgb;
     var irradiance = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
     irradiance = select(irradiance / albedo, vec3<f32>(0.0), albedo < vec3<f32>(0.01));
 
@@ -445,7 +446,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
     // textureStore(radiance_texture, coords, color);
 
-    let albedo = textureLoad(albedo_texture, coords, 0);
+    let albedo = textureLoad(albedo_texture, deferred_coords, 0);
     color *= albedo;
 #endif
 
