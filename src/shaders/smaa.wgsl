@@ -145,9 +145,9 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_reprojected_uv, 0.0).rgb;
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
-    let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_reprojected_uv, 0.0).w;
-    let depth_ratio = current_depth / max(previous_depth, 0.0001);
-    let depth_miss = current_depth == 0.0 || depth_ratio < 0.95 || depth_ratio > 1.05;
+    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv);
+    let depth_ratio = vec4<f32>(current_depth) / max(previous_depths, vec4<f32>(0.0001));
+    let depth_miss = current_depth == 0.0 || any(depth_ratio < vec4<f32>(0.95)) || any(depth_ratio > vec4<f32>(1.05));
 
     let current_instance = textureLoad(instance_material_texture, previous_output_coords, 0).x;
     var instance_miss = current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(0.0));
