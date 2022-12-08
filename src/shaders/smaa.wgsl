@@ -114,13 +114,13 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Fetch the current sample
     let current_output_coords = 2 * coords + current_smaa_jitter(frame.number);
     let current_output_uv = coords_to_uv(current_output_coords, output_size);
-    let current_albedo = textureSampleLevel(albedo_texture, nearest_sampler, current_output_uv, 0.0);
+    let current_albedo = textureSampleLevel(albedo_texture, nearest_sampler, current_output_uv, 0.0).rgb;
     let current_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
 
     // Fetch the previous sample
     let previous_output_coords = 2 * coords + previous_smaa_jitter(frame.number);
     let previous_output_uv = coords_to_uv(previous_output_coords, output_size);
-    let previous_albedo = textureSampleLevel(albedo_texture, nearest_sampler, previous_output_uv, 0.0);
+    let previous_albedo = textureSampleLevel(albedo_texture, nearest_sampler, previous_output_uv, 0.0).rgb;
     let velocity = nearest_velocity(previous_output_uv);
     let previous_reprojected_uv = previous_output_uv - velocity;
 
@@ -184,7 +184,11 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var blend_factor = max(subpixel_velocity.x, subpixel_velocity.y);
     blend_factor = clamp(-cos(blend_factor * TAU), 0.0, 1.0);
 
-    let remix_color = textureSampleLevel(render_texture, linear_sampler, previous_output_uv, 0.0).rgb;
+    var remix_color = textureSampleLevel(render_texture, linear_sampler, previous_output_uv, 0.0).rgb;
+    if current_depth > 0.0 {
+        let remix_ratio = previous_albedo / current_albedo;
+        remix_color *= select(vec3<f32>(1.0), remix_ratio, current_albedo > vec3<f32>(0.0001));
+    }
     previous_color = mix(previous_color, remix_color, blend_factor);
 
     textureStore(output_texture, current_output_coords, vec4<f32>(current_color, 1.0));
