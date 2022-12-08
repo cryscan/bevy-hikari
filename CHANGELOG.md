@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.10] - 2022-12-8
+### Changed
+- SMAA now re-projects and clamps previous frame pixels in a much more cleaver way,
+  which greatly reduces ghosting artefacts.
+
+### Fixed
+- Fix nearest velocity implementation.
+
 ## [0.3.9] - 2022-12-7
 ### Changed
 - SMAA now rejects samples re-projected from the previous frame also by matching sub-pixel velocity with jittering.
@@ -59,6 +67,7 @@ This is mainly a bug-fix and performance upgrade.
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
+[0.3.10]: https://github.com/cryscan/bevy-hikari/commits/v0.3.10
 [0.3.9]: https://github.com/cryscan/bevy-hikari/commits/v0.3.9
 [0.3.8]: https://github.com/cryscan/bevy-hikari/commits/v0.3.8
 [0.3.7]: https://github.com/cryscan/bevy-hikari/commits/v0.3.7
