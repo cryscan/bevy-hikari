@@ -72,8 +72,8 @@ fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
     let depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     var offset: vec2<f32>;
     if depth < max_depth {
-        let x = dot(vec4<f32>(1.0), select(vec4<f32>(0.0), vec4<f32>(texel_size.x, -texel_size.x, texel_size.x, -texel_size.x), depths == vec4<f32>(max_depth)));
-        let y = dot(vec4<f32>(1.0), select(vec4<f32>(0.0), vec4<f32>(texel_size.y, texel_size.y, -texel_size.y, -texel_size.y), depths == vec4<f32>(max_depth)));
+        let x = dot(vec4<f32>(texel_size.x), select(vec4<f32>(0.0), vec4<f32>(1.0, -1.0, 1.0, -1.0), depths == vec4<f32>(max_depth)));
+        let y = dot(vec4<f32>(texel_size.y), select(vec4<f32>(0.0), vec4<f32>(1.0, 1.0, -1.0, -1.0), depths == vec4<f32>(max_depth)));
         offset = vec2<f32>(x, y);
     }
 
