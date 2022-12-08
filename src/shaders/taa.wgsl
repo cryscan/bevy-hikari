@@ -60,19 +60,23 @@ fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
 fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
     let texel_size = 1.0 / vec2<f32>(textureDimensions(render_texture));
 
-    var depths: array<f32, 4>;
+    var depths: vec4<f32>;
     depths[0] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(texel_size.x, texel_size.y), 0.0).w;
     depths[1] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(-texel_size.x, texel_size.y), 0.0).w;
     depths[2] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(texel_size.x, -texel_size.y), 0.0).w;
     depths[3] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(-texel_size.x, -texel_size.y), 0.0).w;
+    let max_depth = max(max(depths[0], depths[1]), max(depths[2], depths[3]));
 
-    var depth_offset = vec3<f32>(textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w, 0.0, 0.0);
-    depth_offset = select(depth_offset, vec3<f32>(depths[0], texel_size.x, texel_size.y), depth_offset.x < depths[0]);
-    depth_offset = select(depth_offset, vec3<f32>(depths[1], -texel_size.x, texel_size.y), depth_offset.x < depths[1]);
-    depth_offset = select(depth_offset, vec3<f32>(depths[2], texel_size.x, -texel_size.y), depth_offset.x < depths[2]);
-    depth_offset = select(depth_offset, vec3<f32>(depths[3], -texel_size.x, -texel_size.y), depth_offset.x < depths[3]);
+    let depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    var offset: vec2<f32>;
+    if depth < max_depth {
+        let count = dot(vec4<f32>(1.0), select(vec4<f32>(0.0), vec4<f32>(1.0), depths == vec4<f32>(max_depth)));
+        let x = dot(vec4<f32>(1.0), select(vec4<f32>(0.0), vec4<f32>(texel_size.x, -texel_size.x, texel_size.x, -texel_size.x), depths == vec4<f32>(max_depth)));
+        let y = dot(vec4<f32>(1.0), select(vec4<f32>(0.0), vec4<f32>(texel_size.y, texel_size.y, -texel_size.y, -texel_size.y), depths == vec4<f32>(max_depth)));
+        offset = vec2<f32>(x, y) / max(count, 1.0);
+    }
 
-    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + depth_offset.yz, 0.0).xy;
+    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + offset, 0.0).xy;
 }
 
 @compute @workgroup_size(8, 8, 1)
