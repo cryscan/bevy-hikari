@@ -172,7 +172,7 @@ impl FromWorld for PostProcessPipeline {
                         },
                         count: None,
                     },
-                    // Previous Radiance
+                    // Render
                     BindGroupLayoutEntry {
                         binding: 2,
                         visibility: ShaderStages::COMPUTE,
@@ -183,31 +183,9 @@ impl FromWorld for PostProcessPipeline {
                         },
                         count: None,
                     },
-                    // Render
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: true },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    // Radiance Output
-                    BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::ReadWrite,
-                            format: HDR_TEXTURE_FORMAT,
-                            view_dimension: TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
                     // Output
                     BindGroupLayoutEntry {
-                        binding: 5,
+                        binding: 3,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::ReadWrite,
@@ -284,9 +262,20 @@ impl FromWorld for PostProcessPipeline {
                     },
                     count: None,
                 },
-                // Albedo
+                // Previous Albedo
                 BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Albedo
+                BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Float { filterable: true },
@@ -660,7 +649,6 @@ pub struct PostProcessTextures {
     pub fallback: TextureView,
     pub denoise_internal: [TextureView; 4],
     pub denoise_internal_variance: TextureView,
-    pub denoise_radiance: [TextureView; 6],
     pub denoise_render: [TextureView; 3],
     pub tone_mapping_output: [TextureView; 2],
     pub taa_output: [TextureView; 2],
@@ -746,7 +734,6 @@ fn prepare_post_process_textures(
 
             let denoise_internal_variance = create_texture(VARIANCE_TEXTURE_FORMAT, scale);
             let denoise_internal = create_texture_array![HDR_TEXTURE_FORMAT, scale; 4];
-            let denoise_radiance = create_texture_array![HDR_TEXTURE_FORMAT, scale; 6];
             let denoise_render = create_texture_array![HDR_TEXTURE_FORMAT, scale; 3];
 
             let tone_mapping_output = create_texture_array![HDR_TEXTURE_FORMAT, scale; 2];
@@ -774,7 +761,6 @@ fn prepare_post_process_textures(
                 fallback: fallback.clone(),
                 denoise_internal,
                 denoise_internal_variance,
-                denoise_radiance,
                 denoise_render,
                 tone_mapping_output,
                 taa_output,
@@ -803,15 +789,15 @@ fn queue_post_process_pipelines(
     mut pipelines: ResMut<SpecializedComputePipelines<PostProcessPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
 ) {
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Demodulation);
-    let demodulation = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-
+    let demodulation = {
+        let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Demodulation);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
     let denoise_direct = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
-
     let denoise = [0, 1, 2, 3].map(|level| {
         let mut key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Denoise);
         key |= PostProcessPipelineKey::from_denoise_level(level);
@@ -819,23 +805,34 @@ fn queue_post_process_pipelines(
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     });
 
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::ToneMapping);
-    let tone_mapping = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+    let tone_mapping = {
+        let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::ToneMapping);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
 
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
-    let taa_jasmine = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+    let taa_jasmine = {
+        let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::JasmineTaa);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
 
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::SmaaTu4x);
-    let smaa_tu4x = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+    let smaa_tu4x = {
+        let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::SmaaTu4x);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
+    let smaa_tu4x_extrapolate = {
+        let key =
+            PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::SmaaTu4xExtrapolate);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
 
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::SmaaTu4xExtrapolate);
-    let smaa_tu4x_extrapolate = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Upscale);
-    let upscale = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
-
-    let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::UpscaleSharpen);
-    let upscale_sharpen = pipelines.specialize(&mut pipeline_cache, &pipeline, key);
+    let upscale = {
+        let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::Upscale);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
+    let upscale_sharpen = {
+        let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::UpscaleSharpen);
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
 
     commands.insert_resource(CachedPostProcessPipelines {
         demodulation,
@@ -957,7 +954,7 @@ fn queue_post_process_bind_groups(
                     entries: &[
                         BindGroupEntry {
                             binding: 0,
-                            resource: BindingResource::TextureView(&light.albedo),
+                            resource: BindingResource::TextureView(&light.albedo[current]),
                         },
                         BindGroupEntry {
                             binding: 1,
@@ -965,22 +962,10 @@ fn queue_post_process_bind_groups(
                         },
                         BindGroupEntry {
                             binding: 2,
-                            resource: BindingResource::TextureView(
-                                &post_process.denoise_radiance[previous + 2 * id],
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 3,
                             resource: BindingResource::TextureView(&light.render[id]),
                         },
                         BindGroupEntry {
-                            binding: 4,
-                            resource: BindingResource::TextureView(
-                                &post_process.denoise_radiance[current + 2 * id],
-                            ),
-                        },
-                        BindGroupEntry {
-                            binding: 5,
+                            binding: 3,
                             resource: BindingResource::TextureView(
                                 &post_process.denoise_render[id],
                             ),
@@ -1051,7 +1036,11 @@ fn queue_post_process_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(&light.albedo),
+                    resource: BindingResource::TextureView(&light.albedo[previous]),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(&light.albedo[current]),
                 },
             ],
         });

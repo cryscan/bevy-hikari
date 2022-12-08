@@ -12,6 +12,8 @@ var previous_render_texture: texture_2d<f32>;
 @group(3) @binding(1)
 var render_texture: texture_2d<f32>;
 @group(3) @binding(2)
+var previous_albedo_texture: texture_2d<f32>;
+@group(3) @binding(3)
 var albedo_texture: texture_2d<f32>;
 
 @group(4) @binding(0)
@@ -146,6 +148,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
     let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv);
+    let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_reprojected_uv, 0.0).w;
     let depth_ratio = vec4<f32>(current_depth) / max(previous_depths, vec4<f32>(0.0001));
     let depth_miss = current_depth == 0.0 || any(depth_ratio < vec4<f32>(0.95)) || any(depth_ratio > vec4<f32>(1.05));
 
@@ -185,9 +188,9 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     blend_factor = clamp(-cos(blend_factor * TAU), 0.0, 1.0);
 
     var remix_color = textureSampleLevel(render_texture, linear_sampler, previous_output_uv, 0.0).rgb;
-    if current_depth > 0.0 {
+    if current_depth > 0.0 && previous_depth > 0.0 {
         let remix_ratio = previous_albedo / current_albedo;
-        remix_color *= select(vec3<f32>(1.0), remix_ratio, current_albedo > vec3<f32>(0.0001));
+        remix_color *= select(vec3<f32>(1.0), remix_ratio, current_albedo > vec3<f32>(0.001));
     }
     previous_color = mix(previous_color, remix_color, blend_factor);
 

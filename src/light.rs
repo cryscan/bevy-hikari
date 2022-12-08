@@ -298,7 +298,7 @@ fn prepare_light_pipeline(
 pub struct LightTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
-    pub albedo: TextureView,
+    pub albedo: [TextureView; 2],
     pub variance: [TextureView; 3],
     pub render: [TextureView; 3],
 }
@@ -370,10 +370,11 @@ fn prepare_light_textures(
 
             let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT, scaled_size; 3];
             let render = create_texture_array![RENDER_TEXTURE_FORMAT, scaled_size; 3];
+            let albedo = create_texture_array![ALBEDO_TEXTURE_FORMAT, size; 2];
 
             commands.entity(entity).insert(LightTextures {
                 head: counter.0 % 2,
-                albedo: create_texture(ALBEDO_TEXTURE_FORMAT, size),
+                albedo,
                 variance,
                 render,
             });
@@ -404,32 +405,28 @@ fn queue_light_pipelines(
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     };
 
-    let (direct_lit, direct_emissive) = {
-        let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::DirectLit);
-        (
-            pipelines.specialize(
-                &mut pipeline_cache,
-                &pipeline,
-                key | LightPipelineKey::RENDER_EMISSIVE_BIT,
-            ),
-            pipelines.specialize(
-                &mut pipeline_cache,
-                &pipeline,
-                key | LightPipelineKey::EMISSIVE_LIT_BIT,
-            ),
-        )
+    let direct_lit = {
+        let key = key
+            | LightPipelineKey::from_entry_point(LightEntryPoint::DirectLit)
+            | LightPipelineKey::RENDER_EMISSIVE_BIT;
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
+    let direct_emissive = {
+        let key = key
+            | LightPipelineKey::from_entry_point(LightEntryPoint::DirectLit)
+            | LightPipelineKey::EMISSIVE_LIT_BIT;
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     };
 
-    let (indirect, indirect_multiple_bounces) = {
+    let indirect = {
         let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::IndirectLitAmbient);
-        (
-            pipelines.specialize(&mut pipeline_cache, &pipeline, key),
-            pipelines.specialize(
-                &mut pipeline_cache,
-                &pipeline,
-                key | LightPipelineKey::MULTIPLE_BOUNCES_BIT,
-            ),
-        )
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
+    let indirect_multiple_bounces = {
+        let key = key
+            | LightPipelineKey::from_entry_point(LightEntryPoint::IndirectLitAmbient)
+            | LightPipelineKey::MULTIPLE_BOUNCES_BIT;
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     };
 
     let spatial_reuse = {
@@ -508,7 +505,7 @@ fn queue_light_bind_groups(
                     entries: &[
                         BindGroupEntry {
                             binding: 0,
-                            resource: BindingResource::TextureView(&light.albedo),
+                            resource: BindingResource::TextureView(&light.albedo[current]),
                         },
                         BindGroupEntry {
                             binding: 1,

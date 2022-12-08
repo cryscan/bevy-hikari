@@ -23,12 +23,8 @@ var albedo_texture: texture_2d<f32>;
 @group(4) @binding(1)
 var variance_texture: texture_2d<f32>;
 @group(4) @binding(2)
-var previous_radiance_texture: texture_2d<f32>;
-@group(4) @binding(3)
 var render_texture: texture_2d<f32>;
-@group(4) @binding(4)
-var radiance_texture: texture_storage_2d<rgba16float, read_write>;
-@group(4) @binding(5)
+@group(4) @binding(3)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
 
 let TAU: f32 = 6.283185307;
@@ -309,7 +305,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // let mixed_color = mix(color, previous_color, 0.5);
     // color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
-    textureStore(radiance_texture, coords, color);
+    // textureStore(radiance_texture, coords, color);
 
     let albedo = textureLoad(albedo_texture, deferred_coords, 0);
     color *= albedo;

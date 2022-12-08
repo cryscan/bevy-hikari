@@ -242,7 +242,7 @@ fn queue_overlay_bind_groups(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&light.albedo),
+                    resource: BindingResource::TextureView(&light.albedo[current]),
                 },
                 BindGroupEntry {
                     binding: 2,
