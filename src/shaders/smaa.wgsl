@@ -139,6 +139,8 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_reprojected_uv = previous_output_uv - velocity;
     var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_reprojected_uv, 0.0).rgb;
 
+    let boundary_miss = any(previous_reprojected_uv < vec2<f32>(0.0)) || any(previous_reprojected_uv > vec2<f32>(1.0));
+
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
     let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv);
     let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_reprojected_uv, 0.0).w;
@@ -154,7 +156,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_reprojected_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
-    if (depth_miss || instance_miss) && velocity_miss {
+    if boundary_miss || ((depth_miss || instance_miss) && velocity_miss) {
         // Constrain past sample with 2x2 YCoCg variance clipping to handle disocclusion
         // Note that the render texture is of half size of the output texture in each side
         // The bias is for less ghosting of newly-disoccluded pixels

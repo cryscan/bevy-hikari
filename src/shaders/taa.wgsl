@@ -94,6 +94,7 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
     var velocity = nearest_velocity(uv);
     let previous_uv = uv - velocity;
+    let boundary_miss = any(previous_uv < vec2<f32>(0.0)) || any(previous_uv > vec2<f32>(1.0));
 
     let sample_position = (uv - velocity) * size;
     let texel_position_1 = floor(sample_position - 0.5) + 0.5;
@@ -131,7 +132,7 @@ fn jasmine_taa(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
 
-    if depth_miss && instance_miss && velocity_miss {
+    if boundary_miss || (depth_miss && instance_miss && velocity_miss) {
         // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
         let s_tl = sample_render_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
         let s_tm = sample_render_texture(uv + vec2<f32>(0.0, texel_size.y));
