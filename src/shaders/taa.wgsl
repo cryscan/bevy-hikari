@@ -59,19 +59,20 @@ fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
 
 fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
     let texel_size = 1.0 / vec2<f32>(textureDimensions(render_texture));
-    var offset = vec2<f32>(0.0);
-    var depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
 
-    var offset_next = vec2<f32>(texel_size.x, texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
-    offset_next = vec2<f32>(-texel_size.x, texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
-    offset_next = vec2<f32>(texel_size.x, -texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
-    offset_next = vec2<f32>(-texel_size.x, -texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    var depths: array<f32, 4>;
+    depths[0] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(texel_size.x, texel_size.y), 0.0).w;
+    depths[1] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(-texel_size.x, texel_size.y), 0.0).w;
+    depths[2] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(texel_size.x, -texel_size.y), 0.0).w;
+    depths[3] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(-texel_size.x, -texel_size.y), 0.0).w;
 
-    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + offset, 0.0).xy;
+    var depth_offset = vec3<f32>(textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w, 0.0, 0.0);
+    depth_offset = select(depth_offset, vec3<f32>(depths[0], texel_size.x, texel_size.y), depth_offset.x < depths[0]);
+    depth_offset = select(depth_offset, vec3<f32>(depths[1], -texel_size.x, texel_size.y), depth_offset.x < depths[1]);
+    depth_offset = select(depth_offset, vec3<f32>(depths[2], texel_size.x, -texel_size.y), depth_offset.x < depths[2]);
+    depth_offset = select(depth_offset, vec3<f32>(depths[3], -texel_size.x, -texel_size.y), depth_offset.x < depths[3]);
+
+    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + depth_offset.yz, 0.0).xy;
 }
 
 @compute @workgroup_size(8, 8, 1)

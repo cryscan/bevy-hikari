@@ -61,19 +61,20 @@ fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
 
 fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
     let texel_size = 1.0 / vec2<f32>(textureDimensions(render_texture));
-    var offset = vec2<f32>(0.0);
-    var depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
 
-    var offset_next = vec2<f32>(texel_size.x, texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
-    offset_next = vec2<f32>(-texel_size.x, texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
-    offset_next = vec2<f32>(texel_size.x, -texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
-    offset_next = vec2<f32>(-texel_size.x, -texel_size.y);
-    offset = select(offset, offset_next, textureSampleLevel(position_texture, nearest_sampler, offset_next, 0.0).w > depth);
+    var depths: array<f32, 4>;
+    depths[0] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(texel_size.x, texel_size.y), 0.0).w;
+    depths[1] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(-texel_size.x, texel_size.y), 0.0).w;
+    depths[2] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(texel_size.x, -texel_size.y), 0.0).w;
+    depths[3] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(-texel_size.x, -texel_size.y), 0.0).w;
 
-    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + offset, 0.0).xy;
+    var depth_offset = vec3<f32>(textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w, 0.0, 0.0);
+    depth_offset = select(depth_offset, vec3<f32>(depths[0], texel_size.x, texel_size.y), depth_offset.x < depths[0]);
+    depth_offset = select(depth_offset, vec3<f32>(depths[1], -texel_size.x, texel_size.y), depth_offset.x < depths[1]);
+    depth_offset = select(depth_offset, vec3<f32>(depths[2], texel_size.x, -texel_size.y), depth_offset.x < depths[2]);
+    depth_offset = select(depth_offset, vec3<f32>(depths[3], -texel_size.x, -texel_size.y), depth_offset.x < depths[3]);
+
+    return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + depth_offset.yz, 0.0).xy;
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -113,6 +114,17 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let texel_size = 1.0 / vec2<f32>(output_size);
     let tile_size = 1.0 / vec2<f32>(input_size);
 
+    var uv_biases: array<vec2<f32>, 5>;
+    uv_biases[0] = vec2<f32>(0.0);
+    uv_biases[1] = vec2<f32>(tile_size.x, tile_size.y);
+    uv_biases[2] = vec2<f32>(-tile_size.x, tile_size.y);
+    uv_biases[3] = vec2<f32>(tile_size.x, -tile_size.y);
+    uv_biases[4] = vec2<f32>(-tile_size.x, -tile_size.y);
+    // uv_biases[5] = vec2<f32>(0.0, tile_size.y);
+    // uv_biases[6] = vec2<f32>(tile_size.x, 0.0);
+    // uv_biases[7] = vec2<f32>(0.0, -tile_size.y);
+    // uv_biases[8] = vec2<f32>(-tile_size.x, 0.0);
+
     // Fetch the current sample
     let current_output_coords = 2 * coords + current_smaa_jitter(frame.number);
     let current_output_uv = coords_to_uv(current_output_coords, output_size);
@@ -125,25 +137,6 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_albedo = textureSampleLevel(albedo_texture, nearest_sampler, previous_output_uv, 0.0).rgb;
     let velocity = nearest_velocity(previous_output_uv);
     let previous_reprojected_uv = previous_output_uv - velocity;
-
-    // let sample_position = previous_reprojected_uv * vec2<f32>(input_size);
-    // let texel_position_1 = floor(sample_position - 0.5) + 0.5;
-    // let f = sample_position - texel_position_1;
-    // let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
-    // let w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
-    // let w2 = f * (0.5 + f * (2.0 - 1.5 * f));
-    // let w3 = f * f * (-0.5 + 0.5 * f);
-    // let w12 = w1 + w2;
-    // let offset12 = w2 / (w1 + w2);
-    // let texel_position_0 = (texel_position_1 - 1.0) * tile_size;
-    // let texel_position_3 = (texel_position_1 + 2.0) * tile_size;
-    // let texel_position_12 = (texel_position_1 + offset12) * tile_size;
-    // var previous_color = vec3<f32>(0.0);
-    // previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_0.y)) * w12.x * w0.y;
-    // previous_color += sample_previous_texture(vec2<f32>(texel_position_0.x, texel_position_12.y)) * w0.x * w12.y;
-    // previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_12.y)) * w12.x * w12.y;
-    // previous_color += sample_previous_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
-    // previous_color += sample_previous_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
     var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_reprojected_uv, 0.0).rgb;
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
@@ -154,19 +147,30 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let current_instance = textureLoad(instance_material_texture, previous_output_coords, 0).x;
     var instance_miss = current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(0.0));
-    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(-tile_size.x, -tile_size.y));
-    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(tile_size.x, -tile_size.y));
-    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(-tile_size.x, tile_size.y));
-    instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(tile_size.x, tile_size.y));
+    for (var i = 1u; i <= 4u; i += 1u) {
+        instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, uv_biases[i]);
+    }
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_reprojected_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
     if (depth_miss || instance_miss) && velocity_miss {
         // Constrain past sample with 2x2 YCoCg variance clipping to handle disocclusion
-        let cr = textureGather(0, render_texture, linear_sampler, previous_output_uv);
-        let cg = textureGather(1, render_texture, linear_sampler, previous_output_uv);
-        let cb = textureGather(2, render_texture, linear_sampler, previous_output_uv);
+        // Note that the render texture is of half size of the output texture in each side
+        // The bias is for less ghosting of newly-disoccluded pixels
+        // The computation of the bias is to test which one leads to the nearest depth
+        var uv_bias: vec2<f32>;
+        var min_ds = 10.0;
+        for (var i = 0u; i < 5u; i += 1u) {
+            let ds = textureGather(3, position_texture, linear_sampler, previous_output_uv + uv_biases[i]);
+            var dds = distance(vec4<f32>(current_depth), ds);
+            uv_bias = select(uv_bias, uv_biases[i], dds < min_ds);
+            min_ds = min(min_ds, dds);
+        }
+
+        let cr = textureGather(0, render_texture, linear_sampler, previous_output_uv + uv_bias);
+        let cg = textureGather(1, render_texture, linear_sampler, previous_output_uv + uv_bias);
+        let cb = textureGather(2, render_texture, linear_sampler, previous_output_uv + uv_bias);
         let s1 = RGB_to_YCoCg(vec3<f32>(cr.x, cg.x, cb.x));
         let s2 = RGB_to_YCoCg(vec3<f32>(cr.y, cg.y, cb.y));
         let s3 = RGB_to_YCoCg(vec3<f32>(cr.z, cg.z, cb.z));
@@ -179,6 +183,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         previous_color = RGB_to_YCoCg(previous_color);
         previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
         previous_color = YCoCg_to_RGB(previous_color);
+        // previous_color = vec3<f32>(0.25 * uv_bias / tile_size + 0.75, 0.0);
     }
 
     // Get the subpixel velocity,
