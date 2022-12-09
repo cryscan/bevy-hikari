@@ -925,7 +925,7 @@ fn check_previous_reservoir(
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
 
-    if (*r).lifetime > reservoir_lifetime((*r)) || depth_miss || position_miss || instance_miss || normal_miss {
+    if depth_miss || position_miss || instance_miss || normal_miss {
         var q: Reservoir;
         (*r) = q;
         return false;
@@ -1222,6 +1222,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
 
+    // if frame.enable_spatial_reuse == 0u {
 #ifdef RENDER_EMISSIVE
     var out_radiance = shading(
         view_direction,
@@ -1234,19 +1235,18 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let out_color = out_radiance + compute_emissive_radiance(surface.emissive);
     textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 #else
-    if frame.enable_spatial_reuse == 0u {
-        var out_radiance = shading(
-            view_direction,
-            r.s.visible_normal,
-            normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
-            surface,
-            r.s.radiance
-        );
-        out_radiance *= r.w;
-        let out_color = out_radiance;
-        textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
-    }
+    var out_radiance = shading(
+        view_direction,
+        r.s.visible_normal,
+        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+        surface,
+        r.s.radiance
+    );
+    out_radiance *= r.w;
+    let out_color = out_radiance;
+    textureStore(render_texture, coords, vec4<f32>(out_color, 1.0));
 #endif
+    // }
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -1533,14 +1533,14 @@ fn spatial_reuse(
     }
 
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
-    var out_radiance = shading(
-        view_direction,
-        s.visible_normal,
-        normalize(s.sample_position.xyz - s.visible_position.xyz),
-        surface,
-        s.radiance
-    );
-    merge_reservoir(&r, q, luminance(out_radiance));
+    // var out_radiance = shading(
+    //     view_direction,
+    //     s.visible_normal,
+    //     normalize(s.sample_position.xyz - s.visible_position.xyz),
+    //     surface,
+    //     s.radiance
+    // );
+    merge_reservoir(&r, q, luminance(q.s.radiance.rgb));
 
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
@@ -1609,17 +1609,15 @@ fn spatial_reuse(
             continue;
         }
 
-        // let inv_jac = select(1.0, compute_inv_jacobian(s, q.s), q.s.sample_position.w > 0.5);
         let jacobian = select(1.0, compute_jacobian(q.s, s), q.s.sample_position.w > 0.5);
-
-        out_radiance = shading(
-            view_direction,
-            s.visible_normal,
-            sample_direction,
-            surface,
-            q.s.radiance
-        );
-        merge_reservoir(&r, q, luminance(out_radiance) / jacobian);
+        // out_radiance = shading(
+        //     view_direction,
+        //     s.visible_normal,
+        //     sample_direction,
+        //     surface,
+        //     q.s.radiance
+        // );
+        merge_reservoir(&r, q, luminance(q.s.radiance.rgb) / jacobian);
     }
 
     // Clamp...
@@ -1630,14 +1628,14 @@ fn spatial_reuse(
         r.count = m;
     }
 
-    out_radiance = shading(
+    let out_radiance = shading(
         view_direction,
         s.visible_normal,
         normalize(r.s.sample_position.xyz - s.visible_position.xyz),
         surface,
         r.s.radiance
     );
-    let total_lum = r.count * luminance(out_radiance);
+    let total_lum = r.count * luminance(r.s.radiance.rgb);
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
 
     r.lifetime += 1.0;
