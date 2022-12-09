@@ -133,24 +133,6 @@ impl Plugin for HikariPlugin {
         );
         load_internal_asset!(
             app,
-            RESERVOIR_TYPES_SHADER_HANDLE,
-            "shaders/reservoir_types.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            RESERVOIR_BINDINGS_SHADER_HANDLE,
-            "shaders/reservoir_bindings.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            RESERVOIR_FUNCTIONS_SHADER_HANDLE,
-            "shaders/reservoir_functions.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
             PREPASS_SHADER_HANDLE,
             "shaders/prepass.wgsl",
             Shader::from_wgsl

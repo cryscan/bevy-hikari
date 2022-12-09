@@ -5,9 +5,6 @@
 
 #import bevy_hikari::mesh_material_bindings
 #import bevy_hikari::deferred_bindings
-#import bevy_hikari::reservoir_bindings
-
-#import bevy_hikari::reservoir_functions
 
 #ifdef NO_TEXTURE
 @group(3) @binding(0)
@@ -32,6 +29,199 @@ var albedo_texture: texture_storage_2d<rgba16float, read_write>;
 var variance_texture: texture_storage_2d<r32float, read_write>;
 @group(5) @binding(2)
 var render_texture: texture_storage_2d<rgba16float, read_write>;
+
+// -------- RESERVOIR   --------
+// 64 Bytes
+struct PackedReservoir {
+    radiance: vec2<u32>,            // RGBA16F
+    random: vec2<u32>,              // RGBA16F
+    visible_position: vec4<f32>,    // RGBA32F
+    sample_position: vec4<f32>,     // RGBA32F
+    visible_normal: u32,            // RGBA8SN
+    sample_normal: u32,             // RGBA8SN
+    reservoir: vec2<u32>,           // RGBA16F
+};
+
+struct Reservoirs {
+    data: array<PackedReservoir>,
+};
+
+struct Sample {
+    radiance: vec4<f32>,
+    random: vec4<f32>,
+    visible_position: vec4<f32>,
+    visible_normal: vec3<f32>,
+    visible_instance: u32,
+    sample_position: vec4<f32>,
+    sample_normal: vec3<f32>,
+};
+
+struct Reservoir {
+    s: Sample,
+    count: f32,
+    lifetime: f32,
+    w: f32,
+    w_sum: f32,
+    w2_sum: f32,
+};
+
+@group(6) @binding(0)
+var<storage, read> previous_reservoir_buffer: Reservoirs;
+@group(6) @binding(1)
+var<storage, read_write> reservoir_buffer: Reservoirs;
+@group(6) @binding(2)
+var<storage, read_write> previous_spatial_reservoir_buffer: Reservoirs;
+@group(6) @binding(3)
+var<storage, read_write> spatial_reservoir_buffer: Reservoirs;
+
+fn unpack_reservoir(packed: PackedReservoir) -> Reservoir {
+    var r: Reservoir;
+
+    var t0: vec2<f32>;
+    var t1: vec2<f32>;
+
+    t0 = unpack2x16float(packed.reservoir.x);
+    t1 = unpack2x16float(packed.reservoir.y);
+    r.count = t0.x;
+    r.w = t0.y;
+    r.w_sum = t1.x;
+    r.w2_sum = t1.y;
+
+    t0 = unpack2x16float(packed.radiance.x);
+    t1 = unpack2x16float(packed.radiance.y);
+    r.s.radiance = vec4<f32>(t0, t1);
+
+    t0 = unpack2x16unorm(packed.random.x);
+    t1 = unpack2x16unorm(packed.random.y);
+    r.s.random = vec4<f32>(t0, t1);
+
+    var t2 = unpack4x8snorm(packed.visible_normal);
+    r.s.visible_position = packed.visible_position;
+    r.s.visible_normal = normalize(t2.xyz);
+    r.lifetime = 127.0 * (1.0 + t2.w);
+
+    t2 = unpack4x8snorm(packed.sample_normal);
+    r.s.sample_position = vec4<f32>(packed.sample_position.xyz, t2.w);
+    r.s.sample_normal = normalize(t2.xyz);
+    r.s.visible_instance = u32(packed.sample_position.w);
+
+    return r;
+}
+
+fn pack_reservoir(r: Reservoir) -> PackedReservoir {
+    var packed: PackedReservoir;
+
+    var t0: u32;
+    var t1: u32;
+
+    t0 = pack2x16float(vec2<f32>(r.count, r.w));
+    t1 = pack2x16float(vec2<f32>(r.w_sum, r.w2_sum));
+    packed.reservoir = vec2<u32>(t0, t1);
+
+    t0 = pack2x16float(r.s.radiance.xy);
+    t1 = pack2x16float(r.s.radiance.zw);
+    packed.radiance = vec2<u32>(t0, t1);
+
+    t0 = pack2x16unorm(r.s.random.xy);
+    t1 = pack2x16unorm(r.s.random.zw);
+    packed.random = vec2<u32>(t0, t1);
+
+    packed.visible_position = r.s.visible_position;
+    packed.sample_position = vec4<f32>(r.s.sample_position.xyz, f32(r.s.visible_instance));
+
+    packed.visible_normal = pack4x8snorm(vec4<f32>(r.s.visible_normal, r.lifetime / 127.0 - 1.0));
+    packed.sample_normal = pack4x8snorm(vec4<f32>(r.s.sample_normal, r.s.sample_position.w));
+
+    return packed;
+}
+
+fn set_reservoir(r: ptr<function, Reservoir>, s: Sample, w_new: f32) {
+    (*r).count = 1.0;
+    (*r).lifetime = 0.0;
+    (*r).w_sum = w_new;
+    (*r).w2_sum = w_new * w_new;
+    (*r).s = s;
+}
+
+fn update_reservoir(
+    r: ptr<function, Reservoir>,
+    s: Sample,
+    w_new: f32,
+) {
+    (*r).w_sum += w_new;
+    (*r).w2_sum += w_new * w_new;
+    (*r).count = (*r).count + 1.0;
+
+    let rand = fract(dot(s.random, vec4<f32>(1.0)));
+    if rand < w_new / (*r).w_sum {
+        (*r).s = s;
+
+        // trsh suggests that instead of substituting the sample in the reservoir,
+        // merging the two with similar luminance works better.
+        // let l1 = luminance(s.radiance.rgb);
+        // let l2 = luminance((*r).s.radiance.rgb);
+        // let ratio = l1 / max(l2, 0.0001);
+        // var radiance = s.radiance;
+
+        // if ratio > 0.8 && ratio < 1.25 {
+        //     radiance = mix((*r).s.radiance, s.radiance, 0.5);
+        // }
+
+        // (*r).s = s;
+        // (*r).s.radiance = radiance;
+    }
+}
+
+fn merge_reservoir(r: ptr<function, Reservoir>, other: Reservoir, p: f32) {
+    let count = (*r).count;
+    update_reservoir(r, other.s, p * other.w * other.count);
+    (*r).count = count + other.count;
+}
+
+fn load_previous_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> Reservoir {
+    var r: Reservoir;
+    if all(abs(uv - 0.5) < vec2<f32>(0.5)) {
+        let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
+        let index = coords.x + reservoir_size.x * coords.y;
+        let packed = previous_reservoir_buffer.data[index];
+        r = unpack_reservoir(packed);
+    }
+    return r;
+}
+
+fn load_reservoir(index: i32) -> Reservoir {
+    let packed = reservoir_buffer.data[index];
+    return unpack_reservoir(packed);
+}
+
+fn store_reservoir(index: i32, r: Reservoir) {
+    reservoir_buffer.data[index] = pack_reservoir(r);
+}
+
+fn load_previous_spatial_reservoir(uv: vec2<f32>, reservoir_size: vec2<i32>) -> Reservoir {
+    var r: Reservoir;
+    if all(abs(uv - 0.5) < vec2<f32>(0.5)) {
+        let coords = vec2<i32>(uv * vec2<f32>(reservoir_size));
+        let index = coords.x + reservoir_size.x * coords.y;
+        let packed = previous_spatial_reservoir_buffer.data[index];
+        r = unpack_reservoir(packed);
+    }
+    return r;
+}
+
+fn store_previous_spatial_reservoir(index: i32, r: Reservoir) {
+    previous_spatial_reservoir_buffer.data[index] = pack_reservoir(r);
+}
+
+fn load_spatial_reservoir(index: i32) -> Reservoir {
+    let packed = spatial_reservoir_buffer.data[index];
+    return unpack_reservoir(packed);
+}
+
+fn store_spatial_reservoir(index: i32, r: Reservoir) {
+    spatial_reservoir_buffer.data[index] = pack_reservoir(r);
+}
+// -------- RESERVOIR   --------
 
 let TAU: f32 = 6.283185307;
 let INV_TAU: f32 = 0.159154943;
@@ -65,6 +255,7 @@ let SPATIAL_REUSE_TAPS: u32 = 4u;
 let DIRECT_VALIDATION_FRAME_SAMPLE_THRESHOLD: u32 = 4u;
 let SPATIAL_VARIANCE_SAMPLE_THRESHOLD: u32 = 4u;
 
+// -------- TRACING     ---------
 struct Ray {
     origin: vec3<f32>,
     direction: vec3<f32>,
@@ -332,7 +523,7 @@ fn hit_info(ray: Ray, hit: Hit) -> HitInfo {
 }
 
 // Use this only if the ray is a shadow ray, i.e., call after `select_light_candidate`.
-fn shadow_hit_info(ray: Ray, hit: Hit, info: ptr<function, HitInfo>) {
+fn occlude_hit_info(ray: Ray, hit: Hit, info: ptr<function, HitInfo>) {
     if hit.instance_index != U32_MAX {
         (*info).instance_index = hit.instance_index;
         (*info).material_index = U32_MAX;
@@ -340,7 +531,9 @@ fn shadow_hit_info(ray: Ray, hit: Hit, info: ptr<function, HitInfo>) {
         (*info).normal = vec3<f32>(0.0);
     }
 }
+// -------- TRACING     --------
 
+// -------- SAMPLING    --------
 fn sample_uniform_disk(rand: vec2<f32>) -> vec2<f32> {
     let r = sqrt(rand.x);
     let theta = 2.0 * PI * rand.y;
@@ -513,7 +706,9 @@ fn select_light_candidate(
 
     return candidate;
 }
+// -------- SAMPLING    --------
 
+// -------- SHADING     --------
 // NOTE: Correctly calculates the view vector depending on whether
 // the projection is orthographic or perspective.
 fn calculate_view(
@@ -711,7 +906,9 @@ fn env_brdf(
     let specular_ambient = EnvBRDFApprox(F0, roughness, NdotV);
     return occlusion * (diffuse_ambient + specular_ambient);
 }
+// -------- SHADING     --------
 
+// -------- RESTIR      --------
 // The lifetime of the reservoir is randomized per sample
 fn reservoir_lifetime(r: Reservoir) -> f32 {
     return select(frame.max_reservoir_lifetime, F32_MAX, frame.max_reservoir_lifetime <= 1.0);
@@ -729,7 +926,8 @@ fn check_previous_reservoir(
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
 
     if (*r).lifetime > reservoir_lifetime((*r)) || depth_miss || position_miss || instance_miss || normal_miss {
-        (*r) = empty_reservoir();
+        var q: Reservoir;
+        (*r) = q;
         return false;
     } else {
         return true;
@@ -804,6 +1002,7 @@ fn compute_jacobian(q: Sample, r: Sample) -> f32 {
     jacobian = clamp(jacobian, 1.0, 50.0);
     return jacobian;
 }
+// -------- RESTIR  --------
 
 @compute @workgroup_size(8, 8, 1)
 fn full_screen_albedo(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
@@ -838,7 +1037,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, render_size);
 
-    var s: Sample = empty_sample();
+    var s: Sample;
 
     let deferred_coords = jittered_deferred_coords(uv, deferred_size, render_size, frame.number);
     let position_depth = textureLoad(position_texture, deferred_coords, 0);
@@ -917,7 +1116,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         if trace_condition {
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
-            shadow_hit_info(ray, hit, &info);
+            occlude_hit_info(ray, hit, &info);
 
 #ifdef EMISSIVE_LIT
             // Don't sample directional light, sample emissive only
@@ -968,7 +1167,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         if trace_condition {
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
             // info = hit_info(ray, hit);
-            shadow_hit_info(ray, hit, &info);
+            occlude_hit_info(ray, hit, &info);
 
 #ifdef EMISSIVE_LIT
             validate_radiance = input_radiance(ray, info, false, candidate.emissive_instance, false);
@@ -1066,8 +1265,8 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
 
-    var s: Sample = empty_sample();
-    var r: Reservoir = empty_reservoir();
+    var s: Sample;
+    var r: Reservoir;
 
     if frame.indirect_bounces == 0u || depth < F32_EPSILON {
         store_reservoir(coords.x + render_size.x * coords.y, r);
@@ -1145,7 +1344,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
                 hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
                 // info = hit_info(ray, hit);
-                shadow_hit_info(ray, hit, &info);
+                occlude_hit_info(ray, hit, &info);
 
                 var in_radiance = input_radiance(ray, info, sample_directional, candidate.emissive_instance, false);
                 in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
@@ -1220,7 +1419,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
             hit = traverse_top(ray, candidate.max_distance, candidate.min_distance, candidate.emissive_instance);
             // info = hit_info(ray, hit);
-            shadow_hit_info(ray, hit, &info);
+            occlude_hit_info(ray, hit, &info);
 
             var in_radiance = input_radiance(ray, info, sample_directional, candidate.emissive_instance, false);
             in_radiance = vec4<f32>(in_radiance.xyz, in_radiance.a);
@@ -1360,7 +1559,7 @@ fn spatial_reuse(
         let sample_coords = vec2<i32>(offset + vec2<f32>(coords));
         let sample_uv = coords_to_uv(sample_coords, render_size);
         let sample_deferred_coords = jittered_deferred_coords(sample_uv, deferred_size, render_size, frame.number);
-        if any(sample_uv < vec2<i32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
+        if any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
             continue;
         }
 
