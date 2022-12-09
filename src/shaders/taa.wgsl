@@ -145,7 +145,7 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let uv = coords_to_uv(coords, textureDimensions(output_texture));
 
     // Fetch the current sample
-    let original_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0);
+    let original_color = textureLoad(short_output_texture, coords);
     let current_color = original_color.rgb;
 
     // Reproject to find the equivalent sample from the past, using 5-tap Catmull-Rom filtering
@@ -188,8 +188,8 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // instance_miss = instance_miss || current_instance != sample_instance(previous_uv, vec2<f32>(-texel_size.x, texel_size.y));
     // instance_miss = instance_miss || current_instance != sample_instance(previous_uv, vec2<f32>(texel_size.x, texel_size.y));
 
-    // let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
-    // let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
+    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
+    let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
 
     // if boundary_miss || (depth_miss && instance_miss && velocity_miss) {
     //     // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
@@ -217,23 +217,25 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // let delta_lum = pow(clamp(abs(current_lum - previous_lum), 0.0, 1.0), 0.5);
     // let factor = select(0.1, mix(0.1, 0.5, delta_lum), velocity_miss);
 
-    // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
-    let s_tl = sample_short_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
-    let s_tm = sample_short_texture(uv + vec2<f32>(0.0, texel_size.y));
-    let s_tr = sample_short_texture(uv + texel_size);
-    let s_ml = sample_short_texture(uv - vec2<f32>(texel_size.x, 0.0));
-    let s_mm = RGB_to_YCoCg(current_color);
-    let s_mr = sample_short_texture(uv + vec2<f32>(texel_size.x, 0.0));
-    let s_bl = sample_short_texture(uv - texel_size);
-    let s_bm = sample_short_texture(uv - vec2<f32>(0.0, texel_size.y));
-    let s_br = sample_short_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
-    let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
-    let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
-    let mean = moment_1 / 9.0;
-    let variance = sqrt((moment_2 / 9.0) - (mean * mean));
-    previous_color = RGB_to_YCoCg(previous_color);
-    previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
-    previous_color = YCoCg_to_RGB(previous_color);
+    if boundary_miss || velocity_miss {
+        // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
+        let s_tl = sample_short_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
+        let s_tm = sample_short_texture(uv + vec2<f32>(0.0, texel_size.y));
+        let s_tr = sample_short_texture(uv + texel_size);
+        let s_ml = sample_short_texture(uv - vec2<f32>(texel_size.x, 0.0));
+        let s_mm = RGB_to_YCoCg(current_color);
+        let s_mr = sample_short_texture(uv + vec2<f32>(texel_size.x, 0.0));
+        let s_bl = sample_short_texture(uv - texel_size);
+        let s_bm = sample_short_texture(uv - vec2<f32>(0.0, texel_size.y));
+        let s_br = sample_short_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
+        let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
+        let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
+        let mean = moment_1 / 9.0;
+        let variance = sqrt((moment_2 / 9.0) - (mean * mean));
+        previous_color = RGB_to_YCoCg(previous_color);
+        previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
+        previous_color = YCoCg_to_RGB(previous_color);
+    }
 
     // Blend current and past sample
     var output = mix(previous_color, current_color, 0.1);
