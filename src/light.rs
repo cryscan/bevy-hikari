@@ -389,7 +389,8 @@ pub struct CachedLightPipelines {
     direct_emissive: CachedComputePipelineId,
     indirect: CachedComputePipelineId,
     indirect_multiple_bounces: CachedComputePipelineId,
-    spatial_reuse: CachedComputePipelineId,
+    emissive_spatial_reuse: CachedComputePipelineId,
+    indirect_spatial_reuse: CachedComputePipelineId,
 }
 
 fn queue_light_pipelines(
@@ -429,7 +430,13 @@ fn queue_light_pipelines(
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     };
 
-    let spatial_reuse = {
+    let emissive_spatial_reuse = {
+        let key = key
+            | LightPipelineKey::from_entry_point(LightEntryPoint::SpatialReuse)
+            | LightPipelineKey::EMISSIVE_LIT_BIT;
+        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
+    };
+    let indirect_spatial_reuse = {
         let key = key | LightPipelineKey::from_entry_point(LightEntryPoint::SpatialReuse);
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     };
@@ -440,7 +447,8 @@ fn queue_light_pipelines(
         direct_emissive,
         indirect,
         indirect_multiple_bounces,
-        spatial_reuse,
+        emissive_spatial_reuse,
+        indirect_spatial_reuse,
     })
 }
 
@@ -669,8 +677,8 @@ impl Node for LightNode {
             ],
             [
                 None,
-                Some(&pipelines.spatial_reuse),
-                Some(&pipelines.spatial_reuse),
+                Some(&pipelines.emissive_spatial_reuse),
+                Some(&pipelines.indirect_spatial_reuse),
             ],
         )) {
             pass.set_bind_group(5, render, &[]);

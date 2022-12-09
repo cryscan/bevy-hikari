@@ -1533,14 +1533,18 @@ fn spatial_reuse(
     }
 
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
-    // var out_radiance = shading(
-    //     view_direction,
-    //     s.visible_normal,
-    //     normalize(s.sample_position.xyz - s.visible_position.xyz),
-    //     surface,
-    //     s.radiance
-    // );
+#ifdef EMISSIVE_LIT
     merge_reservoir(&r, q, luminance(q.s.radiance.rgb));
+#else
+    var out_radiance = shading(
+        view_direction,
+        s.visible_normal,
+        normalize(s.sample_position.xyz - s.visible_position.xyz),
+        surface,
+        s.radiance
+    );
+    merge_reservoir(&r, q, luminance(out_radiance));
+#endif
 
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
@@ -1610,14 +1614,18 @@ fn spatial_reuse(
         }
 
         let jacobian = select(1.0, compute_jacobian(q.s, s), q.s.sample_position.w > 0.5);
-        // out_radiance = shading(
-        //     view_direction,
-        //     s.visible_normal,
-        //     sample_direction,
-        //     surface,
-        //     q.s.radiance
-        // );
+#ifdef EMISSIVE_LIT
         merge_reservoir(&r, q, luminance(q.s.radiance.rgb) / jacobian);
+#else
+        let out_radiance = shading(
+            view_direction,
+            s.visible_normal,
+            sample_direction,
+            surface,
+            q.s.radiance
+        );
+        merge_reservoir(&r, q, luminance(out_radiance) / jacobian);
+#endif
     }
 
     // Clamp...
@@ -1635,7 +1643,11 @@ fn spatial_reuse(
         surface,
         r.s.radiance
     );
+#ifdef EMISSIVE_LIT
     let total_lum = r.count * luminance(r.s.radiance.rgb);
+#else
+    let total_lum = r.count * luminance(out_radiance);
+#endif
     r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
 
     r.lifetime += 1.0;
