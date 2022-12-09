@@ -238,6 +238,8 @@ type Instances = BTreeMap<
     ),
 >;
 
+type AlisaTableCache = BTreeMap<Entity, (Vec3, Vec<GpuAliasEntry>)>;
+
 /// Note: this system must run AFTER [`prepare_mesh_assets`].
 #[allow(clippy::too_many_arguments)]
 fn prepare_instances(
@@ -247,6 +249,7 @@ fn prepare_instances(
     mut render_assets: ResMut<InstanceRenderAssets>,
     mut extracted_instances: ResMut<ExtractedInstances>,
     mut collection: Local<Instances>,
+    mut alias_table_cache: Local<AlisaTableCache>,
     meshes: Res<GpuMeshes>,
     materials: Res<GpuStandardMaterials>,
     universal_settings: Res<HikariUniversalSettings>,
@@ -260,6 +263,7 @@ fn prepare_instances(
 
     for removed in extracted_instances.removed.drain(..) {
         collection.remove(&removed);
+        alias_table_cache.remove(&removed);
     }
 
     let mut prepare_next_frame = vec![];
@@ -373,13 +377,23 @@ fn prepare_instances(
 
         add_instance_indices(&collection);
 
-        for (id, (_, (instance, mesh, material, _))) in collection.iter().enumerate() {
+        for (id, (entity, (instance, mesh, material, _))) in collection.iter().enumerate() {
             let emissive = material.emissive;
             let intensity = 255.0 * emissive.w * emissive.xyz().length();
             if intensity > 0.0 {
                 // Compute alias table for light sampling
+                let instance_scale = instance.transform.to_scale_rotation_translation().0;
                 let alias_table = {
-                    let mut instance_table = mesh.build_alias_table(instance.transform);
+                    let cached_table = alias_table_cache.get(entity).and_then(|(scale, table)| {
+                        scale.abs_diff_eq(instance_scale, 0.01).then_some(table)
+                    });
+                    let cache_hit = cached_table.is_some();
+                    let mut instance_table = cached_table
+                        .map_or_else(|| mesh.build_alias_table(instance.transform), Clone::clone);
+                    if !cache_hit {
+                        alias_table_cache.insert(*entity, (instance_scale, instance_table.clone()));
+                    }
+
                     let index = UVec2::new(alias_table.len() as u32, instance_table.len() as u32);
                     alias_table.append(&mut instance_table);
                     index

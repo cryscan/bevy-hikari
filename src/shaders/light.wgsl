@@ -1078,7 +1078,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_uv = jittered_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
     var r: Reservoir = load_previous_reservoir(previous_uv, render_size);
 
-    if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
+    if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) <= vec2<f32>(0.5)) {
         let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
         store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
@@ -1142,7 +1142,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     // Validation frame
-    var flush_reservoir = false;
     if frame.number % validate_interval == 0u {
         let candidate = select_light_candidate(
             r.s.random,
@@ -1186,6 +1185,10 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
         let luminance_ratio = luminance(validate_radiance.rgb) / max(luminance(r.s.radiance.rgb), 0.0001);
         if luminance_ratio > 1.25 || luminance_ratio < 0.8 {
+            if all(abs(previous_uv - 0.5) <= vec2<f32>(0.5)) {
+                let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
+                store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
+            }
             // Luminance miss, update reservoir
             // let sample_radiance = shading(
             //     view_direction,
@@ -1196,7 +1199,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             // );
             let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
             set_reservoir(&r, s, w_new);
-            flush_reservoir = true;
         }
     }
 
@@ -1215,11 +1217,6 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     if frame.enable_temporal_reuse > 0u {
         store_reservoir(coords.x + render_size.x * coords.y, r);
-    }
-
-    if flush_reservoir {
-        let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
-        store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
 
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
@@ -1445,7 +1442,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     let previous_uv = jittered_deferred_uv(uv, render_size, frame.number) - velocity_uv.xy;
     r = load_previous_reservoir(previous_uv, render_size);
 
-    if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) < vec2<f32>(0.5)) {
+    if !check_previous_reservoir(&r, s) && all(abs(previous_uv - 0.5) <= vec2<f32>(0.5)) {
         let previous_coords = vec2<i32>(previous_uv * vec2<f32>(render_size));
         store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
