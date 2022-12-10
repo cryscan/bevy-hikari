@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.11] - 2022-12-9
+### Changed
+- Implement long short history color clamping to fight ghosting.
+
 ## [0.3.10] - 2022-12-8
 ### Changed
 - SMAA now re-projects and clamps previous frame pixels in a much more cleaver way,
