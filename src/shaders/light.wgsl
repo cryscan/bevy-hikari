@@ -1447,10 +1447,26 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
 
-    let w_new = select(0.0, luminance(s.radiance.rgb) / pdf, pdf > 0.0);
+    surface = retreive_surface(instance_material.y, velocity_uv.zw);
+    let view_direction = calculate_view(position, view.projection[3].w == 1.0);
+    let sample_radiance = shading(
+        view_direction,
+        s.visible_normal,
+        normalize(s.sample_position.xyz - s.visible_position.xyz),
+        surface,
+        s.radiance
+    );
+    let w_new = select(0.0, luminance(sample_radiance) / pdf, pdf > 0.0);
     temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
-    let total_lum = r.count * luminance(r.s.radiance.rgb);
+    let out_radiance = shading(
+        view_direction,
+        r.s.visible_normal,
+        normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
+        surface,
+        r.s.radiance
+    );
+    let total_lum = r.count * luminance(out_radiance);
     r.w = select(0.0, r.w_sum / total_lum, total_lum > 0.0);
 
     r.s.visible_position = s.visible_position;
@@ -1468,18 +1484,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     }
 
     if frame.enable_spatial_reuse == 0u {
-        surface = retreive_surface(instance_material.y, velocity_uv.zw);
-        let view_direction = calculate_view(position, view.projection[3].w == 1.0);
-        var out_radiance = shading(
-            view_direction,
-            r.s.visible_normal,
-            normalize(r.s.sample_position.xyz - r.s.visible_position.xyz),
-            surface,
-            r.s.radiance
-        );
-        out_radiance *= r.w;
-
-        textureStore(render_texture, coords, vec4<f32>(out_radiance, 1.0));
+        textureStore(render_texture, coords, vec4<f32>(out_radiance * r.w, 1.0));
     }
 }
 
