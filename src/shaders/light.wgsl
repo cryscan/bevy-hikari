@@ -565,7 +565,7 @@ fn sample_uniform_triangle_barycentric(rand: vec2<f32>) -> vec2<f32> {
 }
 
 fn cone_pdf(cone: vec4<f32>, direction: vec3<f32>) -> f32 {
-    return select(INV_TAU / (1.0 - cone.w), 0.0, (1.0 - cone.w < 0.0001) || (dot(direction, cone.xyz) < cone.w));
+    return select(INV_TAU / (1.0 - cone.w), 0.0, (cone.w - 1.0 > 0.0) || (dot(direction, cone.xyz) < cone.w));
 }
 
 fn compute_directional_cone(directional: DirectionalLight) -> vec4<f32> {
@@ -919,13 +919,13 @@ fn check_previous_reservoir(
     s: Sample,
 ) -> bool {
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
-    let depth_miss = depth_ratio > 2.0 * (1.0 + s.random.x) || depth_ratio < 0.5 * s.random.y;
+    let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
     let position_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > POSITION_MISS_THRESHOLD;
 
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
 
-    if depth_miss || position_miss || instance_miss || normal_miss {
+    if depth_miss || normal_miss {
         var q: Reservoir;
         (*r) = q;
         return false;
@@ -1137,7 +1137,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         //     surface,
         //     s.radiance
         // );
-        let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
+        let w_new = select(0.0, luminance(s.radiance.rgb) / candidate.p, candidate.p > 0.0);
         temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
     }
 
@@ -1197,13 +1197,13 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             //     surface,
             //     s.radiance
             // );
-            let w_new = select(luminance(s.radiance.rgb) / candidate.p, 0.0, candidate.p < 0.0001);
+            let w_new = select(0.0, luminance(s.radiance.rgb) / candidate.p, candidate.p > 0.0);
             set_reservoir(&r, s, w_new);
         }
     }
 
     let total_lum = r.count * luminance(r.s.radiance.rgb);
-    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
+    r.w = select(0.0, r.w_sum / total_lum, total_lum > 0.0);
 
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
@@ -1447,11 +1447,11 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
         store_previous_spatial_reservoir(previous_coords.x + render_size.x * previous_coords.y, r);
     }
 
-    let w_new = select(luminance(s.radiance.rgb) / pdf, 0.0, pdf < 0.0001);
+    let w_new = select(0.0, luminance(s.radiance.rgb) / pdf, pdf > 0.0);
     temporal_restir(&r, s, w_new, frame.max_temporal_reuse_count);
 
     let total_lum = r.count * luminance(r.s.radiance.rgb);
-    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
+    r.w = select(0.0, r.w_sum / total_lum, total_lum > 0.0);
 
     r.s.visible_position = s.visible_position;
     r.s.visible_normal = s.visible_normal;
@@ -1648,7 +1648,7 @@ fn spatial_reuse(
 #else
     let total_lum = r.count * luminance(out_radiance);
 #endif
-    r.w = select(r.w_sum / total_lum, 0.0, total_lum < 0.0001);
+    r.w = select(0.0, r.w_sum / total_lum, total_lum > 0.0);
 
     r.lifetime += 1.0;
 
