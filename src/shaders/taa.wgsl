@@ -109,7 +109,7 @@ fn taa_short(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var velocity = nearest_velocity(uv);
     let previous_uv = uv - velocity;
-    let boundary_miss = any(previous_uv < vec2<f32>(0.0)) || any(previous_uv > vec2<f32>(1.0));
+    let boundary_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
 
     let sample_position = (uv - velocity) * size;
     let texel_position_1 = floor(sample_position - 0.5) + 0.5;
@@ -192,7 +192,7 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
     var velocity = nearest_velocity(uv);
     let previous_uv = uv - velocity;
-    let boundary_miss = any(previous_uv < vec2<f32>(0.0)) || any(previous_uv > vec2<f32>(1.0));
+    let boundary_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
 
     let sample_position = (uv - velocity) * size;
     let texel_position_1 = floor(sample_position - 0.5) + 0.5;

@@ -137,7 +137,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_reprojected_uv = previous_output_uv - velocity;
     var previous_color = textureSampleLevel(previous_render_texture, nearest_sampler, previous_reprojected_uv, 0.0).rgb;
 
-    let boundary_miss = any(previous_reprojected_uv < vec2<f32>(0.0)) || any(previous_reprojected_uv > vec2<f32>(1.0));
+    let boundary_miss = any(abs(previous_reprojected_uv - 0.5) > vec2<f32>(0.5));
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
     var depth_miss = current_depth == 0.0;
