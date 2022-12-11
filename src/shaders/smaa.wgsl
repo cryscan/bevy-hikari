@@ -119,14 +119,10 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var uv_biases: array<vec2<f32>, 5>;
     uv_biases[0] = vec2<f32>(0.0);
-    uv_biases[1] = vec2<f32>(tile_size.x, tile_size.y);
-    uv_biases[2] = vec2<f32>(-tile_size.x, tile_size.y);
-    uv_biases[3] = vec2<f32>(tile_size.x, -tile_size.y);
-    uv_biases[4] = vec2<f32>(-tile_size.x, -tile_size.y);
-    // uv_biases[5] = vec2<f32>(0.0, tile_size.y);
-    // uv_biases[6] = vec2<f32>(tile_size.x, 0.0);
-    // uv_biases[7] = vec2<f32>(0.0, -tile_size.y);
-    // uv_biases[8] = vec2<f32>(-tile_size.x, 0.0);
+    uv_biases[1] = vec2<f32>(1.5, 1.5) * texel_size;
+    uv_biases[2] = vec2<f32>(-1.5, 1.5) * texel_size;
+    uv_biases[3] = vec2<f32>(1.5, -1.5) * texel_size;
+    uv_biases[4] = vec2<f32>(-1.5, -1.5) * texel_size;
 
     // Fetch the current sample
     let current_output_coords = 2 * coords + current_smaa_jitter(frame.number);

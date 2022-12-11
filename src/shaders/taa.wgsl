@@ -175,10 +175,10 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
 
     var uv_biases: array<vec2<f32>, 4>;
-    uv_biases[0] = 2.0 * vec2<f32>(-texel_size.x, -texel_size.y);
-    uv_biases[1] = 2.0 * vec2<f32>(texel_size.x, -texel_size.y);
-    uv_biases[2] = 2.0 * vec2<f32>(-texel_size.x, texel_size.y);
-    uv_biases[3] = 2.0 * vec2<f32>(texel_size.x, texel_size.y);
+    uv_biases[0] = vec2<f32>(1.5, 1.5) * texel_size;
+    uv_biases[1] = vec2<f32>(-1.5, 1.5) * texel_size;
+    uv_biases[2] = vec2<f32>(1.5, -1.5) * texel_size;
+    uv_biases[3] = vec2<f32>(-1.5, -1.5) * texel_size;
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
     var depth_miss = current_depth == 0.0;
