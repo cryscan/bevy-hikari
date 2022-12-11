@@ -17,8 +17,8 @@ fn main() {
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             // window: WindowDescriptor {
-            //     width: 400.0,
-            //     height: 300.0,
+            //     width: 800.0,
+            //     height: 600.0,
             //     ..Default::default()
             // },
             ..Default::default()

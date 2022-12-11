@@ -488,7 +488,7 @@ pub enum Upscale {
 
 impl Default for Upscale {
     fn default() -> Self {
-        Self::SmaaTu4x { ratio: 1.0 }
+        Self::SmaaTu4x { ratio: 2.0 }
     }
 }
 

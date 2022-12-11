@@ -132,10 +132,7 @@ fn setup(
                 ..Default::default()
             },
             // BloomSettings::default(),
-            HikariSettings {
-                upscale: Upscale::SmaaTu4x { ratio: 2.0 },
-                ..Default::default()
-            },
+            HikariSettings::default(),
             RaycastSource::<RaycastSet>::default(),
         ))
         .insert(OrbitCameraBundle::new(

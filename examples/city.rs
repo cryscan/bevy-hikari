@@ -127,10 +127,7 @@ fn setup(
                 transform: Transform::from_xyz(0.0, 2.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
                 ..Default::default()
             },
-            HikariSettings {
-                upscale: Upscale::SmaaTu4x { ratio: 2.0 },
-                ..Default::default()
-            },
+            HikariSettings::default(),
             BloomSettings::default(),
             RaycastSource::<RaycastSet>::default(),
         ))
