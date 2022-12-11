@@ -61,10 +61,10 @@ fn sample_short_texture(uv: vec2<f32>) -> vec3<f32> {
     return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
-fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
-    let c = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
-    return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
-}
+// fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
+//     let c = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
+//     return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
+// }
 
 fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
     let size = vec2<f32>(textureDimensions(instance_material_texture));
@@ -130,7 +130,7 @@ fn taa_short(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_short_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
     previous_color += sample_previous_short_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
 
-    let output = mix(previous_color, current_color, 0.5);
+    let output = mix(previous_color, current_color, 0.9);
     textureStore(short_output_texture, coords, vec4<f32>(output, original_color.a));
 }
 
@@ -174,10 +174,19 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
 
-    // let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv);
-    // let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
-    // let depth_ratio = vec4<f32>(current_depth) / max(previous_depths, vec4<f32>(0.0001));
-    // let depth_miss = any(depth_ratio < vec4<f32>(0.95)) || any(depth_ratio > vec4<f32>(1.05));
+    var uv_biases: array<vec2<f32>, 4>;
+    uv_biases[0] = 2.0 * vec2<f32>(-texel_size.x, -texel_size.y);
+    uv_biases[1] = 2.0 * vec2<f32>(texel_size.x, -texel_size.y);
+    uv_biases[2] = 2.0 * vec2<f32>(-texel_size.x, texel_size.y);
+    uv_biases[3] = 2.0 * vec2<f32>(texel_size.x, texel_size.y);
+
+    let current_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0).w;
+    var depth_miss = current_depth == 0.0;
+    for (var i = 0u; i < 4u; i += 1u) {
+        let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv + uv_biases[i]);
+        let depth_ratio = select(vec4<f32>(current_depth) / previous_depths, vec4<f32>(1.0), previous_depths == vec4<f32>(0.0));
+        depth_miss = depth_miss || any(depth_ratio < vec4<f32>(0.95)) || any(depth_ratio > vec4<f32>(1.05));
+    }
 
     // let deferred_coords = vec2<i32>(uv * vec2<f32>(deferred_size));
     // let current_instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
@@ -211,27 +220,23 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     //     previous_color = YCoCg_to_RGB(previous_color);
     // }
 
-    // Ghost fading by luminance difference
-    // let current_lum = luminance(current_color);
-    // let previous_lum = luminance(previous_color);
-    // let delta_lum = pow(clamp(abs(current_lum - previous_lum), 0.0, 1.0), 0.5);
-    // let factor = select(0.1, mix(0.1, 0.5, delta_lum), velocity_miss);
+    let s_tl = sample_short_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
+    let s_tm = sample_short_texture(uv + vec2<f32>(0.0, texel_size.y));
+    let s_tr = sample_short_texture(uv + texel_size);
+    let s_ml = sample_short_texture(uv - vec2<f32>(texel_size.x, 0.0));
+    let s_mm = RGB_to_YCoCg(current_color);
+    let s_mr = sample_short_texture(uv + vec2<f32>(texel_size.x, 0.0));
+    let s_bl = sample_short_texture(uv - texel_size);
+    let s_bm = sample_short_texture(uv - vec2<f32>(0.0, texel_size.y));
+    let s_br = sample_short_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
+    let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
+    let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
+    let mean = moment_1 / 9.0;
+    let variance = sqrt((moment_2 / 9.0) - (mean * mean));
+    let luma_miss = abs(RGB_to_YCoCg(previous_color).x - mean.x) < variance.x;
 
-    if boundary_miss || velocity_miss {
+    if boundary_miss || luma_miss || (velocity_miss && depth_miss) {
         // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
-        let s_tl = sample_short_texture(uv + vec2<f32>(-texel_size.x, texel_size.y));
-        let s_tm = sample_short_texture(uv + vec2<f32>(0.0, texel_size.y));
-        let s_tr = sample_short_texture(uv + texel_size);
-        let s_ml = sample_short_texture(uv - vec2<f32>(texel_size.x, 0.0));
-        let s_mm = RGB_to_YCoCg(current_color);
-        let s_mr = sample_short_texture(uv + vec2<f32>(texel_size.x, 0.0));
-        let s_bl = sample_short_texture(uv - texel_size);
-        let s_bm = sample_short_texture(uv - vec2<f32>(0.0, texel_size.y));
-        let s_br = sample_short_texture(uv + vec2<f32>(texel_size.x, -texel_size.y));
-        let moment_1 = s_tl + s_tm + s_tr + s_ml + s_mm + s_mr + s_bl + s_bm + s_br;
-        let moment_2 = (s_tl * s_tl) + (s_tm * s_tm) + (s_tr * s_tr) + (s_ml * s_ml) + (s_mm * s_mm) + (s_mr * s_mr) + (s_bl * s_bl) + (s_bm * s_bm) + (s_br * s_br);
-        let mean = moment_1 / 9.0;
-        let variance = sqrt((moment_2 / 9.0) - (mean * mean));
         previous_color = RGB_to_YCoCg(previous_color);
         previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
         previous_color = YCoCg_to_RGB(previous_color);

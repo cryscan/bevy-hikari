@@ -145,15 +145,17 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let boundary_miss = any(previous_reprojected_uv < vec2<f32>(0.0)) || any(previous_reprojected_uv > vec2<f32>(1.0));
 
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
-    let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv);
-    let previous_depth = textureSampleLevel(previous_position_texture, nearest_sampler, previous_reprojected_uv, 0.0).w;
-    let depth_ratio = vec4<f32>(current_depth) / max(previous_depths, vec4<f32>(0.0001));
-    let depth_miss = current_depth == 0.0 || any(depth_ratio < vec4<f32>(0.95)) || any(depth_ratio > vec4<f32>(1.05));
+    var depth_miss = current_depth == 0.0;
 
     let current_instance = textureLoad(instance_material_texture, previous_output_coords, 0).x;
     var instance_miss = current_instance != sample_instance(previous_reprojected_uv, vec2<f32>(0.0));
+
     for (var i = 1u; i <= 4u; i += 1u) {
         instance_miss = instance_miss || current_instance != sample_instance(previous_reprojected_uv, uv_biases[i]);
+
+        let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv + uv_biases[i]);
+        let depth_ratio = select(vec4<f32>(current_depth) / previous_depths, vec4<f32>(1.0), previous_depths == vec4<f32>(0.0));
+        depth_miss = depth_miss || any(depth_ratio < vec4<f32>(0.95)) || any(depth_ratio > vec4<f32>(1.05));
     }
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_reprojected_uv, 0.0).xy;
@@ -198,7 +200,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     blend_factor = clamp(-cos(blend_factor * TAU), 0.0, 1.0);
 
     var remix_color = textureSampleLevel(render_texture, linear_sampler, previous_output_uv, 0.0).rgb;
-    if current_depth > 0.0 && previous_depth > 0.0 {
+    if current_depth > 0.0 {
         let remix_ratio = previous_albedo / current_albedo;
         remix_color *= select(vec3<f32>(1.0), remix_ratio, current_albedo > vec3<f32>(0.001));
     }
