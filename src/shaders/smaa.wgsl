@@ -115,14 +115,13 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // from https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1
     // and https://www.activision.com/cdn/research/Dynamic_Temporal_Antialiasing_and_Upsampling_in_Call_of_Duty_v4.pdf#page=68
     let texel_size = 1.0 / vec2<f32>(output_size);
-    let tile_size = 1.0 / vec2<f32>(input_size);
 
     var uv_biases: array<vec2<f32>, 5>;
     uv_biases[0] = vec2<f32>(0.0);
-    uv_biases[1] = vec2<f32>(1.5, 1.5) * texel_size;
-    uv_biases[2] = vec2<f32>(-1.5, 1.5) * texel_size;
-    uv_biases[3] = vec2<f32>(1.5, -1.5) * texel_size;
-    uv_biases[4] = vec2<f32>(-1.5, -1.5) * texel_size;
+    uv_biases[1] = vec2<f32>(2.5, 2.5) * texel_size;
+    uv_biases[2] = vec2<f32>(-2.5, 2.5) * texel_size;
+    uv_biases[3] = vec2<f32>(2.5, -2.5) * texel_size;
+    uv_biases[4] = vec2<f32>(-2.5, -2.5) * texel_size;
 
     // Fetch the current sample
     let current_output_coords = 2 * coords + current_smaa_jitter(frame.number);
@@ -186,12 +185,11 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         previous_color = RGB_to_YCoCg(previous_color);
         previous_color = clip_towards_aabb_center(previous_color, s_mm, mean - variance, mean + variance);
         previous_color = YCoCg_to_RGB(previous_color);
-        // previous_color = vec3<f32>(0.25 * uv_bias / tile_size + 0.75, 0.0);
     }
 
     // Get the subpixel velocity,
     // And blend the previous sample with the approximated current to get better edges
-    let subpixel_velocity = fract(velocity / tile_size);
+    let subpixel_velocity = fract(velocity / (2.0 * texel_size));
     var blend_factor = max(subpixel_velocity.x, subpixel_velocity.y);
     blend_factor = clamp(-cos(blend_factor * TAU), 0.0, 1.0);
 
