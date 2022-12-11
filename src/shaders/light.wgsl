@@ -919,7 +919,7 @@ fn check_previous_reservoir(
     s: Sample,
 ) -> bool {
     let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
-    let depth_miss = depth_ratio < 0.95 || depth_ratio > 1.05;
+    let depth_miss = depth_ratio < 0.95 * (1.0 - 0.25 * s.random.x) || depth_ratio > 1.05 * (1.0 + 0.25 * s.random.x);
     let position_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > POSITION_MISS_THRESHOLD;
 
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
