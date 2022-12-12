@@ -918,14 +918,15 @@ fn check_previous_reservoir(
     r: ptr<function, Reservoir>,
     s: Sample,
 ) -> bool {
-    let depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
-    let depth_miss = depth_ratio < 0.95 * (1.0 - 0.25 * s.random.x) || depth_ratio > 1.05 * (1.0 + 0.25 * s.random.x);
-    let position_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > POSITION_MISS_THRESHOLD;
+    var depth_ratio = (*r).s.visible_position.w / s.visible_position.w;
+    depth_ratio = select(depth_ratio, 1.0 / depth_ratio, depth_ratio < 1.0);
+    let depth_miss = depth_ratio > 1.05 * (1.0 + 0.5 * s.random.x);
+    // let position_miss = distance((*r).s.visible_position.xyz, s.visible_position.xyz) > POSITION_MISS_THRESHOLD;
 
     let instance_miss = (*r).s.visible_instance != s.visible_instance;
     let normal_miss = dot(s.visible_normal, (*r).s.visible_normal) < 0.9;
 
-    if depth_miss || normal_miss {
+    if depth_miss || normal_miss || instance_miss {
         var q: Reservoir;
         (*r) = q;
         return false;
