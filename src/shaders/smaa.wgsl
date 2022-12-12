@@ -193,8 +193,8 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var blend_factor = max(subpixel_velocity.x, subpixel_velocity.y);
     blend_factor = clamp(-cos(blend_factor * TAU), 0.0, 1.0);
 
-    var remix_color = textureSampleLevel(render_texture, linear_sampler, previous_output_uv, 0.0).rgb;
-    remix_color *= select(vec3<f32>(1.0), previous_albedo / current_albedo, current_albedo > vec3<f32>(0.0));
+    let remix_color = textureSampleLevel(render_texture, linear_sampler, previous_output_uv, 0.0).rgb;
+    // remix_color *= select(vec3<f32>(1.0), previous_albedo / current_albedo, current_albedo > vec3<f32>(0.0));
     previous_color = mix(previous_color, remix_color, blend_factor);
 
     textureStore(output_texture, current_output_coords, vec4<f32>(current_color, 1.0));
