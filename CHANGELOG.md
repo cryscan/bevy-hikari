@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.12] - 2022-12-11
+## [0.3.13] - 2022-12-11
 ### Changed
 - Make SMAA Tu4x ratio 2.0 the default setting.
 
