@@ -312,28 +312,6 @@ impl FromWorld for PostProcessPipeline {
                     },
                     count: None,
                 },
-                // Previous Short Render
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Short Output
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::all(),
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadWrite,
-                        format: HDR_TEXTURE_FORMAT,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
             ],
         });
 
@@ -400,12 +378,11 @@ pub enum PostProcessEntryPoint {
     Demodulation = 0,
     Denoise = 1,
     ToneMapping = 2,
-    TaaShort = 3,
-    TaaJasmine = 4,
-    SmaaTu4x = 5,
-    SmaaTu4xExtrapolate = 6,
-    Upscale = 7,
-    UpscaleSharpen = 8,
+    TaaJasmine = 3,
+    SmaaTu4x = 4,
+    SmaaTu4xExtrapolate = 5,
+    Upscale = 6,
+    UpscaleSharpen = 7,
 }
 
 bitflags::bitflags! {
@@ -481,7 +458,7 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                 let shader = TONE_MAPPING_SHADER_HANDLE.typed();
                 (layout, shader)
             }
-            PostProcessEntryPoint::TaaShort | PostProcessEntryPoint::TaaJasmine => {
+            PostProcessEntryPoint::TaaJasmine => {
                 let layout = vec![
                     self.view_layout.clone(),
                     self.deferred_layout.clone(),
@@ -674,7 +651,7 @@ pub struct PostProcessTextures {
     pub denoise_internal_variance: TextureView,
     pub denoise_render: [TextureView; 3],
     pub tone_mapping_output: [TextureView; 2],
-    pub taa_output: [TextureView; 4],
+    pub taa_output: [TextureView; 2],
     pub upscale_output: [TextureView; 2],
 }
 
@@ -772,9 +749,9 @@ fn prepare_post_process_textures(
 
             let taa_output = match settings.taa {
                 Taa::Jasmine => {
-                    create_texture_array![HDR_TEXTURE_FORMAT, scale; 4]
+                    create_texture_array![HDR_TEXTURE_FORMAT, scale; 2]
                 }
-                Taa::None => create_texture_array![fallback; 4],
+                Taa::None => create_texture_array![fallback; 2],
             };
 
             commands.entity(entity).insert(PostProcessTextures {
@@ -793,6 +770,7 @@ fn prepare_post_process_textures(
     }
 }
 
+#[allow(dead_code)]
 #[derive(Resource)]
 pub struct CachedPostProcessPipelines {
     demodulation: CachedComputePipelineId,
@@ -800,7 +778,6 @@ pub struct CachedPostProcessPipelines {
     denoise: [CachedComputePipelineId; 4],
     tone_mapping: CachedComputePipelineId,
     taa_jasmine: CachedComputePipelineId,
-    taa_short: CachedComputePipelineId,
     smaa_tu4x: CachedComputePipelineId,
     smaa_tu4x_extrapolate: CachedComputePipelineId,
     upscale: CachedComputePipelineId,
@@ -834,10 +811,6 @@ fn queue_post_process_pipelines(
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
     };
 
-    let taa_short = {
-        let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::TaaShort);
-        pipelines.specialize(&mut pipeline_cache, &pipeline, key)
-    };
     let taa_jasmine = {
         let key = PostProcessPipelineKey::from_entry_point(PostProcessEntryPoint::TaaJasmine);
         pipelines.specialize(&mut pipeline_cache, &pipeline, key)
@@ -867,7 +840,6 @@ fn queue_post_process_pipelines(
         denoise_direct,
         denoise,
         tone_mapping,
-        taa_short,
         taa_jasmine,
         smaa_tu4x,
         smaa_tu4x_extrapolate,
@@ -1097,14 +1069,6 @@ fn queue_post_process_bind_groups(
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::TextureView(taa_input_texture),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(&post_process.taa_output[previous + 2]),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::TextureView(&post_process.taa_output[current + 2]),
                 },
             ],
         });
@@ -1343,12 +1307,12 @@ impl Node for PostProcessNode {
             pass.set_bind_group(3, &post_process_bind_group.taa, &[]);
             pass.set_bind_group(4, &post_process_bind_group.taa_output, &[]);
 
-            if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.taa_short) {
-                pass.set_pipeline(pipeline);
+            // if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.taa_short) {
+            //     pass.set_pipeline(pipeline);
 
-                let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                pass.dispatch_workgroups(count.x, count.y, 1);
-            }
+            //     let count = (scaled_size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+            //     pass.dispatch_workgroups(count.x, count.y, 1);
+            // }
 
             if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.taa_jasmine) {
                 pass.set_pipeline(pipeline);
