@@ -1,12 +1,8 @@
 # Changelog
 
-## [0.3.13] - 2022-12-11
+## [0.3.14] - 2022-12-11
 ### Changed
 - Make SMAA Tu4x ratio 2.0 the default setting.
-
-## [0.3.11] - 2022-12-9
-### Changed
-- Implement long short history color clamping to fight ghosting.
 
 ## [0.3.10] - 2022-12-8
 ### Changed
@@ -75,8 +71,7 @@ This is mainly a bug-fix and performance upgrade.
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
-[0.3.12]: https://github.com/cryscan/bevy-hikari/commits/v0.3.12
-[0.3.11]: https://github.com/cryscan/bevy-hikari/commits/v0.3.11
+[0.3.14]: https://github.com/cryscan/bevy-hikari/commits/v0.3.14
 [0.3.10]: https://github.com/cryscan/bevy-hikari/commits/v0.3.10
 [0.3.9]: https://github.com/cryscan/bevy-hikari/commits/v0.3.9
 [0.3.8]: https://github.com/cryscan/bevy-hikari/commits/v0.3.8
