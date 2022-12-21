@@ -142,12 +142,12 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var depth_miss = current_depth == 0.0;
 
     for (var i = 0u; i < 5u; i += 1u) {
-        let previous_instance = textureSampleLevel(instance_material_texture, nearest_sampler, previous_reprojected_uv + uv_biases[i], 0.0).x;
-        instance_miss = instance_miss || abs(previous_instance - current_instance) > 1.0;
-
         let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv + uv_biases[i]);
         let depth_ratio = select(vec4<f32>(current_depth) / previous_depths, vec4<f32>(1.0), previous_depths == vec4<f32>(0.0));
         depth_miss = depth_miss || any(depth_ratio < vec4<f32>(0.95));
+
+        let previous_instance = textureSampleLevel(instance_material_texture, nearest_sampler, previous_reprojected_uv + uv_biases[i], 0.0).x;
+        instance_miss = instance_miss || (any(depth_ratio < vec4<f32>(0.95)) && abs(previous_instance - current_instance) > 1.0);
     }
 
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_reprojected_uv, 0.0).xy;
