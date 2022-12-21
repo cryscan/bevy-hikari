@@ -1226,7 +1226,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     variance = min(variance, MAX_VARIANCE);
     textureStore(variance_texture, coords, vec4<f32>(variance));
 
-    if frame.enable_temporal_reuse > 0u {
+    if frame.temporal_reuse > 0u {
         store_reservoir(coords.x + render_size.x * coords.y, r);
     }
 
@@ -1490,13 +1490,11 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     variance = min(variance, MAX_VARIANCE);
     textureStore(variance_texture, coords, vec4<f32>(variance));
 
-    if frame.enable_temporal_reuse > 0u {
+    if frame.temporal_reuse > 0u {
         store_reservoir(coords.x + render_size.x * coords.y, r);
     }
 
-    if frame.enable_spatial_reuse == 0u {
-        textureStore(render_texture, coords, vec4<f32>(out_radiance * r.w, 1.0));
-    }
+    textureStore(render_texture, coords, vec4<f32>(out_radiance * r.w, 1.0));
 }
 
 var<workgroup> shared_reservoir: array<array<Reservoir, 8u>, 8u>;

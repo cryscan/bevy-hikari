@@ -653,23 +653,30 @@ impl Node for LightNode {
         }
 
         // Direct, emissive and indirect passes.
-        for (render, reservoir, temporal_pipeline, spatial_pipeline) in multizip((
-            light_bind_group.render.iter(),
-            light_bind_group.reservoir.iter(),
-            [
-                &pipelines.direct_lit,
-                &pipelines.direct_emissive,
-                match settings.indirect_bounces {
-                    x if x < 2 => &pipelines.indirect,
-                    _ => &pipelines.indirect_multiple_bounces,
-                },
-            ],
-            [
-                None,
-                Some(&pipelines.emissive_spatial_reuse),
-                Some(&pipelines.indirect_spatial_reuse),
-            ],
-        )) {
+        for (render, reservoir, temporal_pipeline, spatial_pipeline, enable_spatial_reuse) in
+            multizip((
+                light_bind_group.render.iter(),
+                light_bind_group.reservoir.iter(),
+                [
+                    &pipelines.direct_lit,
+                    &pipelines.direct_emissive,
+                    match settings.indirect_bounces {
+                        x if x < 2 => &pipelines.indirect,
+                        _ => &pipelines.indirect_multiple_bounces,
+                    },
+                ],
+                [
+                    None,
+                    Some(&pipelines.emissive_spatial_reuse),
+                    Some(&pipelines.indirect_spatial_reuse),
+                ],
+                [
+                    false,
+                    settings.emissive_spatial_reuse,
+                    settings.indirect_spatial_reuse,
+                ],
+            ))
+        {
             pass.set_bind_group(5, render, &[]);
             pass.set_bind_group(6, reservoir, &[]);
 
@@ -680,7 +687,7 @@ impl Node for LightNode {
                 pass.dispatch_workgroups(count.x, count.y, 1);
 
                 if let Some(pipeline) = spatial_pipeline
-                    .filter(|_| settings.spatial_reuse)
+                    .filter(|_| enable_spatial_reuse)
                     .and_then(|pipeline| pipeline_cache.get_compute_pipeline(*pipeline))
                 {
                     pass.set_pipeline(pipeline);

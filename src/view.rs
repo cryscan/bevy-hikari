@@ -110,8 +110,9 @@ pub struct FrameUniform {
     pub direct_validate_interval: u32,
     pub emissive_validate_interval: u32,
     pub indirect_bounces: u32,
-    pub enable_temporal_reuse: u32,
-    pub enable_spatial_reuse: u32,
+    pub temporal_reuse: u32,
+    pub emissive_spatial_reuse: u32,
+    pub indirect_spatial_reuse: u32,
     pub max_temporal_reuse_count: u32,
     pub max_spatial_reuse_count: u32,
     pub max_reservoir_lifetime: f32,
@@ -136,7 +137,8 @@ impl ExtractComponent for FrameUniform {
             max_indirect_luminance,
             clear_color,
             temporal_reuse,
-            spatial_reuse,
+            emissive_spatial_reuse,
+            indirect_spatial_reuse,
             ..
         } = settings.clone();
 
@@ -152,8 +154,9 @@ impl ExtractComponent for FrameUniform {
         let clear_color = clear_color.into();
         let max_temporal_reuse_count = max_temporal_reuse_count as u32;
         let max_spatial_reuse_count = max_spatial_reuse_count as u32;
-        let enable_temporal_reuse = temporal_reuse.into();
-        let enable_spatial_reuse = spatial_reuse.into();
+        let temporal_reuse = temporal_reuse.into();
+        let emissive_spatial_reuse = emissive_spatial_reuse.into();
+        let indirect_spatial_reuse = indirect_spatial_reuse.into();
         let upscale_ratio = settings.upscale.ratio();
 
         Self {
@@ -163,8 +166,9 @@ impl ExtractComponent for FrameUniform {
             direct_validate_interval,
             emissive_validate_interval,
             indirect_bounces,
-            enable_temporal_reuse,
-            enable_spatial_reuse,
+            temporal_reuse,
+            emissive_spatial_reuse,
+            indirect_spatial_reuse,
             max_temporal_reuse_count,
             max_spatial_reuse_count,
             max_reservoir_lifetime,

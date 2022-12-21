@@ -420,8 +420,10 @@ pub struct HikariSettings {
     pub clear_color: Color,
     /// Whether to do temporal sample reuse in ReSTIR.
     pub temporal_reuse: bool,
-    /// Whether to do spatial sample reuse in ReSTIR.
-    pub spatial_reuse: bool,
+    /// Whether to do spatial sample reuse for emissive lighting in ReSTIR.
+    pub emissive_spatial_reuse: bool,
+    /// Whether to do spatial sample reuse for indirect lighting in ReSTIR.
+    pub indirect_spatial_reuse: bool,
     /// Whether to do noise filtering.
     pub denoise: bool,
     /// Which temporal filtering implementation to use.
@@ -443,7 +445,8 @@ impl Default for HikariSettings {
             indirect_bounces: 1,
             max_indirect_luminance: 10.0,
             temporal_reuse: true,
-            spatial_reuse: true,
+            emissive_spatial_reuse: false,
+            indirect_spatial_reuse: true,
             denoise: true,
             taa: Taa::default(),
             upscale: Upscale::default(),
