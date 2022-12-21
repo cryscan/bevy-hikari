@@ -656,14 +656,14 @@ fn prepare_texture_bind_group_layout(
                     view_dimension: TextureViewDimension::D2,
                     multisampled: false,
                 },
-                count: NonZeroU32::new(texture_count as u32),
+                count: NonZeroU32::new(texture_count),
             },
             // Samplers
             BindGroupLayoutEntry {
                 binding: 1,
                 visibility: ShaderStages::all(),
                 ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                count: NonZeroU32::new(texture_count as u32),
+                count: NonZeroU32::new(texture_count),
             },
         ],
     });
