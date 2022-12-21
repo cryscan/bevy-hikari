@@ -70,12 +70,12 @@ fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
     return textureSampleLevel(velocity_uv_texture, nearest_sampler, uv + offset, 0.0).xy;
 }
 
-fn current_smaa_jitter(frame_number: u32) -> i32 {
-    return select(1, 0, frame_number % 2u == 0u);
+fn current_smaa_jitter() -> i32 {
+    return select(1, 0, (frame.number & 1u) == 0u);
 }
 
-fn previous_smaa_jitter(frame_number: u32) -> i32 {
-    return select(0, 1, frame_number % 2u == 0u);
+fn previous_smaa_jitter() -> i32 {
+    return select(0, 1, (frame.number & 1u) == 0u);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -122,12 +122,12 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     uv_biases[4] = vec2<f32>(-2.5, -2.5) * texel_size;
 
     // Fetch the current sample
-    let current_output_coords = 2 * coords + current_smaa_jitter(frame.number);
+    let current_output_coords = 2 * coords + current_smaa_jitter();
     let current_output_uv = coords_to_uv(current_output_coords, output_size);
     let current_color = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
 
     // Fetch the previous sample
-    let previous_output_coords = 2 * coords + previous_smaa_jitter(frame.number);
+    let previous_output_coords = 2 * coords + previous_smaa_jitter();
     let previous_output_uv = coords_to_uv(previous_output_coords, output_size);
     let velocity = nearest_velocity(previous_output_uv);
     let previous_reprojected_uv = previous_output_uv - velocity;
@@ -135,10 +135,16 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     let boundary_miss = any(abs(previous_reprojected_uv - 0.5) > vec2<f32>(0.5));
 
+    let current_instance = textureSampleLevel(instance_material_texture, nearest_sampler, previous_output_uv, 0.0).x;
+    var instance_miss = false;
+
     let current_depth = textureSampleLevel(position_texture, nearest_sampler, previous_output_uv, 0.0).w;
     var depth_miss = current_depth == 0.0;
 
     for (var i = 0u; i < 5u; i += 1u) {
+        let previous_instance = textureSampleLevel(instance_material_texture, nearest_sampler, previous_reprojected_uv + uv_biases[i], 0.0).x;
+        instance_miss = instance_miss || abs(previous_instance - current_instance) > 1.0;
+
         let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_reprojected_uv + uv_biases[i]);
         let depth_ratio = select(vec4<f32>(current_depth) / previous_depths, vec4<f32>(1.0), previous_depths == vec4<f32>(0.0));
         depth_miss = depth_miss || any(depth_ratio < vec4<f32>(0.95));
@@ -147,7 +153,7 @@ fn smaa_tu4x(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_reprojected_uv, 0.0).xy;
     let velocity_miss = distance(velocity, previous_velocity) > 0.0001;
 
-    if boundary_miss || (depth_miss && velocity_miss) {
+    if boundary_miss || ((depth_miss || instance_miss) && velocity_miss) {
         // Constrain past sample with 2x2 YCoCg variance clipping to handle disocclusion
         // Note that the render texture is of half size of the output texture in each side
         // The bias is for less ghosting of newly-disoccluded pixels
