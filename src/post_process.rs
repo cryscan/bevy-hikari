@@ -1,6 +1,6 @@
 use crate::{
     light::{LightTextures, VARIANCE_TEXTURE_FORMAT},
-    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
+    prepass::{DeferredBindGroup, PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariSettings, Taa, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_SHADER_HANDLE,
     FSR1_RCAS_SHADER_HANDLE, SMAA_SHADER_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE,
@@ -16,11 +16,10 @@ use bevy::{
             ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
             UniformComponentPlugin,
         },
-        render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
-        texture::{FallbackImage, TextureCache},
+        texture::TextureCache,
         view::ViewUniformOffset,
         RenderApp, RenderStage,
     },
@@ -254,28 +253,6 @@ impl FromWorld for PostProcessPipeline {
                 // Current Render
                 BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Previous Albedo
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Albedo
-                BindGroupLayoutEntry {
-                    binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Float { filterable: true },
@@ -526,11 +503,11 @@ impl SpecializedComputePipeline for PostProcessPipeline {
 #[derive(Debug, Default, Clone, Copy, Component, ShaderType)]
 pub struct FsrConstantsUniform {
     // NOTE: do not remove this yet
-    //pub const_0: UVec4,
-    //pub const_1: UVec4,
-    //pub const_2: UVec4,
-    //pub const_3: UVec4,
-    //pub sample: UVec4,
+    // pub const_0: UVec4,
+    // pub const_1: UVec4,
+    // pub const_2: UVec4,
+    // pub const_3: UVec4,
+    // pub sample: UVec4,
     pub input_viewport_in_pixels: Vec2,
     pub input_size_in_pixels: Vec2,
     pub output_size_in_pixels: Vec2,
@@ -557,89 +534,89 @@ impl ExtractComponent for FsrConstantsUniform {
 }
 
 // NOTE! Don't delete, might be used soon, instead of calulating this on GPU
-/*fn get_fsr_constants(ratio: f32, hdr_rcas: bool, camera: &ExtractedCamera) -> FSRConstantsUniform {
-    let mut fsr_constant = FSRConstantsUniform::default();
-    let size = camera.physical_target_size.unwrap();
-    let size_x = size.x as f32;
-    let size_y = size.x as f32;
-    compute_fsr_constants(
-        &mut fsr_constant.const_0,
-        &mut fsr_constant.const_1,
-        &mut fsr_constant.const_2,
-        &mut fsr_constant.const_3,
-        size_x,
-        size_y,
-        size_x,
-        size_y,
-        size_x * ratio,
-        size_y * ratio,
-    );
+// fn get_fsr_constants(ratio: f32, hdr_rcas: bool, camera: &ExtractedCamera) -> FSRConstantsUniform {
+//     let mut fsr_constant = FSRConstantsUniform::default();
+//     let size = camera.physical_target_size.unwrap();
+//     let size_x = size.x as f32;
+//     let size_y = size.x as f32;
+//     compute_fsr_constants(
+//         &mut fsr_constant.const_0,
+//         &mut fsr_constant.const_1,
+//         &mut fsr_constant.const_2,
+//         &mut fsr_constant.const_3,
+//         size_x,
+//         size_y,
+//         size_x,
+//         size_y,
+//         size_x * ratio,
+//         size_y * ratio,
+//     );
 
-    fsr_constant.sample.x = if hdr_rcas { 1 } else { 0 };
-    fsr_constant
-}
+//     fsr_constant.sample.x = if hdr_rcas { 1 } else { 0 };
+//     fsr_constant
+// }
 
-pub union U32F32Union {
-    pub u: u32,
-    pub f: f32,
-}
+// pub union U32F32Union {
+//     pub u: u32,
+//     pub f: f32,
+// }
 
-fn f32_u32(a: f32) -> u32 {
-    let uf = U32F32Union { f: a };
-    unsafe { uf.u }
-}
+// fn f32_u32(a: f32) -> u32 {
+//     let uf = U32F32Union { f: a };
+//     unsafe { uf.u }
+// }
 
-fn compute_fsr_constants(
-    con0: &mut UVec4,
-    con1: &mut UVec4,
-    con2: &mut UVec4,
-    con3: &mut UVec4,
-    // This the rendered image resolution being upscaled
-    input_viewport_in_pixels_x: f32,
-    input_viewport_in_pixels_y: f32,
-    // This is the resolution of the resource containing the input image (useful for dynamic resolution)
-    input_size_in_pixels_x: f32,
-    input_size_in_pixels_y: f32,
-    // This is the display resolution which the input image gets upscaled to
-    output_size_in_pixels_x: f32,
-    output_size_in_pixels_y: f32,
-) {
-    // Output integer position to a pixel position in viewport.
-    con0[0] = f32_u32(input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x));
-    con0[1] = f32_u32(input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y));
-    con0[2] = f32_u32(0.5 * input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x) - 0.5);
-    con0[3] = f32_u32(0.5 * input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y) - 0.5);
+// fn compute_fsr_constants(
+//     con0: &mut UVec4,
+//     con1: &mut UVec4,
+//     con2: &mut UVec4,
+//     con3: &mut UVec4,
+//     // This the rendered image resolution being upscaled
+//     input_viewport_in_pixels_x: f32,
+//     input_viewport_in_pixels_y: f32,
+//     // This is the resolution of the resource containing the input image (useful for dynamic resolution)
+//     input_size_in_pixels_x: f32,
+//     input_size_in_pixels_y: f32,
+//     // This is the display resolution which the input image gets upscaled to
+//     output_size_in_pixels_x: f32,
+//     output_size_in_pixels_y: f32,
+// ) {
+//     // Output integer position to a pixel position in viewport.
+//     con0[0] = f32_u32(input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x));
+//     con0[1] = f32_u32(input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y));
+//     con0[2] = f32_u32(0.5 * input_viewport_in_pixels_x * (1.0 / output_size_in_pixels_x) - 0.5);
+//     con0[3] = f32_u32(0.5 * input_viewport_in_pixels_y * (1.0 / output_size_in_pixels_y) - 0.5);
 
-    // Viewport pixel position to normalized image space.
-    // This is used to get upper-left of 'F' tap.
-    con1[0] = (1.0 / input_size_in_pixels_x) as u32;
-    con1[1] = (1.0 / input_size_in_pixels_y) as u32;
-    // Centers of gather4, first offset from upper-left of 'F'.
-    //      +---+---+
-    //      |   |   |
-    //      +--(0)--+
-    //      | b | c |
-    //  +---F---+---+---+
-    //  | e | f | g | h |
-    //  +--(1)--+--(2)--+
-    //  | i | j | k | l |
-    //  +---+---+---+---+
-    //      | n | o |
-    //      +--(3)--+
-    //      |   |   |
-    //      +---+---+
-    con1[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
-    con1[3] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_y));
-    // These are from (0) instead of 'F'.
-    con2[0] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_x));
-    con2[1] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
-    con2[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
-    con2[3] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
-    con3[0] = f32_u32(0.0 * (1.0 / input_size_in_pixels_x));
-    con3[1] = f32_u32(4.0 * (1.0 / input_size_in_pixels_y));
-    con3[2] = 0;
-    con3[3] = 0;
-}*/
+//     // Viewport pixel position to normalized image space.
+//     // This is used to get upper-left of 'F' tap.
+//     con1[0] = (1.0 / input_size_in_pixels_x) as u32;
+//     con1[1] = (1.0 / input_size_in_pixels_y) as u32;
+//     // Centers of gather4, first offset from upper-left of 'F'.
+//     //      +---+---+
+//     //      |   |   |
+//     //      +--(0)--+
+//     //      | b | c |
+//     //  +---F---+---+---+
+//     //  | e | f | g | h |
+//     //  +--(1)--+--(2)--+
+//     //  | i | j | k | l |
+//     //  +---+---+---+---+
+//     //      | n | o |
+//     //      +--(3)--+
+//     //      |   |   |
+//     //      +---+---+
+//     con1[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
+//     con1[3] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_y));
+//     // These are from (0) instead of 'F'.
+//     con2[0] = f32_u32(-1.0 * (1.0 / input_size_in_pixels_x));
+//     con2[1] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
+//     con2[2] = f32_u32(1.0 * (1.0 / input_size_in_pixels_x));
+//     con2[3] = f32_u32(2.0 * (1.0 / input_size_in_pixels_y));
+//     con3[0] = f32_u32(0.0 * (1.0 / input_size_in_pixels_x));
+//     con3[1] = f32_u32(4.0 * (1.0 / input_size_in_pixels_y));
+//     con3[2] = 0;
+//     con3[3] = 0;
+// }
 
 #[derive(Component)]
 pub struct PostProcessTextures {
@@ -850,7 +827,6 @@ fn queue_post_process_pipelines(
 
 #[derive(Component, Clone)]
 pub struct PostProcessBindGroup {
-    pub deferred: BindGroup,
     pub sampler: BindGroup,
     pub denoise_internal: BindGroup,
     pub denoise_render: Vec<BindGroup>,
@@ -871,13 +847,10 @@ fn queue_post_process_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<PostProcessPipeline>,
-    images: Res<RenderAssets<Image>>,
-    fallback: Res<FallbackImage>,
     fsr_constants_uniforms: Res<ComponentUniforms<FsrConstantsUniform>>,
     query: Query<
         (
             Entity,
-            &PrepassTextures,
             &LightTextures,
             &PostProcessTextures,
             &HikariSettings,
@@ -890,20 +863,9 @@ fn queue_post_process_bind_groups(
         None => return,
     };
 
-    for (entity, prepass, light, post_process, settings) in &query {
+    for (entity, light, post_process, settings) in &query {
         let current = post_process.head;
         let previous = 1 - current;
-
-        let deferred = match prepass.as_bind_group(
-            &pipeline.deferred_layout,
-            &render_device,
-            &images,
-            &fallback,
-        ) {
-            Ok(deferred) => deferred,
-            Err(_) => continue,
-        }
-        .bind_group;
 
         let sampler = render_device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -955,7 +917,7 @@ fn queue_post_process_bind_groups(
                     entries: &[
                         BindGroupEntry {
                             binding: 0,
-                            resource: BindingResource::TextureView(&light.albedo[current]),
+                            resource: BindingResource::TextureView(&light.albedo),
                         },
                         BindGroupEntry {
                             binding: 1,
@@ -1034,14 +996,6 @@ fn queue_post_process_bind_groups(
                     resource: BindingResource::TextureView(
                         &post_process.tone_mapping_output[current],
                     ),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(&light.albedo[previous]),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: BindingResource::TextureView(&light.albedo[current]),
                 },
             ],
         });
@@ -1133,7 +1087,6 @@ fn queue_post_process_bind_groups(
         });
 
         commands.entity(entity).insert(PostProcessBindGroup {
-            deferred,
             sampler,
             denoise_internal,
             denoise_render,
@@ -1159,6 +1112,7 @@ pub struct PostProcessNode {
         &'static ViewUniformOffset,
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
+        &'static DeferredBindGroup,
         &'static PostProcessBindGroup,
         &'static DynamicUniformIndex<FsrConstantsUniform>,
         &'static HikariSettings,
@@ -1197,6 +1151,7 @@ impl Node for PostProcessNode {
             view_uniform,
             previous_view_uniform,
             view_lights,
+            deferred_bind_group,
             post_process_bind_group,
             fsr_constants_uniform,
             settings,
@@ -1230,7 +1185,7 @@ impl Node for PostProcessNode {
                 view_lights.offset,
             ],
         );
-        pass.set_bind_group(1, &post_process_bind_group.deferred, &[]);
+        pass.set_bind_group(1, &deferred_bind_group.0, &[]);
         pass.set_bind_group(2, &post_process_bind_group.sampler, &[]);
 
         if settings.denoise {

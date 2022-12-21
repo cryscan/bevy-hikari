@@ -67,19 +67,24 @@ struct FragmentOutput {
     @location(0) position: vec4<f32>,
     @location(1) normal: vec4<f32>,
     @location(2) depth_gradient: vec2<f32>,
-    @location(3) instance_material: vec2<u32>,
+    @location(3) instance_material: vec2<f32>,
     @location(4) velocity_uv: vec4<f32>,
 };
 
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
-    let velocity = clip_to_uv(view.view_proj * in.world_position) - clip_to_uv(previous_view.view_proj * in.previous_world_position);
-
     var out: FragmentOutput;
+
     out.position = vec4<f32>(in.world_position.xyz, in.clip_position.z);
     out.normal = vec4<f32>(in.world_normal, 1.0);
     out.depth_gradient = vec2<f32>(dpdx(in.clip_position.z), dpdy(in.clip_position.z));
-    out.instance_material = vec2<u32>(instance_index.instance, instance_index.material);
+
+    let instance = f32(instance_index.instance) + 0.5;
+    let material = f32(instance_index.material) + 0.5;
+    out.instance_material = vec2<f32>(instance, material);
+
+    let velocity = clip_to_uv(view.view_proj * in.world_position) - clip_to_uv(previous_view.view_proj * in.previous_world_position);
     out.velocity_uv = vec4<f32>(velocity, in.uv);
+
     return out;
 }

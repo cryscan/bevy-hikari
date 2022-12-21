@@ -3,7 +3,7 @@ use crate::{
         MeshMaterialBindGroup, MeshMaterialBindGroupLayout, MeshMaterialSystems,
         TextureBindGroupLayout,
     },
-    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
+    prepass::{DeferredBindGroup, PrepassBindGroup, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariSettings, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
@@ -298,7 +298,7 @@ fn prepare_light_pipeline(
 pub struct LightTextures {
     /// Index of the current frame's output denoised texture.
     pub head: usize,
-    pub albedo: [TextureView; 2],
+    pub albedo: TextureView,
     pub variance: [TextureView; 3],
     pub render: [TextureView; 3],
 }
@@ -370,7 +370,7 @@ fn prepare_light_textures(
 
             let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT, scaled_size; 3];
             let render = create_texture_array![RENDER_TEXTURE_FORMAT, scaled_size; 3];
-            let albedo = create_texture_array![ALBEDO_TEXTURE_FORMAT, size; 2];
+            let albedo = create_texture(ALBEDO_TEXTURE_FORMAT, size);
 
             commands.entity(entity).insert(LightTextures {
                 head: counter.0 % 2,
@@ -454,7 +454,6 @@ fn queue_light_pipelines(
 
 #[derive(Component, Clone)]
 pub struct LightBindGroup {
-    pub deferred: BindGroup,
     pub noise: BindGroup,
     pub render: [BindGroup; 3],
     pub reservoir: [BindGroup; 3],
@@ -469,9 +468,9 @@ fn queue_light_bind_groups(
     images: Res<RenderAssets<Image>>,
     fallback: Res<FallbackImage>,
     reservoir_cache: Res<ReservoirCache>,
-    query: Query<(Entity, &PrepassTextures, &LightTextures), With<ExtractedCamera>>,
+    query: Query<(Entity, &LightTextures), With<ExtractedCamera>>,
 ) {
-    for (entity, prepass, light) in &query {
+    for (entity, light) in &query {
         let reservoirs = reservoir_cache.get(&entity).unwrap();
         if let Some(reservoir_bindings) = reservoirs
             .iter()
@@ -480,17 +479,6 @@ fn queue_light_bind_groups(
         {
             let current = light.head;
             let previous = 1 - current;
-
-            let deferred = match prepass.as_bind_group(
-                &pipeline.deferred_layout,
-                &render_device,
-                &images,
-                &fallback,
-            ) {
-                Ok(deferred) => deferred,
-                Err(_) => continue,
-            }
-            .bind_group;
 
             let noise = match noise.as_bind_group(
                 &pipeline.noise_layout,
@@ -513,7 +501,7 @@ fn queue_light_bind_groups(
                     entries: &[
                         BindGroupEntry {
                             binding: 0,
-                            resource: BindingResource::TextureView(&light.albedo[current]),
+                            resource: BindingResource::TextureView(&light.albedo),
                         },
                         BindGroupEntry {
                             binding: 1,
@@ -558,7 +546,6 @@ fn queue_light_bind_groups(
             });
 
             commands.entity(entity).insert(LightBindGroup {
-                deferred,
                 noise,
                 render,
                 reservoir,
@@ -575,6 +562,7 @@ pub struct LightNode {
         &'static ViewUniformOffset,
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
+        &'static DeferredBindGroup,
         &'static LightBindGroup,
         &'static HikariSettings,
     )>,
@@ -612,6 +600,7 @@ impl Node for LightNode {
             view_uniform,
             previous_view_uniform,
             view_lights,
+            deferred_bind_group,
             light_bind_group,
             settings,
         ) = match self.query.get_manual(world, entity) {
@@ -648,7 +637,7 @@ impl Node for LightNode {
                 view_lights.offset,
             ],
         );
-        pass.set_bind_group(1, &light_bind_group.deferred, &[]);
+        pass.set_bind_group(1, &deferred_bind_group.0, &[]);
         pass.set_bind_group(2, &mesh_material_bind_group.mesh_material, &[]);
         pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
         pass.set_bind_group(4, &light_bind_group.noise, &[]);

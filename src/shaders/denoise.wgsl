@@ -34,6 +34,12 @@ let F32_EPSILON: f32 = 1.1920929E-7;
 let F32_MAX: f32 = 3.402823466E+38;
 let U32_MAX: u32 = 0xFFFFFFFFu;
 
+fn jittered_deferred_uv(uv: vec2<f32>) -> vec2<f32> {
+    let texel_size = 1.0 / vec2<f32>(textureDimensions(position_texture));
+    let ratio = frame.upscale_ratio - 1.0;
+    return uv + select(0.5, -0.5, (frame.number & 1u) == 0u) * texel_size * ratio;
+}
+
 // Normal-weighting function (4.4.1)
 fn normal_weight(n0: vec3<f32>, n1: vec3<f32>) -> f32 {
     let exponent = 16.0;
@@ -54,8 +60,8 @@ fn luminance_weight(l0: f32, l1: f32, variance: f32) -> f32 {
     return exp((-abs(l0 - l1)) / (strictness * pow(variance, exponent) + eps));
 }
 
-fn instance_weight(i0: u32, i1: u32) -> f32 {
-    return f32(i0 == i1);
+fn instance_weight(i0: f32, i1: f32) -> f32 {
+    return max(0.0, 1.0 - abs(i0 - i1));
 }
 
 fn position_weight(p0: vec2<f32>, p1: vec2<f32>) -> f32 {
@@ -133,7 +139,7 @@ fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, output_size);
-    let deferred_uv = jittered_deferred_uv(uv, output_size, frame.number);
+    let deferred_uv = jittered_deferred_uv(uv);
 
     let albedo = textureSampleLevel(albedo_texture, nearest_sampler, deferred_uv, 0.0).rgb;
     var irradiance = textureSampleLevel(render_texture, nearest_sampler, uv, 0.0).rgb;
@@ -156,14 +162,13 @@ fn demodulation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 }
 
 fn accumulate_irradiance(
-    deferred_size: vec2<i32>,
     output_size: vec2<i32>,
     coords: vec2<i32>,
     offset: vec2<i32>,
     normal: vec3<f32>,
     depth: f32,
     depth_gradient: vec2<f32>,
-    instance: u32,
+    instance: f32,
     lum: f32,
     variance: f32,
     sum_irradiance: ptr<function, vec3<f32>>,
@@ -176,7 +181,7 @@ fn accumulate_irradiance(
 ) {
     let sample_coords = coords + offset * step_size();
     let sample_uv = coords_to_uv(sample_coords, output_size);
-    let sample_deferred_coords: vec2<i32> = jittered_deferred_coords(sample_uv, deferred_size, output_size, frame.number);
+    let sample_deferred_uv = jittered_deferred_uv(sample_uv);
     if any(sample_uv < vec2<f32>(0.0)) || any(sample_uv > vec2<f32>(1.0)) {
         return;
     }
@@ -186,9 +191,9 @@ fn accumulate_irradiance(
         return;
     }
 
-    let sample_normal = textureLoad(normal_texture, sample_deferred_coords, 0).xyz;
-    let sample_depth = textureLoad(position_texture, sample_deferred_coords, 0).w;
-    let sample_instance = textureLoad(instance_material_texture, sample_deferred_coords, 0).x;
+    let sample_normal = normalize(textureSampleLevel(normal_texture, nearest_sampler, sample_deferred_uv, 0.0).xyz);
+    let sample_depth = textureSampleLevel(position_texture, nearest_sampler, sample_deferred_uv, 0.0).w;
+    let sample_instance = textureSampleLevel(instance_material_texture, nearest_sampler, sample_deferred_uv, 0.0).x;
     let sample_luminance = luminance(irradiance);
 
     let w_normal = normal_weight(normal, sample_normal);
@@ -211,15 +216,14 @@ fn accumulate_irradiance(
 fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let input_size = textureDimensions(render_texture);
     let output_size = textureDimensions(output_texture);
-    let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, output_size);
-    let deferred_coords: vec2<i32> = jittered_deferred_coords(uv, deferred_size, output_size, frame.number);
+    let deferred_uv = jittered_deferred_uv(uv);
 
-    let depth = textureLoad(position_texture, deferred_coords, 0).w;
-    let depth_gradient = textureLoad(depth_gradient_texture, deferred_coords, 0).xy;
-    let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
-    let instance = textureLoad(instance_material_texture, deferred_coords, 0).x;
+    let depth = textureSampleLevel(position_texture, nearest_sampler, deferred_uv, 0.0).w;
+    let depth_gradient = textureSampleLevel(depth_gradient_texture, nearest_sampler, deferred_uv, 0.0).xy;
+    let normal = normalize(textureSampleLevel(normal_texture, nearest_sampler, deferred_uv, 0.0).xyz);
+    let instance = textureSampleLevel(instance_material_texture, nearest_sampler, deferred_uv, 0.0).x;
 
     if depth < F32_EPSILON {
         store_output(coords, vec4<f32>(0.0));
@@ -245,23 +249,23 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var ff_moment_2 = 0.0;
     var ff_count = 0.0;
 
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(-1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(0, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(-1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(-1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(0, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
+    accumulate_irradiance(output_size, coords, vec2<i32>(1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w, &ff_moment_1, &ff_moment_2, &ff_count);
 #else
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(-1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(0, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
-    accumulate_irradiance(deferred_size, output_size, coords, vec2<i32>(1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(-1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(0, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(1, -1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(-1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(1, 0), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(-1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(0, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
+    accumulate_irradiance(output_size, coords, vec2<i32>(1, 1), normal, depth, depth_gradient, instance, lum, variance, &sum_irradiance, &sum_w);
 #endif
 
     irradiance = select(sum_irradiance / sum_w, vec3<f32>(0.0), sum_w < 0.0001);
@@ -307,7 +311,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // color = select(mixed_color, color, any_is_nan_vec4(mixed_color) || previous_color.a == 0.0);
     // textureStore(radiance_texture, coords, color);
 
-    let albedo = textureLoad(albedo_texture, deferred_coords, 0);
+    let albedo = textureSampleLevel(albedo_texture, nearest_sampler, deferred_uv, 0.0);
     color *= albedo;
 #endif
 

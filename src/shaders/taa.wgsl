@@ -51,12 +51,6 @@ fn sample_render_texture(uv: vec2<f32>) -> vec3<f32> {
     return RGB_to_YCoCg(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
-fn sample_instance(uv: vec2<f32>, offset: vec2<f32>) -> u32 {
-    let size = vec2<f32>(textureDimensions(instance_material_texture));
-    let coords = vec2<i32>((uv + frame.upscale_ratio * offset) * size);
-    return textureLoad(previous_instance_material_texture, coords, 0).x;
-}
-
 fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
     let texel_size = 1.0 / vec2<f32>(textureDimensions(render_texture));
 
