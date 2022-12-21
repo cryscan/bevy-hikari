@@ -52,7 +52,7 @@ impl Plugin for MeshMaterialPlugin {
                     RenderStage::Prepare,
                     prepare_texture_bind_group_layout.label(MeshMaterialSystems::PrepareAssets),
                 )
-                .add_system_to_stage(RenderStage::Queue, queue_mesh_material_bind_group);
+                .add_system_to_stage(RenderStage::Queue, queue_mesh_material_bind_groups);
         }
     }
 }
@@ -675,13 +675,13 @@ fn prepare_texture_bind_group_layout(
 }
 
 #[derive(Resource)]
-pub struct MeshMaterialBindGroup {
+pub struct MeshMaterialBindGroups {
     pub mesh_material: BindGroup,
     pub texture: BindGroup,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn queue_mesh_material_bind_group(
+fn queue_mesh_material_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     mesh_pipeline: Res<MeshPipeline>,
@@ -798,18 +798,18 @@ fn queue_mesh_material_bind_group(
             })
         };
 
-        commands.insert_resource(MeshMaterialBindGroup {
+        commands.insert_resource(MeshMaterialBindGroups {
             mesh_material,
             texture,
         });
     } else {
-        commands.remove_resource::<MeshMaterialBindGroup>();
+        commands.remove_resource::<MeshMaterialBindGroups>();
     }
 }
 
 pub struct SetMeshMaterialBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetMeshMaterialBindGroup<I> {
-    type Param = SRes<MeshMaterialBindGroup>;
+    type Param = SRes<MeshMaterialBindGroups>;
 
     fn render<'w>(
         _view: Entity,

@@ -33,7 +33,7 @@ use bevy::{
         },
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
-        texture::{GpuImage, ImageSampler, TextureCache},
+        texture::{FallbackImage, GpuImage, ImageSampler, TextureCache},
         view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms, VisibleEntities},
         Extract, RenderApp, RenderStage,
     },
@@ -43,7 +43,7 @@ use bevy::{
 pub const POSITION_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 pub const NORMAL_FORMAT: TextureFormat = TextureFormat::Rgba8Snorm;
 pub const DEPTH_GRADIENT_FORMAT: TextureFormat = TextureFormat::Rg32Float;
-pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Uint;
+pub const INSTANCE_MATERIAL_FORMAT: TextureFormat = TextureFormat::Rg16Float;
 pub const VELOCITY_UV_FORMAT: TextureFormat = TextureFormat::Rgba32Float;
 
 pub struct PrepassPlugin;
@@ -61,7 +61,8 @@ impl Plugin for PrepassPlugin {
                 .add_system_to_stage(RenderStage::Extract, extract_prepass_camera_phases)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_depth_texture)
                 .add_system_to_stage(RenderStage::Queue, queue_prepass_meshes)
-                .add_system_to_stage(RenderStage::Queue, queue_prepass_bind_group)
+                .add_system_to_stage(RenderStage::Queue, queue_prepass_bind_groups)
+                .add_system_to_stage(RenderStage::Queue, queue_deferred_bind_group)
                 .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Prepass>);
         }
     }
@@ -290,7 +291,7 @@ pub struct PrepassTextures {
     pub normal: Handle<Image>,
     #[texture(2, visibility(all))]
     pub depth_gradient: Handle<Image>,
-    #[texture(3, visibility(all), sample_type = "u_int")]
+    #[texture(3, visibility(all))]
     pub instance_material: Handle<Image>,
     #[texture(4, visibility(all))]
     pub velocity_uv: Handle<Image>,
@@ -298,7 +299,7 @@ pub struct PrepassTextures {
     pub previous_position: Handle<Image>,
     #[texture(6, visibility(all))]
     pub previous_normal: Handle<Image>,
-    #[texture(7, visibility(all), sample_type = "u_int")]
+    #[texture(7, visibility(all))]
     pub previous_instance_material: Handle<Image>,
     #[texture(8, visibility(all))]
     pub previous_velocity_uv: Handle<Image>,
@@ -515,13 +516,13 @@ fn queue_prepass_meshes(
 }
 
 #[derive(Resource)]
-pub struct PrepassBindGroup {
+pub struct PrepassBindGroups {
     pub view: BindGroup,
     pub mesh: BindGroup,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn queue_prepass_bind_group(
+fn queue_prepass_bind_groups(
     mut commands: Commands,
     prepass_pipeline: Res<PrepassPipeline>,
     render_device: Res<RenderDevice>,
@@ -590,7 +591,30 @@ fn queue_prepass_bind_group(
                 },
             ],
         });
-        commands.insert_resource(PrepassBindGroup { view, mesh });
+        commands.insert_resource(PrepassBindGroups { view, mesh });
+    }
+}
+
+#[derive(Component)]
+pub struct DeferredBindGroup(pub BindGroup);
+
+fn queue_deferred_bind_group(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    images: Res<RenderAssets<Image>>,
+    fallback_image: Res<FallbackImage>,
+    cameras: Query<(Entity, &PrepassTextures), With<ExtractedCamera>>,
+) {
+    let layout = PrepassTextures::bind_group_layout(&render_device);
+
+    for (entity, prepass) in &cameras {
+        if let Ok(prepared_bind_group) =
+            prepass.as_bind_group(&layout, &render_device, &images, &fallback_image)
+        {
+            commands
+                .entity(entity)
+                .insert(DeferredBindGroup(prepared_bind_group.bind_group));
+        }
     }
 }
 
@@ -639,7 +663,7 @@ type DrawPrepass = (
 pub struct SetViewBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
     type Param = (
-        SRes<PrepassBindGroup>,
+        SRes<PrepassBindGroups>,
         SQuery<(
             Read<DynamicUniformIndex<FrameUniform>>,
             Read<ViewUniformOffset>,
@@ -677,7 +701,7 @@ impl<const I: usize> EntityRenderCommand for SetViewBindGroup<I> {
 pub struct SetMeshBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetMeshBindGroup<I> {
     type Param = (
-        Option<SRes<PrepassBindGroup>>,
+        Option<SRes<PrepassBindGroups>>,
         SQuery<(
             Read<DynamicUniformIndex<MeshUniform>>,
             Read<DynamicUniformIndex<PreviousMeshUniform>>,

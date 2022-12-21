@@ -1005,15 +1005,23 @@ fn compute_jacobian(q: Sample, r: Sample) -> f32 {
 }
 // -------- RESTIR  --------
 
+fn jittered_deferred_uv(uv: vec2<f32>, render_size: vec2<i32>, frame_number: u32) -> vec2<f32> {
+    let texel_size = 1.0 / vec2<f32>(render_size);
+    return uv + select(0.25, -0.25, (frame_number & 1u) == 0u) * texel_size;
+}
+
+fn jittered_deferred_coords(uv: vec2<f32>, deferred_size: vec2<i32>, render_size: vec2<i32>, frame_number: u32) -> vec2<i32> {
+    let deferred_uv = jittered_deferred_uv(uv, render_size, frame_number);
+    return vec2<i32>(deferred_uv * vec2<f32>(deferred_size));
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn full_screen_albedo(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let render_size = textureDimensions(albedo_texture);
-    let deferred_size = textureDimensions(position_texture);
     let coords = vec2<i32>(invocation_id.xy);
     let uv = coords_to_uv(coords, render_size);
 
-    let deferred_coords = jittered_deferred_coords(uv, deferred_size, render_size, frame.number);
-    let position_depth = textureLoad(position_texture, deferred_coords, 0);
+    let position_depth = textureLoad(position_texture, coords, 0);
     let position = vec4<f32>(position_depth.xyz, 1.0);
     let depth = position_depth.w;
 
@@ -1022,9 +1030,9 @@ fn full_screen_albedo(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         return;
     }
 
-    let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
-    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
-    let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
+    let normal = textureLoad(normal_texture, coords, 0).xyz;
+    let instance_material = vec2<u32>(textureLoad(instance_material_texture, coords, 0).xy);
+    let velocity_uv = textureLoad(velocity_uv_texture, coords, 0);
 
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);
     let view_direction = calculate_view(position, view.projection[3].w == 1.0);
@@ -1059,7 +1067,7 @@ fn direct_lit(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     let normal = textureLoad(normal_texture, deferred_coords, 0).xyz;
-    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
+    let instance_material = vec2<u32>(textureLoad(instance_material_texture, deferred_coords, 0).xy);
     let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
@@ -1277,7 +1285,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
     }
 
     let normal = normalize(textureLoad(normal_texture, deferred_coords, 0).xyz);
-    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
+    let instance_material = vec2<u32>(textureLoad(instance_material_texture, deferred_coords, 0).xy);
     let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
 
     let noise_id = frame.number % NOISE_TEXTURE_COUNT;
@@ -1521,7 +1529,7 @@ fn spatial_reuse(
         return;
     }
 
-    let instance_material = textureLoad(instance_material_texture, deferred_coords, 0).xy;
+    let instance_material = vec2<u32>(textureLoad(instance_material_texture, deferred_coords, 0).xy);
     let velocity_uv = textureLoad(velocity_uv_texture, deferred_coords, 0);
 
     let surface = retreive_surface(instance_material.y, velocity_uv.zw);

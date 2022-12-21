@@ -1,9 +1,9 @@
 use crate::{
     mesh_material::{
-        MeshMaterialBindGroup, MeshMaterialBindGroupLayout, MeshMaterialSystems,
+        MeshMaterialBindGroups, MeshMaterialBindGroupLayout, MeshMaterialSystems,
         TextureBindGroupLayout,
     },
-    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
+    prepass::{PrepassBindGroups, PrepassPipeline, PrepassTextures, DeferredBindGroup},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariSettings, NoiseTextures, LIGHT_SHADER_HANDLE, WORKGROUP_SIZE,
 };
@@ -18,7 +18,7 @@ use bevy::{
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{FallbackImage, TextureCache},
-        view::ViewUniformOffset,
+        view::{ViewTarget, ViewUniformOffset},
         RenderApp, RenderStage,
     },
     utils::HashMap,
@@ -26,9 +26,7 @@ use bevy::{
 use itertools::multizip;
 use serde::Serialize;
 
-pub const ALBEDO_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const VARIANCE_TEXTURE_FORMAT: TextureFormat = TextureFormat::R32Float;
-pub const RENDER_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct LightPlugin;
 impl Plugin for LightPlugin {
@@ -202,7 +200,7 @@ fn prepare_light_pipeline(
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::StorageTexture {
                     access: StorageTextureAccess::ReadWrite,
-                    format: ALBEDO_TEXTURE_FORMAT,
+                    format: ViewTarget::TEXTURE_FORMAT_HDR,
                     view_dimension: TextureViewDimension::D2,
                 },
                 count: None,
@@ -224,7 +222,7 @@ fn prepare_light_pipeline(
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::StorageTexture {
                     access: StorageTextureAccess::ReadWrite,
-                    format: RENDER_TEXTURE_FORMAT,
+                    format: ViewTarget::TEXTURE_FORMAT_HDR,
                     view_dimension: TextureViewDimension::D2,
                 },
                 count: None,
@@ -363,14 +361,14 @@ fn prepare_light_textures(
             }
 
             macro_rules! create_texture_array {
-                [$texture_format:ident, $size:ident; $count:literal] => {
+                [$texture_format:expr, $size:ident; $count:literal] => {
                     [(); $count].map(|_| create_texture($texture_format, $size))
                 };
             }
 
             let variance = create_texture_array![VARIANCE_TEXTURE_FORMAT, scaled_size; 3];
-            let render = create_texture_array![RENDER_TEXTURE_FORMAT, scaled_size; 3];
-            let albedo = create_texture_array![ALBEDO_TEXTURE_FORMAT, size; 2];
+            let render = create_texture_array![ViewTarget::TEXTURE_FORMAT_HDR, scaled_size; 3];
+            let albedo = create_texture_array![ViewTarget::TEXTURE_FORMAT_HDR, size; 2];
 
             commands.entity(entity).insert(LightTextures {
                 head: counter.0 % 2,
@@ -452,9 +450,8 @@ fn queue_light_pipelines(
     })
 }
 
-#[derive(Component, Clone)]
-pub struct LightBindGroup {
-    pub deferred: BindGroup,
+#[derive(Component)]
+pub struct LightBindGroups {
     pub noise: BindGroup,
     pub render: [BindGroup; 3],
     pub reservoir: [BindGroup; 3],
@@ -467,11 +464,11 @@ fn queue_light_bind_groups(
     pipeline: Res<LightPipeline>,
     noise: Res<NoiseTextures>,
     images: Res<RenderAssets<Image>>,
-    fallback: Res<FallbackImage>,
+    fallback_images: Res<FallbackImage>,
     reservoir_cache: Res<ReservoirCache>,
-    query: Query<(Entity, &PrepassTextures, &LightTextures), With<ExtractedCamera>>,
+    query: Query<(Entity, &LightTextures), With<ExtractedCamera>>,
 ) {
-    for (entity, prepass, light) in &query {
+    for (entity, light) in &query {
         let reservoirs = reservoir_cache.get(&entity).unwrap();
         if let Some(reservoir_bindings) = reservoirs
             .iter()
@@ -481,22 +478,11 @@ fn queue_light_bind_groups(
             let current = light.head;
             let previous = 1 - current;
 
-            let deferred = match prepass.as_bind_group(
-                &pipeline.deferred_layout,
-                &render_device,
-                &images,
-                &fallback,
-            ) {
-                Ok(deferred) => deferred,
-                Err(_) => continue,
-            }
-            .bind_group;
-
             let noise = match noise.as_bind_group(
                 &pipeline.noise_layout,
                 &render_device,
                 &images,
-                &fallback,
+                &fallback_images,
             ) {
                 Ok(noise) => noise,
                 Err(_) => continue,
@@ -557,8 +543,7 @@ fn queue_light_bind_groups(
                 })
             });
 
-            commands.entity(entity).insert(LightBindGroup {
-                deferred,
+            commands.entity(entity).insert(LightBindGroups {
                 noise,
                 render,
                 reservoir,
@@ -575,7 +560,8 @@ pub struct LightNode {
         &'static ViewUniformOffset,
         &'static PreviousViewUniformOffset,
         &'static ViewLightsUniformOffset,
-        &'static LightBindGroup,
+        &'static DeferredBindGroup,
+        &'static LightBindGroups,
         &'static HikariSettings,
     )>,
 }
@@ -612,18 +598,19 @@ impl Node for LightNode {
             view_uniform,
             previous_view_uniform,
             view_lights,
-            light_bind_group,
+            deferred_bind_group,
+            light_bind_groups,
             settings,
         ) = match self.query.get_manual(world, entity) {
             Ok(query) => query,
             Err(_) => return Ok(()),
         };
-        let view_bind_group = match world.get_resource::<PrepassBindGroup>() {
-            Some(bind_group) => &bind_group.view,
+        let view_bind_group = match world.get_resource::<PrepassBindGroups>() {
+            Some(result) => &result.view,
             None => return Ok(()),
         };
-        let mesh_material_bind_group = match world.get_resource::<MeshMaterialBindGroup>() {
-            Some(bind_group) => bind_group,
+        let (mesh_material_bind_group, texture_bind_group) = match world.get_resource::<MeshMaterialBindGroups>() {
+            Some(result) => (&result.mesh_material, &result.texture),
             None => return Ok(()),
         };
 
@@ -648,15 +635,15 @@ impl Node for LightNode {
                 view_lights.offset,
             ],
         );
-        pass.set_bind_group(1, &light_bind_group.deferred, &[]);
-        pass.set_bind_group(2, &mesh_material_bind_group.mesh_material, &[]);
-        pass.set_bind_group(3, &mesh_material_bind_group.texture, &[]);
-        pass.set_bind_group(4, &light_bind_group.noise, &[]);
+        pass.set_bind_group(1, &deferred_bind_group.0, &[]);
+        pass.set_bind_group(2, &mesh_material_bind_group, &[]);
+        pass.set_bind_group(3, &texture_bind_group, &[]);
+        pass.set_bind_group(4, &light_bind_groups.noise, &[]);
 
         // Full screen albedo pass.
         if let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipelines.full_screen_albedo) {
-            pass.set_bind_group(5, &light_bind_group.render[0], &[]);
-            pass.set_bind_group(6, &light_bind_group.reservoir[0], &[]);
+            pass.set_bind_group(5, &light_bind_groups.render[0], &[]);
+            pass.set_bind_group(6, &light_bind_groups.reservoir[0], &[]);
             pass.set_pipeline(pipeline);
 
             let count = (size + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -665,8 +652,8 @@ impl Node for LightNode {
 
         // Direct, emissive and indirect passes.
         for (render, reservoir, temporal_pipeline, spatial_pipeline) in multizip((
-            light_bind_group.render.iter(),
-            light_bind_group.reservoir.iter(),
+            light_bind_groups.render.iter(),
+            light_bind_groups.reservoir.iter(),
             [
                 &pipelines.direct_lit,
                 &pipelines.direct_emissive,

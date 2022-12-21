@@ -35,6 +35,7 @@ pub mod light;
 pub mod mesh_material;
 pub mod overlay;
 pub mod post_process;
+pub mod post_process_fs;
 pub mod prelude;
 pub mod prepass;
 pub mod transform;

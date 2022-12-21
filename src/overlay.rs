@@ -1,5 +1,5 @@
 use crate::{
-    light::LightTextures, post_process::PostProcessTextures, prepass::PrepassBindGroup,
+    light::LightTextures, post_process::PostProcessTextures, prepass::PrepassBindGroups,
     HikariSettings, Taa, Upscale, OVERLAY_SHADER_HANDLE, QUAD_MESH_HANDLE,
 };
 use bevy::{
@@ -354,7 +354,7 @@ impl Node for OverlayNode {
             Err(_) => return Ok(()),
         };
 
-        if !world.contains_resource::<PrepassBindGroup>() {
+        if !world.contains_resource::<PrepassBindGroups>() {
             return Ok(());
         }
 

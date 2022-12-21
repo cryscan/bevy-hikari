@@ -1,6 +1,6 @@
 use crate::{
     light::{LightTextures, VARIANCE_TEXTURE_FORMAT},
-    prepass::{PrepassBindGroup, PrepassPipeline, PrepassTextures},
+    prepass::{PrepassBindGroups, PrepassPipeline, PrepassTextures},
     view::{FrameCounter, FrameUniform, PreviousViewUniformOffset},
     HikariSettings, Taa, Upscale, DENOISE_SHADER_HANDLE, FSR1_EASU_SHADER_HANDLE,
     FSR1_RCAS_SHADER_HANDLE, SMAA_SHADER_HANDLE, TAA_SHADER_HANDLE, TONE_MAPPING_SHADER_HANDLE,
@@ -1204,7 +1204,7 @@ impl Node for PostProcessNode {
             Ok(query) => query,
             Err(_) => return Ok(()),
         };
-        let view_bind_group = match world.get_resource::<PrepassBindGroup>() {
+        let view_bind_group = match world.get_resource::<PrepassBindGroups>() {
             Some(bind_group) => &bind_group.view,
             None => return Ok(()),
         };
