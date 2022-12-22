@@ -2,6 +2,7 @@
 
 struct Frame {
     kernel: mat3x3<f32>,
+    halton: array<vec4<f32>, 8>,
     clear_color: vec4<f32>,
     number: u32,
     direct_validate_interval: u32,

@@ -105,6 +105,7 @@ fn frame_counter_system(
 #[derive(Debug, Default, Clone, Copy, Component, ShaderType)]
 pub struct FrameUniform {
     pub kernel: Mat3,
+    pub halton: [Vec4; 8],
     pub clear_color: Vec4,
     pub number: u32,
     pub direct_validate_interval: u32,
@@ -120,6 +121,22 @@ pub struct FrameUniform {
     pub max_indirect_luminance: f32,
     pub upscale_ratio: f32,
 }
+
+const KERNEL: Mat3 = Mat3 {
+    x_axis: Vec3::new(0.0625, 0.125, 0.0625),
+    y_axis: Vec3::new(0.125, 0.25, 0.125),
+    z_axis: Vec3::new(0.0625, 0.125, 0.0625),
+};
+const HALTON: [Vec4; 8] = [
+    Vec4::new(0.000000, 0.000000, 0.500000, 0.333333),
+    Vec4::new(0.250000, 0.666667, 0.750000, 0.111111),
+    Vec4::new(0.125000, 0.444444, 0.625000, 0.777778),
+    Vec4::new(0.375000, 0.222222, 0.875000, 0.555556),
+    Vec4::new(0.062500, 0.888889, 0.562500, 0.037037),
+    Vec4::new(0.312500, 0.370370, 0.812500, 0.703704),
+    Vec4::new(0.187500, 0.148148, 0.687500, 0.481481),
+    Vec4::new(0.437500, 0.814815, 0.937500, 0.259259),
+];
 
 impl ExtractComponent for FrameUniform {
     type Query = (&'static HikariSettings, &'static FrameCounter);
@@ -142,11 +159,6 @@ impl ExtractComponent for FrameUniform {
             ..
         } = settings.clone();
 
-        let kernel = Mat3 {
-            x_axis: Vec3::new(0.0625, 0.125, 0.0625),
-            y_axis: Vec3::new(0.125, 0.25, 0.125),
-            z_axis: Vec3::new(0.0625, 0.125, 0.0625),
-        };
         let number = counter.0 as u32;
         let direct_validate_interval = direct_validate_interval as u32;
         let emissive_validate_interval = emissive_validate_interval as u32;
@@ -160,7 +172,8 @@ impl ExtractComponent for FrameUniform {
         let upscale_ratio = settings.upscale.ratio();
 
         Self {
-            kernel,
+            kernel: KERNEL,
+            halton: HALTON,
             clear_color,
             number,
             direct_validate_interval,

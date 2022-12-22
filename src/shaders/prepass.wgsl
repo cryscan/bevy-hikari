@@ -27,6 +27,12 @@ struct VertexOutput {
     @location(3) uv: vec2<f32>,
 };
 
+fn frame_jitter() -> vec2<f32> {
+    let index = frame.number % 15u;
+    let halton: vec4<f32> = frame.halton[index >> 1u];
+    return select(halton.zw, halton.xy, (index & 1u) == 0u);
+}
+
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var model = mesh.model;
@@ -40,7 +46,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.previous_world_position = mesh_position_local_to_world(previous_mesh.model, vertex_position);
 
 #ifdef TEMPORAL_ANTI_ALIASING
-    jitter = 2.0 * (frame_jitter(frame.number, 13u) - 0.5) * texel_size;
+    jitter = 2.0 * frame_jitter() * texel_size;
 #endif // TEMPORAL_ANTI_ALIASING
 #ifdef SMAA_TU4X
     // +-+-+

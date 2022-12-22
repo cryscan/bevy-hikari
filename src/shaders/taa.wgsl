@@ -155,7 +155,7 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     // Blend current and past sample
-    var output = mix(previous_color, current_color, 0.1);
+    var output = mix(previous_color, current_color, 0.1 / frame.upscale_ratio);
 
     textureStore(output_texture, coords, vec4<f32>(output, original_color.a));
 }
