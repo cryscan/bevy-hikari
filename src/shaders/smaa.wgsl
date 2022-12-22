@@ -50,7 +50,7 @@ fn sample_previous_texture(uv: vec2<f32>) -> vec3<f32> {
 }
 
 fn nearest_velocity(uv: vec2<f32>) -> vec2<f32> {
-    let texel_size = 1.0 / vec2<f32>(textureDimensions(render_texture));
+    let texel_size = 1.0 / vec2<f32>(textureDimensions(position_texture));
 
     var depths: vec4<f32>;
     depths[0] = textureSampleLevel(position_texture, nearest_sampler, uv + vec2<f32>(texel_size.x, texel_size.y), 0.0).w;
