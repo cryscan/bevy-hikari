@@ -28,7 +28,11 @@ struct VertexOutput {
 };
 
 fn frame_jitter() -> vec2<f32> {
-    let index = frame.number % 15u;
+#ifdef SMAA_TU4X
+    let index = (frame.number >> 1u) & 15u;
+#else
+    let index = frame.number & 15u;
+#endif
     let halton: vec4<f32> = frame.halton[index >> 1u];
     return select(halton.zw, halton.xy, (index & 1u) == 0u);
 }

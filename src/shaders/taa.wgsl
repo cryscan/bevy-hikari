@@ -93,6 +93,33 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let previous_uv = uv - velocity;
     let boundary_miss = any(abs(previous_uv - 0.5) > vec2<f32>(0.5));
 
+    var uv_biases: array<vec2<f32>, 5>;
+    uv_biases[0] = vec2<f32>(0.0);
+    uv_biases[1] = vec2<f32>(1.5, 1.5) * texel_size;
+    uv_biases[2] = vec2<f32>(-1.5, 1.5) * texel_size;
+    uv_biases[3] = vec2<f32>(1.5, -1.5) * texel_size;
+    uv_biases[4] = vec2<f32>(-1.5, -1.5) * texel_size;
+
+    let current_position_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0);
+    if current_position_depth.w == 0.0 {
+        textureStore(output_texture, coords, frame.clear_color);
+    }
+
+    var depth_miss = current_position_depth.w == 0.0;
+    var position_miss = current_position_depth.w == 0.0;
+
+    for (var i = 0u; i < 5u; i += 1u) {
+        let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv + uv_biases[i]);
+        let depth_ratio = select(vec4<f32>(current_position_depth.w) / previous_depths, vec4<f32>(1.0), previous_depths == vec4<f32>(0.0));
+        depth_miss = depth_miss || any(depth_ratio < vec4<f32>(0.95));
+
+        let previous_position = textureSampleLevel(previous_position_texture, nearest_sampler, previous_uv + uv_biases[i], 0.0).xyz;
+        position_miss = position_miss || distance(current_position_depth.xyz, previous_position) > 0.5;
+    }
+
+    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
+    let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
+
     let sample_position = (uv - velocity) * size;
     let texel_position_1 = floor(sample_position - 0.5) + 0.5;
     let f = sample_position - texel_position_1;
@@ -111,28 +138,6 @@ fn taa_jasmine(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_12.y)) * w12.x * w12.y;
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_3.x, texel_position_12.y)) * w3.x * w12.y;
     previous_color += sample_previous_render_texture(vec2<f32>(texel_position_12.x, texel_position_3.y)) * w12.x * w3.y;
-
-    var uv_biases: array<vec2<f32>, 5>;
-    uv_biases[0] = vec2<f32>(0.0);
-    uv_biases[1] = vec2<f32>(1.5, 1.5) * texel_size;
-    uv_biases[2] = vec2<f32>(-1.5, 1.5) * texel_size;
-    uv_biases[3] = vec2<f32>(1.5, -1.5) * texel_size;
-    uv_biases[4] = vec2<f32>(-1.5, -1.5) * texel_size;
-
-    let current_position_depth = textureSampleLevel(position_texture, nearest_sampler, uv, 0.0);
-    var depth_miss = current_position_depth.w == 0.0;
-    var position_miss = current_position_depth.w == 0.0;
-    for (var i = 0u; i < 5u; i += 1u) {
-        let previous_depths = textureGather(3, previous_position_texture, linear_sampler, previous_uv + uv_biases[i]);
-        let depth_ratio = select(vec4<f32>(current_position_depth.w) / previous_depths, vec4<f32>(1.0), previous_depths == vec4<f32>(0.0));
-        depth_miss = depth_miss || any(depth_ratio < vec4<f32>(0.95));
-
-        let previous_position = textureSampleLevel(previous_position_texture, nearest_sampler, previous_uv + uv_biases[i], 0.0).xyz;
-        position_miss = position_miss || distance(current_position_depth.xyz, previous_position) > 0.5;
-    }
-
-    let previous_velocity = textureSampleLevel(previous_velocity_uv_texture, nearest_sampler, previous_uv, 0.0).xy;
-    let velocity_miss = distance(velocity, previous_velocity) > 0.00005;
 
     if boundary_miss || (position_miss && velocity_miss && depth_miss) {
         // Constrain past sample with 3x3 YCoCg variance clipping to handle disocclusion
