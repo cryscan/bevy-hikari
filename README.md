@@ -24,6 +24,7 @@ For the old version (0.1.x) which uses voxel cone tracing with anisotropic mip-m
 
 ## Progress
 - [x] Extraction and preparation of mesh assets and instances
+- [ ] Asynchronous building of acceleration structures
 - [x] G-Buffer generation
 - [x] N-bounce indirect lighting
 - [ ] Transparency
