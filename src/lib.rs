@@ -486,20 +486,21 @@ pub enum Upscale {
         /// Renders the main pass and post process on a low resolution texture.
         ratio: f32,
     },
-    None,
 }
 
 impl Default for Upscale {
     fn default() -> Self {
-        Self::SmaaTu4x { ratio: 2.0 }
+        Self::SMAA_TU_2_0
     }
 }
 
 impl Upscale {
+    pub const SMAA_TU_1_0: Upscale = Upscale::SmaaTu4x { ratio: 1.0 };
+    pub const SMAA_TU_2_0: Upscale = Upscale::SmaaTu4x { ratio: 2.0 };
+
     pub fn ratio(&self) -> f32 {
         match self {
             Upscale::Fsr1 { ratio, .. } | Upscale::SmaaTu4x { ratio } => ratio.clamp(1.0, 2.0),
-            Upscale::None => 1.0,
         }
     }
 

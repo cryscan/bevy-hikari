@@ -721,7 +721,6 @@ fn prepare_post_process_textures(
                     create_texture_array![HDR_TEXTURE_FORMAT, scale; 2]
                 }
                 Upscale::Fsr1 { .. } => create_texture_array![HDR_TEXTURE_FORMAT, 1.0; 2],
-                Upscale::None => create_texture_array![fallback; 2],
             };
 
             let taa_output = match settings.taa {

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.16] - 2023-2-8
+### Changed
+- Remove `Upscale::None` variant.
+
 ## [0.3.15] - 2022-12-24
 ### Changed
 - Make enabling/disabling emissive spatial reuse a separate config item (default to false).
@@ -78,6 +82,7 @@ This is mainly a bug-fix and performance upgrade.
 ### Removed
 - Disable denoiser's temporal accumulation. ([97c4081](https://github.com/cryscan/bevy-hikari/tree/97c4081df6dee24d6e11df2ea0059a4126795d62))
 
+[0.3.16]: https://github.com/cryscan/bevy-hikari/commits/v0.3.16
 [0.3.15]: https://github.com/cryscan/bevy-hikari/commits/v0.3.15
 [0.3.14]: https://github.com/cryscan/bevy-hikari/commits/v0.3.14
 [0.3.10]: https://github.com/cryscan/bevy-hikari/commits/v0.3.10
