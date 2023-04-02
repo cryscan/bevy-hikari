@@ -11,7 +11,7 @@ var<uniform> instance_index: InstanceIndex;
 
 #import bevy_pbr::mesh_functions
 
-let PI: f32 = 3.1415926;
+const PI: f32 = 3.1415926;
 
 struct Vertex {
     @location(0) position: vec3<f32>,

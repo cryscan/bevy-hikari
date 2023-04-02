@@ -40,7 +40,11 @@ impl Plugin for OverlayPlugin {
                 .init_resource::<OverlayPipeline>()
                 .init_resource::<SpecializedMeshPipelines<OverlayPipeline>>()
                 .add_render_command::<Overlay, DrawOverlay>()
-                .add_system(extract_overlay_camera_phases.in_set(RenderSet::ExtractCommands))
+                .add_system(
+                    extract_overlay_camera_phases
+                        .in_schedule(ExtractSchedule)
+                        .in_set(RenderSet::ExtractCommands),
+                )
                 .add_system(queue_overlay_meshes.in_set(RenderSet::Queue))
                 .add_system(queue_overlay_bind_groups.in_set(RenderSet::Queue));
         }
@@ -108,7 +112,10 @@ impl SpecializedMeshPipeline for OverlayPipeline {
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
         let bind_group_layout = vec![self.input_layout.clone()];
 
-        let mut shader_defs = vec![];
+        let mut shader_defs = vec![
+            ShaderDefVal::Int("MAX_CASCADES_PER_LIGHT".into(), 0),
+            ShaderDefVal::Int("MAX_DIRECTIONAL_LIGHTS".into(), 0),
+        ];
         let mut format = TextureFormat::bevy_default();
         if key.contains(MeshPipelineKey::HDR) {
             shader_defs.push("HDR".into());

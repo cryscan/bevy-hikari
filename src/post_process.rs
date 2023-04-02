@@ -406,7 +406,10 @@ impl SpecializedComputePipeline for PostProcessPipeline {
             .unwrap()
             .into();
 
-        let mut shader_defs: Vec<ShaderDefVal> = vec![];
+        let mut shader_defs: Vec<ShaderDefVal> = vec![
+            ShaderDefVal::Int("MAX_CASCADES_PER_LIGHT".into(), 0),
+            ShaderDefVal::Int("MAX_DIRECTIONAL_LIGHTS".into(), 0),
+        ];
         if key.contains(PostProcessPipelineKey::FIREFLY_FILTERING_BITS) {
             shader_defs.push("FIREFLY_FILTERING".into());
         }
@@ -420,7 +423,10 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.denoise_internal_layout.clone(),
                     self.denoise_render_layout.clone(),
                 ];
-                shader_defs.push(format!("DENOISE_LEVEL_{}", key.denoise_level()).into());
+                shader_defs.push(ShaderDefVal::UInt(
+                    "DENOISE_LEVEL".into(),
+                    key.denoise_level(),
+                ));
                 let shader = DENOISE_SHADER_HANDLE.typed();
                 (layout, shader)
             }

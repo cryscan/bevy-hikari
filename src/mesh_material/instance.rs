@@ -63,7 +63,11 @@ where
         );
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_system(extract_instances::<M>.in_set(RenderSet::ExtractCommands));
+            render_app.add_system(
+                extract_instances::<M>
+                    .in_schedule(ExtractSchedule)
+                    .in_set(RenderSet::ExtractCommands),
+            );
         }
     }
 }

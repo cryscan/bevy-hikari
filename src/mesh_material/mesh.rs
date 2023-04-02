@@ -22,7 +22,11 @@ impl Plugin for MeshPlugin {
             render_app
                 .init_resource::<GpuMeshes>()
                 .init_resource::<MeshRenderAssets>()
-                .add_system(extract_mesh_assets.in_set(RenderSet::ExtractCommands))
+                .add_system(
+                    extract_mesh_assets
+                        .in_schedule(ExtractSchedule)
+                        .in_set(RenderSet::ExtractCommands),
+                )
                 .add_system(
                     prepare_mesh_assets
                         .in_set(MeshMaterialSystems::PrepareAssets)

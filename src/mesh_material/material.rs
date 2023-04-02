@@ -44,7 +44,11 @@ where
 {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_system(extract_material_assets::<M>.in_set(RenderSet::ExtractCommands));
+            render_app.add_system(
+                extract_material_assets::<M>
+                    .in_schedule(ExtractSchedule)
+                    .in_set(RenderSet::ExtractCommands),
+            );
         }
     }
 }

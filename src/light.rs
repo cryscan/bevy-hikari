@@ -138,7 +138,10 @@ impl SpecializedComputePipeline for LightPipeline {
     type Key = LightPipelineKey;
 
     fn specialize(&self, key: Self::Key) -> ComputePipelineDescriptor {
-        let mut shader_defs = vec![];
+        let mut shader_defs = vec![
+            ShaderDefVal::Int("MAX_CASCADES_PER_LIGHT".into(), 0),
+            ShaderDefVal::Int("MAX_DIRECTIONAL_LIGHTS".into(), 0),
+        ];
         if key.texture_count() == 0 {
             shader_defs.push("NO_TEXTURE".into());
         }

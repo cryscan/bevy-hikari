@@ -58,7 +58,11 @@ impl Plugin for PrepassPlugin {
                 .init_resource::<PrepassPipeline>()
                 .init_resource::<SpecializedMeshPipelines<PrepassPipeline>>()
                 .add_render_command::<Prepass, DrawPrepass>()
-                .add_system(extract_prepass_camera_phases.in_set(RenderSet::ExtractCommands))
+                .add_system(
+                    extract_prepass_camera_phases
+                        .in_schedule(ExtractSchedule)
+                        .in_set(RenderSet::ExtractCommands),
+                )
                 .add_system(queue_prepass_depth_texture.in_set(RenderSet::Queue))
                 .add_system(queue_prepass_meshes.in_set(RenderSet::Queue))
                 .add_system(queue_prepass_bind_group.in_set(RenderSet::Queue))
@@ -190,7 +194,10 @@ impl SpecializedMeshPipeline for PrepassPipeline {
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
         let bind_group_layout = vec![self.view_layout.clone(), self.mesh_layout.clone()];
 
-        let mut shader_defs = vec![];
+        let mut shader_defs = vec![
+            ShaderDefVal::Int("MAX_CASCADES_PER_LIGHT".into(), 1),
+            ShaderDefVal::Int("MAX_DIRECTIONAL_LIGHTS".into(), 1),
+        ];
         if key.temporal_anti_aliasing {
             shader_defs.push("TEMPORAL_ANTI_ALIASING".into());
         }
@@ -826,11 +833,12 @@ impl Node for PrepassNode {
 
             let draw_functions = world.resource::<DrawFunctions<Prepass>>();
 
+            let render_device = render_context.render_device().clone();
             let render_pass = render_context
                 .command_encoder()
                 .begin_render_pass(&pass_descriptor);
             let mut draw_functions = draw_functions.write();
-            let mut tracked_pass = TrackedRenderPass::new(todo!(), render_pass);
+            let mut tracked_pass = TrackedRenderPass::new(&render_device, render_pass);
             if let Some(viewport) = camera.viewport.as_ref() {
                 tracked_pass.set_camera_viewport(viewport);
             }

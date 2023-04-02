@@ -223,37 +223,37 @@ fn store_spatial_reservoir(index: i32, r: Reservoir) {
 }
 // -------- RESERVOIR   --------
 
-let TAU: f32 = 6.283185307;
-let INV_TAU: f32 = 0.159154943;
+const TAU: f32 = 6.283185307;
+const INV_TAU: f32 = 0.159154943;
 
-let F32_EPSILON: f32 = 1.1920929E-7;
-let F32_MAX: f32 = 3.402823466E+38;
-let U32_MAX: u32 = 0xFFFFFFFFu;
-let BVH_LEAF_FLAG: u32 = 0x80000000u;
+const F32_EPSILON: f32 = 1.1920929E-7;
+const F32_MAX: f32 = 3.402823466E+38;
+const U32_MAX: u32 = 0xFFFFFFFFu;
+const BVH_LEAF_FLAG: u32 = 0x80000000u;
 
-let RAY_BIAS: f32 = 0.02;
-let DISTANCE_MAX: f32 = 65535.0;
-let NOISE_TEXTURE_COUNT: u32 = 16u;
-let GOLDEN_RATIO: f32 = 1.618033989;
-let POSITION_MISS_THRESHOLD: f32 = 0.5;
-let MAX_VARIANCE: f32 = 10.0;
+const RAY_BIAS: f32 = 0.02;
+const DISTANCE_MAX: f32 = 65535.0;
+const NOISE_TEXTURE_COUNT: u32 = 16u;
+const GOLDEN_RATIO: f32 = 1.618033989;
+const POSITION_MISS_THRESHOLD: f32 = 0.5;
+const MAX_VARIANCE: f32 = 10.0;
 
-let DONT_EXCLUDE: u32 = 0xFFFFFFFFu;
-let DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
-let DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
-let SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
+const DONT_EXCLUDE: u32 = 0xFFFFFFFFu;
+const DONT_SAMPLE_DIRECTIONAL_LIGHT: u32 = 0xFFFFFFFFu;
+const DONT_SAMPLE_EMISSIVE: u32 = 0x80000000u;
+const SAMPLE_ALL_EMISSIVE: u32 = 0xFFFFFFFFu;
 
 #ifdef EMISSIVE_LIT
-let SPATIAL_REUSE_COUNT: u32 = 8u;
-let SPATIAL_REUSE_RANGE: f32 = 10.0;
+const SPATIAL_REUSE_COUNT: u32 = 8u;
+const SPATIAL_REUSE_RANGE: f32 = 10.0;
 #else
-let SPATIAL_REUSE_COUNT: u32 = 16u;
-let SPATIAL_REUSE_RANGE: f32 = 20.0;
+const SPATIAL_REUSE_COUNT: u32 = 16u;
+const SPATIAL_REUSE_RANGE: f32 = 20.0;
 #endif
-let SPATIAL_REUSE_TAPS: u32 = 4u;
+const SPATIAL_REUSE_TAPS: u32 = 4u;
 
-let DIRECT_VALIDATION_FRAME_SAMPLE_THRESHOLD: u32 = 4u;
-let SPATIAL_VARIANCE_SAMPLE_THRESHOLD: u32 = 4u;
+const DIRECT_VALIDATION_FRAME_SAMPLE_THRESHOLD: u32 = 4u;
+const SPATIAL_VARIANCE_SAMPLE_THRESHOLD: u32 = 4u;
 
 // -------- TRACING     ---------
 struct Ray {
@@ -695,7 +695,7 @@ fn select_light_candidate(
             candidate.p = dot(delta, delta) / (abs(dot(ray.direction, (*info).normal) * emissive.surface_area));
             candidate.p = candidate.p / count;
         } else {
-            // Fallback to sample directional        
+            // Fallback to sample directional
             *info = empty_hit_info(ray.origin, ray.direction);
 
             candidate.emissive_instance = DONT_SAMPLE_EMISSIVE;
@@ -1377,7 +1377,7 @@ fn indirect_lit_ambient(@builtin(global_invocation_id) invocation_id: vec3<u32>)
 
                 s.radiance += vec4<f32>(color_transport * out_radiance, 1.0);
             }
-            
+
             // Env BRDF approximates the reflection of the surface regardless of the input direction,
             // which may be a good choice for color transport.
             color_transport *= env_brdf(bounce_view_direction, bounce_sample.sample_normal, surface);
