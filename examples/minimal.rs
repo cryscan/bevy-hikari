@@ -1,16 +1,15 @@
-use bevy::{prelude::*, render::camera::CameraRenderGraph};
+use bevy::{prelude::*, render::camera::CameraRenderGraph, window::WindowResolution};
 use bevy_hikari::prelude::*;
 use std::f32::consts::PI;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            // window: WindowDescriptor {
-            //     width: 800.0,
-            //     height: 600.0,
-            //     ..Default::default()
-            // },
-            ..Default::default()
+            primary_window: Some(Window {
+                resolution: WindowResolution::new(800., 600.),
+                ..default()
+            }),
+            ..default()
         }))
         .add_plugin(HikariPlugin)
         .add_startup_system(setup)
@@ -25,7 +24,10 @@ fn setup(
 ) {
     // Plane
     commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
+        mesh: meshes.add(Mesh::from(shape::Plane {
+            size: 5.0,
+            subdivisions: 1,
+        })),
         material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
         ..default()
     });

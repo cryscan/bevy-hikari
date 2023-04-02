@@ -15,8 +15,8 @@ var render_texture: texture_2d<f32>;
 @group(4) @binding(0)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
 
-let TAU: f32 = 6.283185307;
-let INV_TAU: f32 = 0.159154943;
+const TAU: f32 = 6.283185307;
+const INV_TAU: f32 = 0.159154943;
 
 // The following 3 functions are from Playdead
 // https://github.com/playdeadgames/temporal/blob/master/Assets/Shaders/TemporalReprojection.shader

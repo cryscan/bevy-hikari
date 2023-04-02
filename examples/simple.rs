@@ -3,9 +3,10 @@ use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
     render::camera::CameraRenderGraph,
+    window::WindowResolution,
 };
 use bevy_hikari::prelude::*;
-use bevy_inspector_egui::WorldInspectorPlugin;
+// use bevy_inspector_egui::DefaultInspectorConfigPlugin;
 use bevy_mod_raycast::{
     DefaultRaycastingPlugin, Intersection, RaycastMesh, RaycastMethod, RaycastSource, RaycastSystem,
 };
@@ -21,14 +22,13 @@ fn main() {
     App::new()
         .register_type::<EmissiveSphere>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            // window: WindowDescriptor {
-            //     width: 800.0,
-            //     height: 600.0,
-            //     ..Default::default()
-            // },
-            ..Default::default()
+            primary_window: Some(Window {
+                resolution: WindowResolution::new(800., 600.),
+                ..default()
+            }),
+            ..default()
         }))
-        .add_plugin(WorldInspectorPlugin::new())
+        // .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
@@ -36,13 +36,15 @@ fn main() {
         .add_startup_system(setup)
         .add_system(camera_input_map)
         .add_system(sphere_rotate_system)
-        .add_system_to_stage(
-            CoreStage::First,
-            control_directional_light.before(RaycastSystem::BuildRays::<RaycastSet>),
+        .add_system(
+            control_directional_light
+                .in_base_set(CoreSet::First)
+                .before(RaycastSystem::BuildRays::<RaycastSet>),
         )
         .run();
 }
 
+#[derive(Clone, Reflect)]
 pub struct RaycastSet;
 
 #[derive(Default, Component, Reflect)]
@@ -264,6 +266,7 @@ fn setup(
             OrbitCameraController::default(),
             Vec3::new(-20.0, 10.0, 20.0),
             Vec3::ZERO,
+            Vec3::Y,
         ));
 }
 

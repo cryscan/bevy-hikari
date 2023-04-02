@@ -27,12 +27,12 @@ var render_texture: texture_2d<f32>;
 @group(4) @binding(3)
 var output_texture: texture_storage_2d<rgba16float, read_write>;
 
-let TAU: f32 = 6.283185307;
-let GOLDEN_RATIO: f32 = 1.618033989;
+const TAU: f32 = 6.283185307;
+const GOLDEN_RATIO: f32 = 1.618033989;
 
-let F32_EPSILON: f32 = 1.1920929E-7;
-let F32_MAX: f32 = 3.402823466E+38;
-let U32_MAX: u32 = 0xFFFFFFFFu;
+const F32_EPSILON: f32 = 1.1920929E-7;
+const F32_MAX: f32 = 3.402823466E+38;
+const U32_MAX: u32 = 0xFFFFFFFFu;
 
 fn jittered_deferred_uv(uv: vec2<f32>) -> vec2<f32> {
     let texel_size = 1.0 / vec2<f32>(textureDimensions(position_texture));
@@ -69,46 +69,37 @@ fn position_weight(p0: vec2<f32>, p1: vec2<f32>) -> f32 {
 }
 
 fn load_input(coords: vec2<i32>) -> vec4<f32> {
-#ifdef DENOISE_LEVEL_0
+#if DENOISE_LEVEL == 0
     return textureLoad(internal_texture_0, coords);
-#endif
-#ifdef DENOISE_LEVEL_1
+#else if DENOISE_LEVEL == 1
     return textureLoad(internal_texture_1, coords);
-#endif
-#ifdef DENOISE_LEVEL_2
+#else if DENOISE_LEVEL == 2
     return textureLoad(internal_texture_2, coords);
-#endif
-#ifdef DENOISE_LEVEL_3
+#else if DENOISE_LEVEL == 3
     return textureLoad(internal_texture_3, coords);
 #endif
 }
 
 fn store_output(coords: vec2<i32>, value: vec4<f32>) {
-#ifdef DENOISE_LEVEL_0
+#if DENOISE_LEVEL == 0
     textureStore(internal_texture_1, coords, value);
-#endif
-#ifdef DENOISE_LEVEL_1
+#else if DENOISE_LEVEL == 1
     textureStore(internal_texture_2, coords, value);
-#endif
-#ifdef DENOISE_LEVEL_2
+#else if DENOISE_LEVEL == 2
     textureStore(internal_texture_3, coords, value);
-#endif
-#ifdef DENOISE_LEVEL_3
+#else if DENOISE_LEVEL == 3
     textureStore(output_texture, coords, value);
 #endif
 }
 
 fn step_size() -> i32 {
-#ifdef DENOISE_LEVEL_0
+#if DENOISE_LEVEL == 0
     return 8;
-#endif
-#ifdef DENOISE_LEVEL_1
+#else if DENOISE_LEVEL == 1
     return 4;
-#endif
-#ifdef DENOISE_LEVEL_2
+#else if DENOISE_LEVEL == 2
     return 2;
-#endif
-#ifdef DENOISE_LEVEL_3
+#else if DENOISE_LEVEL == 3
     return 1;
 #endif
 }
@@ -281,7 +272,7 @@ fn denoise(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     var color = vec4<f32>(irradiance, 1.0);
 
-#ifdef DENOISE_LEVEL_3
+#if DENOISE_LEVEL == 3
     // let velocity = textureLoad(velocity_uv_texture, deferred_coords, 0).xy;
     // let previous_uv = uv - velocity;
     // var previous_color = color;

@@ -1,5 +1,4 @@
 use bevy::{
-    ecs::query::QueryItem,
     prelude::*,
     render::extract_component::{ExtractComponent, ExtractComponentPlugin},
     transform::TransformSystem,
@@ -9,24 +8,16 @@ pub struct TransformPlugin;
 impl Plugin for TransformPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(ExtractComponentPlugin::<GlobalTransformQueue>::default())
-            .add_system_to_stage(
-                CoreStage::PostUpdate,
-                previous_transform_system.after(TransformSystem::TransformPropagate),
+            .add_system(
+                previous_transform_system
+                    .in_base_set(CoreSet::PostUpdate)
+                    .after(TransformSystem::TransformPropagate),
             );
     }
 }
 
-#[derive(Component, Debug, Clone, Deref, DerefMut)]
+#[derive(Component, Debug, Clone, Deref, DerefMut, ExtractComponent)]
 pub struct GlobalTransformQueue(pub [Mat4; 2]);
-
-impl ExtractComponent for GlobalTransformQueue {
-    type Query = &'static Self;
-    type Filter = ();
-
-    fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        item.clone()
-    }
-}
 
 #[allow(clippy::type_complexity)]
 fn previous_transform_system(

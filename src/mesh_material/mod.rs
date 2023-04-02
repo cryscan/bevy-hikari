@@ -10,10 +10,10 @@ use bevy::{
     render::{
         mesh::VertexAttributeValues,
         render_asset::RenderAssets,
-        render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
+        render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
         render_resource::*,
         renderer::RenderDevice,
-        RenderApp, RenderStage,
+        RenderApp, RenderSet,
     },
 };
 use bvh::{
@@ -48,11 +48,12 @@ impl Plugin for MeshMaterialPlugin {
             render_app
                 .init_resource::<MeshMaterialBindGroupLayout>()
                 .init_resource::<TextureBindGroupLayout>()
-                .add_system_to_stage(
-                    RenderStage::Prepare,
-                    prepare_texture_bind_group_layout.label(MeshMaterialSystems::PrepareAssets),
+                .add_system(
+                    prepare_texture_bind_group_layout
+                        .in_set(MeshMaterialSystems::PrepareAssets)
+                        .in_set(RenderSet::Prepare),
                 )
-                .add_system_to_stage(RenderStage::Queue, queue_mesh_material_bind_group);
+                .add_system(queue_mesh_material_bind_group.in_set(RenderSet::Queue));
         }
     }
 }
@@ -238,9 +239,11 @@ pub struct GpuEmissive {
 
 impl Bounded for GpuEmissive {
     fn aabb(&self) -> AABB {
+        let min = self.position - self.radius;
+        let max = self.position + self.radius;
         AABB {
-            min: self.position - self.radius,
-            max: self.position + self.radius,
+            min: bvh::Vector3::new(min.x, min.y, min.z),
+            max: bvh::Vector3::new(max.x, max.y, max.z),
         }
     }
 }
@@ -475,7 +478,7 @@ pub struct GpuMeshIndex {
     pub node: UVec2,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
 pub enum MeshMaterialSystems {
     PrepareTextures,
     PrepareAssets,
@@ -808,17 +811,20 @@ fn queue_mesh_material_bind_group(
 }
 
 pub struct SetMeshMaterialBindGroup<const I: usize>;
-impl<const I: usize> EntityRenderCommand for SetMeshMaterialBindGroup<I> {
-    type Param = SRes<MeshMaterialBindGroup>;
+// impl<const I: usize, P: PhaseItem> RenderCommand<P> for SetMeshMaterialBindGroup<I> {
+//     type Param = SRes<MeshMaterialBindGroup>;
+//     type ItemWorldQuery = ();
+//     type ViewWorldQuery = ();
 
-    fn render<'w>(
-        _view: Entity,
-        _item: Entity,
-        bind_group: SystemParamItem<'w, '_, Self::Param>,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        pass.set_bind_group(I, &bind_group.into_inner().mesh_material, &[]);
+//     fn render<'w>(
+//         _view: Entity,
+//         _item: Entity,
+//         bind_group: SystemParamItem<'w, '_, Self::Param>,
+//         pass: &mut TrackedRenderPass<'w>,
+// 				param:
+//     ) -> RenderCommandResult {
+//         pass.set_bind_group(I, &bind_group.into_inner().mesh_material, &[]);
 
-        RenderCommandResult::Success
-    }
-}
+//         RenderCommandResult::Success
+//     }
+// }

@@ -21,7 +21,7 @@ use bevy::{
         renderer::{RenderContext, RenderDevice},
         texture::TextureCache,
         view::ViewUniformOffset,
-        RenderApp, RenderStage,
+        RenderApp, RenderSet,
     },
 };
 use serde::Serialize;
@@ -38,9 +38,9 @@ impl Plugin for PostProcessPlugin {
             render_app
                 .init_resource::<PostProcessPipeline>()
                 .init_resource::<SpecializedComputePipelines<PostProcessPipeline>>()
-                .add_system_to_stage(RenderStage::Prepare, prepare_post_process_textures)
-                .add_system_to_stage(RenderStage::Queue, queue_post_process_pipelines)
-                .add_system_to_stage(RenderStage::Queue, queue_post_process_bind_groups);
+                .add_system(prepare_post_process_textures.in_set(RenderSet::Prepare))
+                .add_system(queue_post_process_pipelines.in_set(RenderSet::Queue))
+                .add_system(queue_post_process_bind_groups.in_set(RenderSet::Queue));
         }
     }
 }
@@ -383,7 +383,7 @@ impl PostProcessPipelineKey {
     }
 
     pub fn entry_point(&self) -> PostProcessEntryPoint {
-        let entry_point_bits = self.bits & Self::ENTRY_POINT_MASK_BITS;
+        let entry_point_bits = self.bits() & Self::ENTRY_POINT_MASK_BITS;
         num_traits::FromPrimitive::from_u32(entry_point_bits).unwrap()
     }
 
@@ -394,7 +394,7 @@ impl PostProcessPipelineKey {
     }
 
     pub fn denoise_level(&self) -> u32 {
-        (self.bits >> Self::DENOISE_LEVEL_SHIFT_BITS) & Self::DENOISE_LEVEL_MASK_BITS
+        (self.bits() >> Self::DENOISE_LEVEL_SHIFT_BITS) & Self::DENOISE_LEVEL_MASK_BITS
     }
 }
 
@@ -406,7 +406,10 @@ impl SpecializedComputePipeline for PostProcessPipeline {
             .unwrap()
             .into();
 
-        let mut shader_defs: Vec<_> = vec![];
+        let mut shader_defs: Vec<ShaderDefVal> = vec![
+            ShaderDefVal::Int("MAX_CASCADES_PER_LIGHT".into(), 0),
+            ShaderDefVal::Int("MAX_DIRECTIONAL_LIGHTS".into(), 0),
+        ];
         if key.contains(PostProcessPipelineKey::FIREFLY_FILTERING_BITS) {
             shader_defs.push("FIREFLY_FILTERING".into());
         }
@@ -420,7 +423,10 @@ impl SpecializedComputePipeline for PostProcessPipeline {
                     self.denoise_internal_layout.clone(),
                     self.denoise_render_layout.clone(),
                 ];
-                shader_defs.push(format!("DENOISE_LEVEL_{}", key.denoise_level()));
+                shader_defs.push(ShaderDefVal::UInt(
+                    "DENOISE_LEVEL".into(),
+                    key.denoise_level(),
+                ));
                 let shader = DENOISE_SHADER_HANDLE.typed();
                 (layout, shader)
             }
@@ -492,10 +498,12 @@ impl SpecializedComputePipeline for PostProcessPipeline {
 
         ComputePipelineDescriptor {
             label: None,
-            layout: Some(layout),
+            layout: layout,
             shader,
             shader_defs,
             entry_point,
+            // TODO: Does this default value make sense?
+            push_constant_ranges: vec![],
         }
     }
 }
@@ -518,18 +526,19 @@ pub struct FsrConstantsUniform {
 impl ExtractComponent for FsrConstantsUniform {
     type Query = (&'static Camera, &'static HikariSettings);
     type Filter = ();
+    type Out = Self;
 
-    fn extract_component((camera, settings): QueryItem<Self::Query>) -> Self {
+    fn extract_component((camera, settings): QueryItem<Self::Query>) -> Option<Self::Out> {
         let size = camera.physical_target_size().unwrap_or_default();
         let scale = settings.upscale.ratio().recip();
         let scaled_size = (scale * size.as_vec2()).ceil();
-        Self {
+        Some(Self {
             input_viewport_in_pixels: scaled_size,
             input_size_in_pixels: scaled_size,
             output_size_in_pixels: size.as_vec2(),
             sharpness: settings.upscale.sharpness(),
             hdr: 0,
-        }
+        })
     }
 }
 
@@ -654,6 +663,8 @@ fn prepare_post_process_textures(
                 dimension: TextureDimension::D2,
                 format: HDR_TEXTURE_FORMAT,
                 usage: texture_usage,
+                // TODO: Does this default value make sense?
+                view_formats: &[],
             },
         )
         .default_view;
@@ -677,6 +688,8 @@ fn prepare_post_process_textures(
                             dimension: TextureDimension::D2,
                             format: texture_format,
                             usage: texture_usage,
+                            // TODO: Does this default value make sense?
+                            view_formats: &[],
                         },
                     )
                     .default_view
@@ -1171,7 +1184,7 @@ impl Node for PostProcessNode {
         let mut scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
-            .command_encoder
+            .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor::default());
 
         pass.set_bind_group(

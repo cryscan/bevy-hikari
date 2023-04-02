@@ -9,7 +9,7 @@ use bevy::{
     render::{
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
-        Extract, RenderApp, RenderStage,
+        Extract, RenderApp, RenderSet,
     },
     utils::{HashMap, HashSet},
 };
@@ -22,10 +22,15 @@ impl Plugin for MeshPlugin {
             render_app
                 .init_resource::<GpuMeshes>()
                 .init_resource::<MeshRenderAssets>()
-                .add_system_to_stage(RenderStage::Extract, extract_mesh_assets)
-                .add_system_to_stage(
-                    RenderStage::Prepare,
-                    prepare_mesh_assets.label(MeshMaterialSystems::PrepareAssets),
+                .add_system(
+                    extract_mesh_assets
+                        .in_schedule(ExtractSchedule)
+                        .in_set(RenderSet::ExtractCommands),
+                )
+                .add_system(
+                    prepare_mesh_assets
+                        .in_set(MeshMaterialSystems::PrepareAssets)
+                        .in_set(RenderSet::Prepare),
                 );
         }
     }

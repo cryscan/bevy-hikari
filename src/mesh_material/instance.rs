@@ -18,7 +18,7 @@ use bevy::{
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         view::VisibilitySystems,
-        Extract, RenderApp, RenderStage,
+        Extract, RenderApp, RenderSet,
     },
     transform::TransformSystem,
 };
@@ -36,10 +36,10 @@ impl Plugin for InstancePlugin {
             render_app
                 .init_resource::<ExtractedInstances>()
                 .init_resource::<InstanceRenderAssets>()
-                .add_system_to_stage(
-                    RenderStage::Prepare,
+                .add_system(
                     prepare_instances
-                        .label(MeshMaterialSystems::PrepareInstances)
+                        .in_set(MeshMaterialSystems::PrepareInstances)
+                        .in_set(RenderSet::Prepare)
                         .after(MeshMaterialSystems::PrepareAssets),
                 );
         }
@@ -54,16 +54,20 @@ where
     M: Into<StandardMaterial> + Asset,
 {
     fn build(&self, app: &mut App) {
-        app.add_event::<InstanceEvent<M>>().add_system_to_stage(
-            CoreStage::PostUpdate,
+        app.add_event::<InstanceEvent<M>>().add_system(
             instance_event_system::<M>
+                .in_base_set(CoreSet::PostUpdate)
                 .after(TransformSystem::TransformPropagate)
                 .after(VisibilitySystems::VisibilityPropagate)
                 .after(VisibilitySystems::CalculateBounds),
         );
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_system_to_stage(RenderStage::Extract, extract_instances::<M>);
+            render_app.add_system(
+                extract_instances::<M>
+                    .in_schedule(ExtractSchedule)
+                    .in_set(RenderSet::ExtractCommands),
+            );
         }
     }
 }
@@ -117,13 +121,14 @@ pub struct PreviousMeshUniform {
 impl ExtractComponent for PreviousMeshUniform {
     type Query = &'static GlobalTransformQueue;
     type Filter = With<Handle<Mesh>>;
+    type Out = Self;
 
-    fn extract_component(queue: QueryItem<Self::Query>) -> Self {
+    fn extract_component(queue: QueryItem<Self::Query>) -> Option<Self::Out> {
         let transform = queue[1];
-        PreviousMeshUniform {
+        Some(PreviousMeshUniform {
             transform,
             inverse_transpose_model: transform.inverse().transpose(),
-        }
+        })
     }
 }
 
@@ -136,7 +141,7 @@ pub enum InstanceEvent<M: Into<StandardMaterial> + Asset> {
 #[allow(clippy::type_complexity)]
 fn instance_event_system<M: Into<StandardMaterial> + Asset>(
     mut events: EventWriter<InstanceEvent<M>>,
-    removed: RemovedComponents<Handle<Mesh>>,
+    mut removed: RemovedComponents<Handle<Mesh>>,
     mut set: ParamSet<(
         Query<
             (Entity, &Handle<Mesh>, &Handle<M>, &ComputedVisibility),
