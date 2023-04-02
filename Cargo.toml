@@ -33,10 +33,10 @@ features = ["bevy_asset", "bevy_render", "bevy_pbr", "bevy_core_pipeline"]
 
 [dev-dependencies]
 bevy = { version = "0.10.1", default-features = true, features = [
-	"bevy_gltf",
-	"jpeg",
-	"png",
-	"wayland",
+    "bevy_gltf",
+    "jpeg",
+    "png",
+    "wayland",
 ] }
 # bevy_flycam = "0.9"
 smooth-bevy-cameras = "0.8"

@@ -6,7 +6,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                resolution: WindowResolution::new(400., 300.),
+                resolution: WindowResolution::new(800., 600.),
                 ..default()
             }),
             ..default()

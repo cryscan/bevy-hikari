@@ -3,9 +3,10 @@ use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
     render::camera::CameraRenderGraph,
+    window::WindowResolution,
 };
 use bevy_hikari::prelude::*;
-use bevy_inspector_egui::DefaultInspectorConfigPlugin;
+// use bevy_inspector_egui::DefaultInspectorConfigPlugin;
 use bevy_mod_raycast::{
     DefaultRaycastingPlugin, Intersection, RaycastMesh, RaycastMethod, RaycastSource, RaycastSystem,
 };
@@ -21,12 +22,11 @@ fn main() {
     App::new()
         .register_type::<EmissiveSphere>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            // window: WindowDescriptor {
-            //     width: 800.0,
-            //     height: 600.0,
-            //     ..Default::default()
-            // },
-            ..Default::default()
+            primary_window: Some(Window {
+                resolution: WindowResolution::new(800., 600.),
+                ..default()
+            }),
+            ..default()
         }))
         // .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
