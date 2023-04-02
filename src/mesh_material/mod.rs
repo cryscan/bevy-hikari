@@ -238,9 +238,11 @@ pub struct GpuEmissive {
 
 impl Bounded for GpuEmissive {
     fn aabb(&self) -> AABB {
+        let min = self.position - self.radius;
+        let max = self.position + self.radius;
         AABB {
-            min: self.position - self.radius,
-            max: self.position + self.radius,
+            min: bvh::Vector3::new(min.x, min.y, min.z),
+            max: bvh::Vector3::new(max.x, max.y, max.z),
         }
     }
 }

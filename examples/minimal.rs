@@ -5,11 +5,11 @@ use std::f32::consts::PI;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            // window: WindowDescriptor {
-            //     width: 800.0,
-            //     height: 600.0,
-            //     ..Default::default()
-            // },
+            window: WindowDescriptor {
+                width: 400.0,
+                height: 300.0,
+                ..Default::default()
+            },
             ..Default::default()
         }))
         .add_plugin(HikariPlugin)
