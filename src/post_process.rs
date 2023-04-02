@@ -383,7 +383,7 @@ impl PostProcessPipelineKey {
     }
 
     pub fn entry_point(&self) -> PostProcessEntryPoint {
-        let entry_point_bits = self.bits & Self::ENTRY_POINT_MASK_BITS;
+        let entry_point_bits = self.bits() & Self::ENTRY_POINT_MASK_BITS;
         num_traits::FromPrimitive::from_u32(entry_point_bits).unwrap()
     }
 
@@ -394,7 +394,7 @@ impl PostProcessPipelineKey {
     }
 
     pub fn denoise_level(&self) -> u32 {
-        (self.bits >> Self::DENOISE_LEVEL_SHIFT_BITS) & Self::DENOISE_LEVEL_MASK_BITS
+        (self.bits() >> Self::DENOISE_LEVEL_SHIFT_BITS) & Self::DENOISE_LEVEL_MASK_BITS
     }
 }
 

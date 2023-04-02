@@ -118,7 +118,7 @@ impl LightPipelineKey {
     }
 
     pub fn entry_point(&self) -> LightEntryPoint {
-        let entry_point_bits = self.bits & Self::ENTRY_POINT_MASK_BITS;
+        let entry_point_bits = self.bits() & Self::ENTRY_POINT_MASK_BITS;
         num_traits::FromPrimitive::from_u32(entry_point_bits).unwrap()
     }
 
@@ -129,7 +129,7 @@ impl LightPipelineKey {
     }
 
     pub fn texture_count(&self) -> u32 {
-        (self.bits >> Self::TEXTURE_COUNT_SHIFT_BITS) & Self::TEXTURE_COUNT_MASK_BITS
+        (self.bits() >> Self::TEXTURE_COUNT_SHIFT_BITS) & Self::TEXTURE_COUNT_MASK_BITS
     }
 }
 
