@@ -12,7 +12,6 @@ use bevy::{
     core_pipeline::{
         bloom::BloomNode, fxaa::FxaaNode, tonemapping::TonemappingNode, upscaling::UpscalingNode,
     },
-    ecs::query::QueryItem,
     prelude::*,
     reflect::TypeUuid,
     render::{
@@ -264,105 +263,75 @@ impl Plugin for HikariPlugin {
             sub_graph.add_node(core_3d::graph::node::FXAA, fxaa_node);
             sub_graph.add_node(core_3d::graph::node::UPSCALING, upscaling_node);
 
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    graph::node::PREPASS,
-                    PrepassNode::IN_VIEW,
-                )
-                .unwrap();
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    graph::node::LIGHT,
-                    LightNode::IN_VIEW,
-                )
-                .unwrap();
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    graph::node::POST_PROCESS,
-                    PostProcessNode::IN_VIEW,
-                )
-                .unwrap();
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    graph::node::OVERLAY,
-                    OverlayNode::IN_VIEW,
-                )
-                .unwrap();
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    core_3d::graph::node::BLOOM,
-                    BloomNode::IN_VIEW,
-                )
-                .unwrap();
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    core_3d::graph::node::TONEMAPPING,
-                    TonemappingNode::IN_VIEW,
-                )
-                .unwrap();
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    core_3d::graph::node::FXAA,
-                    FxaaNode::IN_VIEW,
-                )
-                .unwrap();
-            sub_graph
-                .add_slot_edge(
-                    sub_graph.input_node().unwrap().id,
-                    core_3d::graph::input::VIEW_ENTITY,
-                    core_3d::graph::node::UPSCALING,
-                    UpscalingNode::IN_VIEW,
-                )
-                .unwrap();
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                graph::node::PREPASS,
+                PrepassNode::IN_VIEW,
+            );
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                graph::node::LIGHT,
+                LightNode::IN_VIEW,
+            );
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                graph::node::POST_PROCESS,
+                PostProcessNode::IN_VIEW,
+            );
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                graph::node::OVERLAY,
+                OverlayNode::IN_VIEW,
+            );
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                core_3d::graph::node::BLOOM,
+                BloomNode::IN_VIEW,
+            );
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                core_3d::graph::node::TONEMAPPING,
+                TonemappingNode::IN_VIEW,
+            );
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                core_3d::graph::node::FXAA,
+                FxaaNode::IN_VIEW,
+            );
+            sub_graph.add_slot_edge(
+                sub_graph.input_node().id,
+                core_3d::graph::input::VIEW_ENTITY,
+                core_3d::graph::node::UPSCALING,
+                UpscalingNode::IN_VIEW,
+            );
 
             // PREPASS -> LIGHT -> POST_PROCESS -> OVERLAY -> BLOOM -> TONEMAPPING -> UPSCALING
-            sub_graph
-                .add_node_edge(graph::node::PREPASS, graph::node::LIGHT)
-                .unwrap();
-            sub_graph
-                .add_node_edge(graph::node::LIGHT, graph::node::POST_PROCESS)
-                .unwrap();
-            sub_graph
-                .add_node_edge(graph::node::POST_PROCESS, graph::node::OVERLAY)
-                .unwrap();
-            sub_graph
-                .add_node_edge(
-                    graph::node::OVERLAY,
-                    bevy::core_pipeline::core_3d::graph::node::BLOOM,
-                )
-                .unwrap();
-            sub_graph
-                .add_node_edge(
-                    bevy::core_pipeline::core_3d::graph::node::BLOOM,
-                    bevy::core_pipeline::core_3d::graph::node::TONEMAPPING,
-                )
-                .unwrap();
-            sub_graph
-                .add_node_edge(
-                    bevy::core_pipeline::core_3d::graph::node::TONEMAPPING,
-                    bevy::core_pipeline::core_3d::graph::node::FXAA,
-                )
-                .unwrap();
-            sub_graph
-                .add_node_edge(
-                    bevy::core_pipeline::core_3d::graph::node::FXAA,
-                    bevy::core_pipeline::core_3d::graph::node::UPSCALING,
-                )
-                .unwrap();
+            sub_graph.add_node_edge(graph::node::PREPASS, graph::node::LIGHT);
+            sub_graph.add_node_edge(graph::node::LIGHT, graph::node::POST_PROCESS);
+            sub_graph.add_node_edge(graph::node::POST_PROCESS, graph::node::OVERLAY);
+            sub_graph.add_node_edge(
+                graph::node::OVERLAY,
+                bevy::core_pipeline::core_3d::graph::node::BLOOM,
+            );
+            sub_graph.add_node_edge(
+                bevy::core_pipeline::core_3d::graph::node::BLOOM,
+                bevy::core_pipeline::core_3d::graph::node::TONEMAPPING,
+            );
+            sub_graph.add_node_edge(
+                bevy::core_pipeline::core_3d::graph::node::TONEMAPPING,
+                bevy::core_pipeline::core_3d::graph::node::FXAA,
+            );
+            sub_graph.add_node_edge(
+                bevy::core_pipeline::core_3d::graph::node::FXAA,
+                bevy::core_pipeline::core_3d::graph::node::UPSCALING,
+            );
 
             graph.add_sub_graph(graph::NAME, sub_graph);
         }
@@ -397,7 +366,7 @@ impl ExtractResource for HikariUniversalSettings {
 }
 
 /// Settings that must be attached on cameras with `bevy_hikari` render graph.
-#[derive(Debug, Clone, Component, Reflect)]
+#[derive(Debug, Clone, Component, Reflect, ExtractComponent)]
 #[reflect(Component)]
 pub struct HikariSettings {
     /// The interval of frames between sample validation passes.
@@ -451,15 +420,6 @@ impl Default for HikariSettings {
             taa: Taa::default(),
             upscale: Upscale::default(),
         }
-    }
-}
-
-impl ExtractComponent for HikariSettings {
-    type Query = &'static Self;
-    type Filter = ();
-
-    fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        item.clone()
     }
 }
 
@@ -524,7 +484,7 @@ impl AsBindGroup for NoiseTextures {
         render_device: &RenderDevice,
         images: &RenderAssets<Image>,
         fallback_image: &FallbackImage,
-    ) -> Result<PreparedBindGroup<Self>, AsBindGroupError> {
+    ) -> Result<PreparedBindGroup<()>, AsBindGroupError> {
         let images: Vec<_> = self
             .iter()
             .map(|handle| match images.get(handle) {

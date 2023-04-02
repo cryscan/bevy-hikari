@@ -19,7 +19,7 @@ use bevy::{
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::{FallbackImage, TextureCache},
         view::ViewUniformOffset,
-        RenderApp, RenderStage,
+        RenderApp, RenderSet,
     },
     utils::HashMap,
 };
@@ -37,13 +37,14 @@ impl Plugin for LightPlugin {
             render_app
                 .init_resource::<ReservoirCache>()
                 .init_resource::<SpecializedComputePipelines<LightPipeline>>()
-                .add_system_to_stage(
-                    RenderStage::Prepare,
-                    prepare_light_pipeline.after(MeshMaterialSystems::PrepareAssets),
+                .add_system(
+                    prepare_light_pipeline
+                        .in_set(RenderSet::Prepare)
+                        .after(MeshMaterialSystems::PrepareAssets),
                 )
-                .add_system_to_stage(RenderStage::Prepare, prepare_light_textures)
-                .add_system_to_stage(RenderStage::Queue, queue_light_bind_groups)
-                .add_system_to_stage(RenderStage::Queue, queue_light_pipelines);
+                .add_system(prepare_light_textures.in_set(RenderSet::Prepare))
+                .add_system(queue_light_bind_groups.in_set(RenderSet::Queue))
+                .add_system(queue_light_pipelines.in_set(RenderSet::Queue));
         }
     }
 }
@@ -157,7 +158,7 @@ impl SpecializedComputePipeline for LightPipeline {
 
         ComputePipelineDescriptor {
             label: None,
-            layout: Some(vec![
+            layout: vec![
                 self.view_layout.clone(),
                 self.deferred_layout.clone(),
                 self.mesh_material_layout.clone(),
@@ -165,10 +166,12 @@ impl SpecializedComputePipeline for LightPipeline {
                 self.noise_layout.clone(),
                 self.render_layout.clone(),
                 self.reservoir_layout.clone(),
-            ]),
+            ],
             shader: LIGHT_SHADER_HANDLE.typed::<Shader>(),
             shader_defs,
             entry_point,
+            // TODO: Does this default value make sense?
+            push_constant_ranges: vec![],
         }
     }
 }
@@ -334,6 +337,8 @@ fn prepare_light_textures(
                             dimension: TextureDimension::D2,
                             format: texture_format,
                             usage: texture_usage,
+                            // TODO: Does this default value make sense?
+                            view_formats: &[],
                         },
                     )
                     .default_view
@@ -624,7 +629,7 @@ impl Node for LightNode {
         let scaled_size = (scale * size.as_vec2()).ceil().as_uvec2();
 
         let mut pass = render_context
-            .command_encoder
+            .command_encoder()
             .begin_compute_pass(&ComputePassDescriptor::default());
 
         pass.set_bind_group(

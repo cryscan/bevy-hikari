@@ -4,7 +4,7 @@ use bevy::{
     render::camera::CameraRenderGraph,
 };
 use bevy_hikari::prelude::*;
-use bevy_inspector_egui::WorldInspectorPlugin;
+// use bevy_inspector_egui::WorldInspectorPlugin;
 use smooth_bevy_cameras::{
     controllers::orbit::{
         ControlEvent, OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
@@ -15,15 +15,15 @@ use smooth_bevy_cameras::{
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+        .add_plugins(DefaultPlugins.build().set(WindowPlugin {
             // window: WindowDescriptor {
             //     width: 800.0,
             //     height: 600.0,
             //     ..Default::default()
             // },
-            ..Default::default()
+            ..default()
         }))
-        .add_plugin(WorldInspectorPlugin::new())
+        // .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::new(false))
         .add_plugin(HikariPlugin)
@@ -57,6 +57,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             OrbitCameraController::default(),
             Vec3::new(0.0, 1.0, 4.0),
             Vec3::new(0.0, 1.0, 0.0),
+            Vec3::Y,
         ));
 }
 

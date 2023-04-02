@@ -1,13 +1,12 @@
-use crate::{transform::GlobalTransformQueue, HikariSettings};
+use crate::transform::GlobalTransformQueue;
 use bevy::{
-    ecs::query::QueryItem,
     prelude::*,
     render::{
         extract_component::{ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin},
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         view::ExtractedView,
-        RenderApp, RenderStage,
+        RenderApp, RenderSet,
     },
 };
 
@@ -18,12 +17,12 @@ impl Plugin for ViewPlugin {
             .add_plugin(ExtractComponentPlugin::<FrameCounter>::default())
             .add_plugin(ExtractComponentPlugin::<FrameUniform>::default())
             .add_plugin(UniformComponentPlugin::<FrameUniform>::default())
-            .add_system_to_stage(CoreStage::PostUpdate, frame_counter_system);
+            .add_system(frame_counter_system.in_base_set(CoreSet::PostUpdate));
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<PreviousViewUniforms>()
-                .add_system_to_stage(RenderStage::Prepare, prepare_view_uniforms);
+                .add_system(prepare_view_uniforms.in_set(RenderSet::Prepare));
         }
     }
 }
@@ -72,18 +71,9 @@ fn prepare_view_uniforms(
         .write_buffer(&render_device, &render_queue);
 }
 
-#[derive(Default, Clone, Copy, Component, Reflect, Deref, DerefMut)]
+#[derive(Default, Clone, Copy, Component, Reflect, Deref, DerefMut, ExtractComponent)]
 #[reflect(Component)]
 pub struct FrameCounter(pub usize);
-
-impl ExtractComponent for FrameCounter {
-    type Query = &'static Self;
-    type Filter = ();
-
-    fn extract_component(item: QueryItem<Self::Query>) -> Self {
-        *item
-    }
-}
 
 #[allow(clippy::type_complexity)]
 fn frame_counter_system(
@@ -102,7 +92,7 @@ fn frame_counter_system(
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Component, ShaderType)]
+#[derive(Debug, Default, Clone, Copy, Component, ShaderType, ExtractComponent)]
 pub struct FrameUniform {
     pub kernel: Mat3,
     pub halton: [Vec4; 8],
@@ -137,57 +127,3 @@ const HALTON: [Vec4; 8] = [
     Vec4::new(0.187500, 0.148148, 0.687500, 0.481481),
     Vec4::new(0.437500, 0.814815, 0.937500, 0.259259),
 ];
-
-impl ExtractComponent for FrameUniform {
-    type Query = (&'static HikariSettings, &'static FrameCounter);
-    type Filter = ();
-
-    fn extract_component((settings, counter): QueryItem<Self::Query>) -> Self {
-        let HikariSettings {
-            direct_validate_interval,
-            emissive_validate_interval,
-            max_temporal_reuse_count,
-            max_spatial_reuse_count,
-            max_reservoir_lifetime,
-            solar_angle,
-            indirect_bounces,
-            max_indirect_luminance,
-            clear_color,
-            temporal_reuse,
-            emissive_spatial_reuse,
-            indirect_spatial_reuse,
-            ..
-        } = settings.clone();
-
-        let number = counter.0 as u32;
-        let direct_validate_interval = direct_validate_interval as u32;
-        let emissive_validate_interval = emissive_validate_interval as u32;
-        let indirect_bounces = indirect_bounces as u32;
-        let clear_color = clear_color.into();
-        let max_temporal_reuse_count = max_temporal_reuse_count as u32;
-        let max_spatial_reuse_count = max_spatial_reuse_count as u32;
-        let temporal_reuse = temporal_reuse.into();
-        let emissive_spatial_reuse = emissive_spatial_reuse.into();
-        let indirect_spatial_reuse = indirect_spatial_reuse.into();
-        let upscale_ratio = settings.upscale.ratio();
-
-        Self {
-            kernel: KERNEL,
-            halton: HALTON,
-            clear_color,
-            number,
-            direct_validate_interval,
-            emissive_validate_interval,
-            indirect_bounces,
-            temporal_reuse,
-            emissive_spatial_reuse,
-            indirect_spatial_reuse,
-            max_temporal_reuse_count,
-            max_spatial_reuse_count,
-            max_reservoir_lifetime,
-            solar_angle,
-            max_indirect_luminance,
-            upscale_ratio,
-        }
-    }
-}
